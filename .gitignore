@@ -216,3 +216,11 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+
+# gitkeep
+.gitkeep
+**/.gitkeep
+
+# Built-in official assets / private character resources
+resources/builtin/
