@@ -1,7 +1,7 @@
 # Chara-i-face
-Local AI Companion App For you &amp; your Partner Character.
+A local AI companion app for you & your partner character.
 
-- This Project Supported by GPT-5.5.
+> This project is designed and developed with assistance from GPT-5.5.
 
 **Chara-i-face** is a desktop AI companion interface that combines lightweight local AI, cloud AI, and character-based interaction.
 
