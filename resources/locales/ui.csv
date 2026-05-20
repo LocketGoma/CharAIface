@@ -1,0 +1,23 @@
+key,ko,en
+app.title,CharAIface,CharAIface
+chat.placeholder,메시지를 입력하세요...,Type a message...
+chat.send,전송,Send
+settings.title,설정,Settings
+settings.language,언어,Language
+settings.theme,테마,Theme
+settings.models,모델,Models
+settings.character,캐릭터,Character
+state.idle,대기 중,Idle
+state.user_typing,사용자 입력중,User typing
+state.thinking,생각중,Thinking
+state.searching,검색중,Searching
+state.assistant_typing,문자입력중,Typing
+state.assistant_done,문자입력완료,Done
+state.error,오류,Error
+theme.character,캐릭터 특화,Character Theme
+theme.light,라이트,Light
+theme.dark,다크,Dark
+model.lightweight,가벼움,Lightweight
+model.balanced,균형형,Balanced
+model.high_quality,고품질,High Quality
+developer.mode,개발자 모드,Developer Mode

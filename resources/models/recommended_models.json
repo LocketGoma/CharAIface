@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "models": [
+    {
+      "id": "lightweight_llama_1b",
+      "name": "llama3.2:1b",
+      "display_name_key": "model.lightweight",
+      "size_class": "1B",
+      "roles": ["chat", "style"],
+      "recommended": true,
+      "warning_level": "none"
+    },
+    {
+      "id": "balanced_qwen_3b",
+      "name": "qwen2.5:3b",
+      "display_name_key": "model.balanced",
+      "size_class": "3B",
+      "roles": ["chat", "style"],
+      "recommended": true,
+      "warning_level": "none"
+    },
+    {
+      "id": "high_quality_qwen_coder_7b",
+      "name": "qwen2.5-coder:7b",
+      "display_name_key": "model.high_quality",
+      "size_class": "7B",
+      "roles": ["chat", "code"],
+      "recommended": false,
+      "warning_level": "large"
+    }
+  ]
+}

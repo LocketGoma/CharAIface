@@ -1,0 +1,21 @@
+{
+  "id": "dark",
+  "name": "Dark",
+  "palette": {
+    "window_bg": "#202123",
+    "panel_bg": "#2A2B32",
+    "chat_bg": "#202123",
+    "user_bubble_bg": "#343541",
+    "assistant_bubble_bg": "#2A2B32",
+    "text_primary": "#ECECF1",
+    "text_secondary": "#A9A9B3",
+    "border": "#4D4D5A",
+    "accent": "#10A37F",
+    "accent_text": "#FFFFFF",
+    "input_bg": "#343541",
+    "input_border": "#565869",
+    "error": "#F97066",
+    "warning": "#FDB022",
+    "success": "#32D583"
+  }
+}
