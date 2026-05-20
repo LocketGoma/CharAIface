@@ -217,6 +217,9 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
+# OS
+.DS_Store
+Thumbs.db
 
 # gitkeep
 .gitkeep
@@ -224,3 +227,6 @@ __marimo__/
 
 # Built-in official assets / private character resources
 resources/builtin/
+
+# Env
+.env
