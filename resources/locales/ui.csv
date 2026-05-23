@@ -13,6 +13,8 @@ state.thinking,생각중,Thinking
 state.searching,검색중,Searching
 state.assistant_typing,문자입력중,Typing
 state.assistant_done,문자입력완료,Done
+state.embarrassed,당황,Embarrassed
+state.panic,패닉,Panic
 state.error,오류,Error
 theme.character,캐릭터 특화,Character Theme
 theme.light,라이트,Light
