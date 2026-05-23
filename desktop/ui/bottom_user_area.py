@@ -4,6 +4,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -24,6 +25,12 @@ class BottomUserArea(QWidget):
 
         self.setObjectName("BottomOverlayArea")
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+
+        self.setMinimumSize(0, 0)
+        self.setSizePolicy(
+            QSizePolicy.Policy.Ignored,
+            QSizePolicy.Policy.Ignored,
+        )
 
         root_layout = QHBoxLayout(self)
         root_layout.setContentsMargins(16, 8, 16, 16)

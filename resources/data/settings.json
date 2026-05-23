@@ -1,0 +1,20 @@
+{
+  "language": "ko",
+  "fallback_language": "en",
+  "theme_id": "light",
+  "selected_character_id": "default_sakura",
+  "user_name": "익명의 선생님",
+  "developer_mode": false,
+  "expand_chat_over_character_area": true,
+  "avatar_occluded_opacity": 0.7,
+  "enable_avatar_embarrassed_when_occluded": true,
+  "local_model": "llama3.2:1b",
+  "style_model": "llama3.2:1b",
+  "cloud_model": "openai/gpt-5.1",
+  "auto_download_models": true,
+  "ask_before_model_download": true,
+  "warn_large_local_model": true,
+  "window_width": 804,
+  "window_height": 552,
+  "extra": {}
+}
