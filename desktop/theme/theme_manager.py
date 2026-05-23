@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from desktop.theme.theme_model import ThemeDefinition
+from desktop.theme.theme_model import ThemeDefinition, ThemePalette
 
 
 class ThemeManager:
@@ -32,6 +32,33 @@ class ThemeManager:
             raise ValueError(f"Unknown theme: {theme_id}")
 
         return theme
+
+    def create_character_theme(
+        self,
+        base_theme_id: str,
+        palette_override: dict[str, str] | None,
+        character_name: str = "Character",
+    ) -> ThemeDefinition:
+        base_theme = self.get_theme(base_theme_id)
+        palette_data = base_theme.palette.model_dump()
+
+        if palette_override:
+            valid_keys = set(ThemePalette.model_fields.keys())
+
+            for key, value in palette_override.items():
+                if key in valid_keys:
+                    palette_data[key] = value
+                else:
+                    print(
+                        "[Theme] Unknown palette key ignored: "
+                        f"{key} for character theme"
+                    )
+
+        return ThemeDefinition(
+            id="character",
+            name=f"{character_name} Theme",
+            palette=ThemePalette(**palette_data),
+        )
 
     def available_theme_ids(self) -> list[str]:
         return list(self._themes.keys())

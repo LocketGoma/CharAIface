@@ -30,16 +30,14 @@ def main() -> int:
     theme_manager = ThemeManager(themes_dir=themes_dir)
 
     try:
-        theme = theme_manager.get_theme(settings.theme_id)
+        initial_theme = theme_manager.get_theme(settings.theme_id)
     except ValueError:
-        print(f'[Theme] Unknown theme "{settings.theme_id}". Falling back to light.')
-        theme = theme_manager.get_theme("light")
-        settings.theme_id = "light"
-        settings_repository.save(settings)
+        initial_theme = theme_manager.get_theme("light")
 
     window = MainWindow(
         localization=localization,
-        theme=theme,
+        theme=initial_theme,
+        theme_manager=theme_manager,
         settings=settings,
         settings_repository=settings_repository,
     )

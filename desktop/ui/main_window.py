@@ -12,15 +12,18 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from desktop.characters.character_pack import CharacterPack
 from desktop.characters.character_registry import CharacterRegistry
 from desktop.core.character_state import CharacterStateController
 from desktop.localization.localization_manager import LocalizationManager
 from desktop.settings.app_settings import AppSettings
 from desktop.settings.settings_repository import SettingsRepository
 from desktop.theme.qss_builder import build_qss
+from desktop.theme.theme_manager import ThemeManager
 from desktop.theme.theme_model import ThemeDefinition
 from desktop.ui.bottom_user_area import BottomUserArea
 from desktop.ui.chat_view import ChatView
+from desktop.ui.settings_dialog import SettingsDialog
 
 
 class MainWindow(QMainWindow):
@@ -31,6 +34,7 @@ class MainWindow(QMainWindow):
         self,
         localization: LocalizationManager,
         theme: ThemeDefinition,
+        theme_manager: ThemeManager,
         settings: AppSettings,
         settings_repository: SettingsRepository,
     ) -> None:
@@ -38,11 +42,13 @@ class MainWindow(QMainWindow):
 
         self.localization = localization
         self.theme = theme
+        self.theme_manager = theme_manager
         self.settings = settings
         self.settings_repository = settings_repository
 
         self.character_state = CharacterStateController(done_to_idle_ms=3000)
         self.character_registry: CharacterRegistry | None = None
+        self.current_character_pack: CharacterPack | None = None
 
         self.setMinimumSize(self.MIN_WINDOW_WIDTH, self.MIN_WINDOW_HEIGHT)
         self.resize(self.settings.window_width, self.settings.window_height)
@@ -60,7 +66,7 @@ class MainWindow(QMainWindow):
 
         self.setCentralWidget(root)
 
-        self.apply_theme(self.theme)
+        self.apply_theme_from_settings()
         self.retranslate_ui()
         QTimer.singleShot(0, self._restore_window_geometry)
 
@@ -113,6 +119,7 @@ class MainWindow(QMainWindow):
 
         self.settings_button = QPushButton()
         self.settings_button.setObjectName("HeaderButton")
+        self.settings_button.clicked.connect(self.open_settings_dialog)
 
         layout.addWidget(self.title_label)
         layout.addStretch()
@@ -175,26 +182,134 @@ class MainWindow(QMainWindow):
             print("[CharacterRegistry] No valid character pack found.")
             return
 
+        self._apply_character_pack(character_pack)
+
+    def _apply_character_pack(self, character_pack: CharacterPack) -> None:
+        self.current_character_pack = character_pack
         self.settings.selected_character_id = character_pack.id
-        self.settings_repository.save(self.settings)
 
         self.bottom_area.set_character_name(character_pack.name)
         self.bottom_area.set_avatar_images(character_pack.avatar_images_as_str())
 
-        source = (
-            "builtin"
-            if self.character_registry.is_builtin(character_pack.id)
-            else "user"
-        )
+        if self.character_registry is not None:
+            source = (
+                "builtin"
+                if self.character_registry.is_builtin(character_pack.id)
+                else "user"
+            )
+        else:
+            source = "unknown"
 
         print(
             "[CharacterRegistry] Applied character: "
             f"{character_pack.name} ({character_pack.id}) [{source}]"
         )
 
+    def open_settings_dialog(self) -> None:
+        if self.character_registry is None:
+            print("[Settings] CharacterRegistry is not initialized.")
+            return
+
+        dialog = SettingsDialog(
+            settings=self.settings.model_copy(deep=True),
+            localization=self.localization,
+            theme_manager=self.theme_manager,
+            character_registry=self.character_registry,
+            parent=self,
+        )
+
+        if not dialog.exec():
+            return
+
+        dialog.apply_to_settings()
+        new_settings = dialog.settings
+
+        self._apply_settings(new_settings)
+
+    def _apply_settings(self, new_settings: AppSettings) -> None:
+        old_language = self.settings.language
+        old_theme_id = self.settings.theme_id
+        old_character_id = self.settings.selected_character_id
+
+        self.settings = new_settings
+
+        if self.settings.language != old_language:
+            try:
+                self.localization.set_language(self.settings.language)
+            except ValueError:
+                print(
+                    f'[Settings] Unsupported language "{self.settings.language}". '
+                    f'Keeping "{old_language}".'
+                )
+                self.settings.language = old_language
+
+        if (
+            self.settings.theme_id != old_theme_id
+            or self.settings.selected_character_id != old_character_id
+        ):
+            self.apply_theme_from_settings()
+
+        if (
+            self.character_registry is not None
+            and self.settings.selected_character_id != old_character_id
+        ):
+            character_pack = self.character_registry.get_pack(
+                self.settings.selected_character_id
+            )
+
+            if character_pack is not None:
+                self._apply_character_pack(character_pack)
+            else:
+                print(
+                    "[Settings] Unknown character id: "
+                    f"{self.settings.selected_character_id}"
+                )
+                self.settings.selected_character_id = old_character_id
+
+        self.bottom_area.set_user_name(self.settings.user_name)
+        self.retranslate_ui()
+
+        self.settings_repository.save(self.settings)
+
     def apply_theme(self, theme: ThemeDefinition) -> None:
         self.theme = theme
         self.setStyleSheet(build_qss(theme))
+
+    def apply_theme_from_settings(self) -> None:
+        if self.settings.theme_id == "character":
+            character_pack = self.current_character_pack
+
+            if character_pack is not None and character_pack.theme is not None:
+                try:
+                    character_theme = self.theme_manager.create_character_theme(
+                        base_theme_id=character_pack.theme.base_theme,
+                        palette_override=character_pack.theme.palette_override,
+                        character_name=character_pack.name,
+                    )
+                    self.apply_theme(character_theme)
+                    return
+
+                except ValueError as error:
+                    print(f"[Theme] Failed to apply character theme: {error}")
+
+            try:
+                self.apply_theme(self.theme_manager.get_theme("light"))
+            except ValueError:
+                self.apply_theme(self.theme)
+
+            return
+
+        try:
+            theme = self.theme_manager.get_theme(self.settings.theme_id)
+            self.apply_theme(theme)
+
+        except ValueError:
+            print(
+                f'[Theme] Unknown theme "{self.settings.theme_id}". '
+                "Falling back to light."
+            )
+            self.settings.theme_id = "light"
+            self.apply_theme(self.theme_manager.get_theme("light"))
 
     def retranslate_ui(self) -> None:
         self.setWindowTitle(self.localization.t("app.title"))

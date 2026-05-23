@@ -1,7 +1,7 @@
 {
   "language": "ko",
   "fallback_language": "en",
-  "theme_id": "light",
+  "theme_id": "character",
   "selected_character_id": "default_sakura",
   "user_name": "익명의 선생님",
   "developer_mode": false,
