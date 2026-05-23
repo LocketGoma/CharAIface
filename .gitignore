@@ -230,3 +230,4 @@ resources/builtin/
 
 # Env
 .env
+.idea
