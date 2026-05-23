@@ -238,6 +238,42 @@ def build_qss(theme: ThemeDefinition) -> str:
         background-color: {p.accent};
         border: 2px solid {p.accent};
     }}
+    
+    QLabel#OpacityValueLabel {{
+        color: {p.text_secondary};
+        font-size: 13px;
+        font-weight: bold;
+    }}
+
+    QSlider::groove:horizontal {{
+        border: 1px solid {p.border};
+        height: 8px;
+        background-color: {p.input_bg};
+        border-radius: 4px;
+    }}
+
+    QSlider::sub-page:horizontal {{
+        background-color: {p.accent};
+        border-radius: 4px;
+    }}
+
+    QSlider::add-page:horizontal {{
+        background-color: {p.input_bg};
+        border-radius: 4px;
+    }}
+
+    QSlider::handle:horizontal {{
+        background-color: {p.accent};
+        border: 2px solid {p.accent_text};
+        width: 18px;
+        height: 18px;
+        margin: -6px 0;
+        border-radius: 9px;
+    }}
+
+    QSlider::handle:horizontal:hover {{
+        border: 2px solid {p.border};
+    }}
 
     QPushButton#SendButton {{
         background-color: {p.accent};

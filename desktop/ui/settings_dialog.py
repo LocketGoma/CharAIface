@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QLabel,
     QLineEdit,
+    QSlider,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -276,8 +277,24 @@ class SettingsDialog(QDialog):
             self.settings.enable_avatar_embarrassed_when_occluded
         )
 
-        self.avatar_opacity_combo = QComboBox()
-        self._setup_avatar_opacity_combo()
+        self.avatar_opacity_slider = QSlider(Qt.Orientation.Horizontal)
+        self.avatar_opacity_slider.setMinimum(10)
+        self.avatar_opacity_slider.setMaximum(100)
+        self.avatar_opacity_slider.setSingleStep(10)
+        self.avatar_opacity_slider.setPageStep(10)
+        self.avatar_opacity_slider.setTickInterval(10)
+        self.avatar_opacity_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
+
+        current_opacity_percent = round(self.settings.avatar_occluded_opacity * 100)
+        current_opacity_percent = min(100, max(10, current_opacity_percent))
+        current_opacity_percent = round(current_opacity_percent / 10) * 10
+
+        self.avatar_opacity_slider.setValue(current_opacity_percent)
+
+        self.avatar_opacity_label = QLabel(f"{current_opacity_percent}%")
+        self.avatar_opacity_label.setObjectName("OpacityValueLabel")
+
+        self.avatar_opacity_slider.valueChanged.connect(self._on_avatar_opacity_changed)
 
         form_layout.addRow(
             self.localization.t("settings.developer_mode"),
@@ -291,9 +308,19 @@ class SettingsDialog(QDialog):
             self.localization.t("settings.avatar_embarrassed_when_occluded"),
             self.embarrassed_when_occluded_checkbox,
         )
+
+        #Character Opacity Settings
+        opacity_widget = QWidget()
+        opacity_layout = QVBoxLayout(opacity_widget)
+        opacity_layout.setContentsMargins(0, 0, 0, 0)
+        opacity_layout.setSpacing(4)
+
+        opacity_layout.addWidget(self.avatar_opacity_slider)
+        opacity_layout.addWidget(self.avatar_opacity_label)
+
         form_layout.addRow(
             self.localization.t("settings.avatar_occluded_opacity"),
-            self.avatar_opacity_combo,
+            opacity_widget,
         )
 
         layout.addLayout(form_layout)
@@ -363,21 +390,16 @@ class SettingsDialog(QDialog):
 
         self._finalize_combo_box(self.character_combo)
 
-    def _setup_avatar_opacity_combo(self) -> None:
-        for percent in range(10, 101, 10):
-            value = percent / 100.0
-            self.avatar_opacity_combo.addItem(f"{percent}%", value)
+    def _on_avatar_opacity_changed(self, value: int) -> None:
+        snapped_value = round(value / 10) * 10
+        snapped_value = min(100, max(10, snapped_value))
 
-        current_percent = round(self.settings.avatar_occluded_opacity * 100)
-        current_percent = min(100, max(10, current_percent))
-        current_percent = round(current_percent / 10) * 10
-        current_value = current_percent / 100.0
+        if snapped_value != value:
+            self.avatar_opacity_slider.blockSignals(True)
+            self.avatar_opacity_slider.setValue(snapped_value)
+            self.avatar_opacity_slider.blockSignals(False)
 
-        index = self.avatar_opacity_combo.findData(current_value)
-        if index >= 0:
-            self.avatar_opacity_combo.setCurrentIndex(index)
-
-        self._finalize_combo_box(self.avatar_opacity_combo)
+        self.avatar_opacity_label.setText(f"{snapped_value}%")
 
     def _finalize_combo_box(self, combo_box: QComboBox) -> None:
         combo_box.setSizeAdjustPolicy(
@@ -478,5 +500,5 @@ class SettingsDialog(QDialog):
             self.embarrassed_when_occluded_checkbox.isChecked()
         )
         self.settings.avatar_occluded_opacity = (
-            self.avatar_opacity_combo.currentData()
+            self.avatar_opacity_slider.value() / 100.0
         )

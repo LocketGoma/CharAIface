@@ -1,11 +1,13 @@
 from pathlib import Path
-
+from desktop.chat.chat_session import ChatSession
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
+    QApplication,
     QFrame,
     QHBoxLayout,
     QLabel,
     QMainWindow,
+    QMessageBox,
     QPushButton,
     QStackedLayout,
     QVBoxLayout,
@@ -49,6 +51,7 @@ class MainWindow(QMainWindow):
         self.character_state = CharacterStateController(done_to_idle_ms=3000)
         self.character_registry: CharacterRegistry | None = None
         self.current_character_pack: CharacterPack | None = None
+        self.chat_session = ChatSession()
 
         self.setMinimumSize(self.MIN_WINDOW_WIDTH, self.MIN_WINDOW_HEIGHT)
         self.resize(self.settings.window_width, self.settings.window_height)
@@ -70,9 +73,8 @@ class MainWindow(QMainWindow):
         self.retranslate_ui()
         QTimer.singleShot(0, self._restore_window_geometry)
 
-        self.chat_view.add_message(
-            "Assistant",
-            "CharAIface 기본 화면 출력 테스트입니다. 아직 AI 연결 전입니다.",
+        self._add_assistant_message(
+            "CharAIface 기본 화면 출력 테스트입니다. 아직 AI 연결 전입니다."
         )
 
     def _create_content_area(self) -> QWidget:
@@ -169,6 +171,7 @@ class MainWindow(QMainWindow):
     def _apply_selected_or_default_character_pack(self) -> None:
         if self.character_registry is None:
             print("[CharacterRegistry] Registry is not initialized.")
+            self._show_missing_default_character_warning()
             return
 
         character_pack = self.character_registry.get_pack(
@@ -180,6 +183,7 @@ class MainWindow(QMainWindow):
 
         if character_pack is None:
             print("[CharacterRegistry] No valid character pack found.")
+            self._show_missing_default_character_warning()
             return
 
         self._apply_character_pack(character_pack)
@@ -204,6 +208,20 @@ class MainWindow(QMainWindow):
             "[CharacterRegistry] Applied character: "
             f"{character_pack.name} ({character_pack.id}) [{source}]"
         )
+        
+    def _show_missing_default_character_warning(self) -> None:
+        QMessageBox.critical(
+            self,
+            "CharAIface",
+            "기본 캐릭터가 없습니다!",
+        )
+
+        app = QApplication.instance()
+
+        if app is not None:
+            QTimer.singleShot(0, app.quit)
+        else:
+            QTimer.singleShot(0, self.close)
 
     def open_settings_dialog(self) -> None:
         if self.character_registry is None:
@@ -318,12 +336,19 @@ class MainWindow(QMainWindow):
         self.bottom_area.retranslate_ui()
         self.bottom_area.set_user_name(self.settings.user_name)
 
+    def _add_user_message(self, content: str) -> None:
+        message = self.chat_session.add_user_message(content)
+        self.chat_view.add_chat_message(message)
+
+    def _add_assistant_message(self, content: str) -> None:
+        message = self.chat_session.add_assistant_message(content)
+        self.chat_view.add_chat_message(message)
+
     def on_send_requested(self, text: str) -> None:
         self.content_stack.setCurrentWidget(self.bottom_area)
         self.bottom_area.raise_()
-
         self.character_state.on_message_sent()
-        self.chat_view.add_message("User", text)
+        self._add_user_message(text)
 
         QTimer.singleShot(300, self._show_fake_assistant_typing)
         QTimer.singleShot(700, lambda: self._add_fake_assistant_response(text))
@@ -332,10 +357,7 @@ class MainWindow(QMainWindow):
         self.character_state.on_assistant_typing()
 
     def _add_fake_assistant_response(self, text: str) -> None:
-        self.chat_view.add_message(
-            "Assistant",
-            f"임시 응답입니다. 입력한 내용: {text}",
-        )
+        self._add_assistant_message(f"임시 응답입니다. 입력한 내용: {text}")
 
         self.character_state.on_assistant_done()
 
