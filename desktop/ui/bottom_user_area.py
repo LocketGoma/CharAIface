@@ -1,6 +1,7 @@
 from PySide6.QtCore import Signal, Qt
 from PySide6.QtWidgets import (
     QFrame,
+    QGraphicsOpacityEffect,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -38,7 +39,12 @@ class BottomUserArea(QWidget):
 
         self.character_area = self._create_character_area()
 
+        self.character_opacity_effect = QGraphicsOpacityEffect(self.character_area)
+        self.character_opacity_effect.setOpacity(1.0)
+        self.character_area.setGraphicsEffect(self.character_opacity_effect)
+
         self.composer = ComposerTextEdit()
+
         self.composer.send_requested.connect(self._emit_send)
         self.composer.textChanged.connect(self._emit_text_changed)
 
@@ -149,6 +155,19 @@ class BottomUserArea(QWidget):
 
     def set_character_name(self, name: str) -> None:
         self.character_name_label.setText(name)
+
+    def character_global_rect(self):
+        top_left = self.character_area.mapToGlobal(self.character_area.rect().topLeft())
+        return self.character_area.rect().translated(top_left)
+
+    def set_character_occluded(
+        self,
+        is_occluded: bool,
+        occluded_opacity: float,
+    ) -> None:
+        opacity = occluded_opacity if is_occluded else 1.0
+        opacity = min(1.0, max(0.1, opacity))
+        self.character_opacity_effect.setOpacity(opacity)
 
     def _emit_text_changed(self) -> None:
         self.text_changed.emit(self.composer.toPlainText())

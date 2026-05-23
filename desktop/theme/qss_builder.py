@@ -71,6 +71,44 @@ def build_qss(theme: ThemeDefinition) -> str:
         border: none;
     }}
 
+    QScrollBar:vertical {{
+        width: 16px;
+        margin: 0px;
+        background-color: {p.chat_bg};
+        border: none;
+    }}
+
+    QScrollBar::handle:vertical {{
+        min-height: 36px;
+        border-radius: 8px;
+        background-color: {p.border};
+    }}
+
+    QScrollBar::handle:vertical:hover {{
+        background-color: {p.accent};
+    }}
+
+    QScrollBar::add-line:vertical,
+    QScrollBar::sub-line:vertical {{
+        height: 0px;
+        border: none;
+        background: transparent;
+    }}
+
+    QScrollBar::add-page:vertical,
+    QScrollBar::sub-page:vertical {{
+        background: transparent;
+    }}
+
+    QScrollBar:horizontal {{
+        height: 0px;
+        background: transparent;
+    }}
+
+    QScrollBar::handle:horizontal {{
+        background: transparent;
+    }}
+
     QWidget#ChatContainer {{
         background-color: {p.chat_bg};
     }}

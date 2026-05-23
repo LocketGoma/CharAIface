@@ -1,6 +1,8 @@
 from pathlib import Path
+from shared.schema.chat import ChatRequest
 from desktop.chat.chat_session import ChatSession
-from PySide6.QtCore import QTimer
+from desktop.client.backend_http_client import BackendHttpClient
+from PySide6.QtCore import QEvent, QTimer
 from PySide6.QtWidgets import (
     QApplication,
     QFrame,
@@ -9,7 +11,6 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
-    QStackedLayout,
     QVBoxLayout,
     QWidget,
 )
@@ -52,6 +53,7 @@ class MainWindow(QMainWindow):
         self.character_registry: CharacterRegistry | None = None
         self.current_character_pack: CharacterPack | None = None
         self.chat_session = ChatSession()
+        self.backend_client = BackendHttpClient()
 
         self.setMinimumSize(self.MIN_WINDOW_WIDTH, self.MIN_WINDOW_HEIGHT)
         self.resize(self.settings.window_width, self.settings.window_height)
@@ -72,41 +74,50 @@ class MainWindow(QMainWindow):
         self.apply_theme_from_settings()
         self.retranslate_ui()
         QTimer.singleShot(0, self._restore_window_geometry)
+        QTimer.singleShot(100, self._check_backend_health)
+        QTimer.singleShot(500, self._check_local_ai_model)
 
         self._add_assistant_message(
             "CharAIface 기본 화면 출력 테스트입니다. 아직 AI 연결 전입니다."
         )
 
     def _create_content_area(self) -> QWidget:
-        content_area = QWidget()
-        content_area.setObjectName("ContentArea")
-
-        self.content_stack = QStackedLayout(content_area)
-        self.content_stack.setStackingMode(QStackedLayout.StackingMode.StackAll)
-        self.content_stack.setContentsMargins(0, 0, 0, 0)
-        self.content_stack.setSpacing(0)
+        self.content_area = QWidget()
+        self.content_area.setObjectName("ContentArea")
 
         self.chat_view = ChatView()
-        self.bottom_area = BottomUserArea(localization=self.localization)
+        self.chat_view.setParent(self.content_area)
 
+        self.bottom_area = BottomUserArea(localization=self.localization)
+        self.bottom_area.setParent(self.content_area)
         self.bottom_area.set_user_name(self.settings.user_name)
 
         self._load_character_registry()
         self._apply_selected_or_default_character_pack()
+        self._update_chat_view_display_names()
 
         self.bottom_area.send_requested.connect(self.on_send_requested)
-        self.bottom_area.text_changed.connect(
-            self.character_state.on_user_text_changed
-        )
+        self.bottom_area.text_changed.connect(self.character_state.on_user_text_changed)
         self.character_state.state_changed.connect(self.bottom_area.set_state)
 
-        self.content_stack.addWidget(self.chat_view)
-        self.content_stack.addWidget(self.bottom_area)
+        self.chat_view.verticalScrollBar().valueChanged.connect(
+            self._update_avatar_occlusion_later
+        )
 
-        self.content_stack.setCurrentWidget(self.bottom_area)
+        self.chat_view.show()
+        self.bottom_area.show()
+
+        self.bottom_area.installEventFilter(self)
+        self.bottom_area.character_area.installEventFilter(self)
+        self.bottom_area.character_info_box.installEventFilter(self)
+        self.bottom_area.user_label.installEventFilter(self)
+        self.bottom_area.user_name_label.installEventFilter(self)
+
         self.bottom_area.raise_()
 
-        return content_area
+        QTimer.singleShot(0, self._update_content_geometry)
+
+        return self.content_area
 
     def _create_header(self) -> QFrame:
         header = QFrame()
@@ -194,6 +205,7 @@ class MainWindow(QMainWindow):
 
         self.bottom_area.set_character_name(character_pack.name)
         self.bottom_area.set_avatar_images(character_pack.avatar_images_as_str())
+        self._update_chat_view_display_names()
 
         if self.character_registry is not None:
             source = (
@@ -208,7 +220,7 @@ class MainWindow(QMainWindow):
             "[CharacterRegistry] Applied character: "
             f"{character_pack.name} ({character_pack.id}) [{source}]"
         )
-        
+
     def _show_missing_default_character_warning(self) -> None:
         QMessageBox.critical(
             self,
@@ -284,7 +296,9 @@ class MainWindow(QMainWindow):
                 )
                 self.settings.selected_character_id = old_character_id
 
+        #유저 이름 변경시 적용
         self.bottom_area.set_user_name(self.settings.user_name)
+        self._update_chat_view_display_names()
         self.retranslate_ui()
 
         self.settings_repository.save(self.settings)
@@ -335,6 +349,23 @@ class MainWindow(QMainWindow):
         self.settings_button.setText(self.localization.t("settings.title"))
         self.bottom_area.retranslate_ui()
         self.bottom_area.set_user_name(self.settings.user_name)
+        self._update_chat_view_display_names()
+
+    def _update_chat_view_display_names(self) -> None:
+        if not hasattr(self, "chat_view"):
+            return
+
+        user_name = self.settings.user_name
+
+        if self.current_character_pack is not None:
+            assistant_name = self.current_character_pack.name
+        else:
+            assistant_name = "Assistant"
+
+        self.chat_view.set_display_names(
+            user_name=user_name,
+            assistant_name=assistant_name,
+        )
 
     def _add_user_message(self, content: str) -> None:
         message = self.chat_session.add_user_message(content)
@@ -345,27 +376,298 @@ class MainWindow(QMainWindow):
         self.chat_view.add_chat_message(message)
 
     def on_send_requested(self, text: str) -> None:
-        self.content_stack.setCurrentWidget(self.bottom_area)
+        normalized_text = text.strip().lower()
+
+        if normalized_text == "/clear":
+            self._clear_chat_display_only()
+            return
+
         self.bottom_area.raise_()
         self.character_state.on_message_sent()
         self._add_user_message(text)
+        self._update_avatar_occlusion_later()
 
         QTimer.singleShot(300, self._show_fake_assistant_typing)
-        QTimer.singleShot(700, lambda: self._add_fake_assistant_response(text))
+        QTimer.singleShot(700, self._request_backend_chat_response)
+
+    def _clear_chat_display_only(self) -> None:
+        self.chat_view.clear_messages()
+        self.bottom_area.raise_()
+        self._update_avatar_occlusion_later()
 
     def _show_fake_assistant_typing(self) -> None:
         self.character_state.on_assistant_typing()
 
-    def _add_fake_assistant_response(self, text: str) -> None:
-        self._add_assistant_message(f"임시 응답입니다. 입력한 내용: {text}")
+    def _request_backend_chat_response(self) -> None:
+        request = ChatRequest(
+            messages=self.chat_session.messages,
+            character_id=self.settings.selected_character_id,
+            user_name=self.settings.user_name,
+            developer_mode=self.settings.developer_mode,
+        )
+
+        response = self.backend_client.chat(request)
+
+        if response is None:
+            self._add_backend_fallback_response()
+            return
+
+        self.chat_session.append_message(response.message)
+        self.chat_view.add_chat_message(response.message)
 
         self.character_state.on_assistant_done()
+        self._update_avatar_occlusion_later()
+
+    def _add_backend_fallback_response(self) -> None:
+        self._add_assistant_message(
+            "백엔드 응답을 가져오지 못했습니다. 임시 로컬 응답입니다."
+        )
+
+        self.character_state.on_assistant_done()
+        self._update_avatar_occlusion_later()
+
+    def _update_content_geometry(self) -> None:
+        if not hasattr(self, "content_area"):
+            return
+
+        area_width = self.content_area.width()
+        area_height = self.content_area.height()
+
+        # 하단 입력 UI가 차지하는 실제 높이.
+        # composer 110 + margins + 여유분.
+        input_area_height = 150
+
+        # 캐릭터가 포함된 overlay 전체 높이.
+        # 캐릭터가 잘리지 않도록 충분히 크게 잡는다.
+        overlay_height = min(area_height, 430)
+
+        # ChatView는 입력창 위에서 끝난다.
+        chat_view_height = max(0, area_height - input_area_height)
+
+        self.chat_view.setGeometry(
+            0,
+            0,
+            area_width,
+            chat_view_height,
+        )
+
+        self.bottom_area.setGeometry(
+            0,
+            max(0, area_height - overlay_height),
+            area_width,
+            overlay_height,
+        )
+
+        # 메시지 영역은 입력창 좌우 폭과 맞춘다.
+        character_reserved_width = 238
+        send_reserved_width = 86
+
+        self.chat_view.set_side_reserved_widths(
+            left_width=character_reserved_width,
+            right_width=send_reserved_width,
+        )
+
+        # ChatView 자체가 이미 입력창 위까지만 있으므로 bottom viewport margin은 필요 없다.
+        self.chat_view.set_bottom_reserved_height(0)
+
+        self.chat_view.raise_()
+        self.bottom_area.raise_()
+        self._update_avatar_occlusion_later()
+
+    def _update_avatar_occlusion_later(self) -> None:
+        QTimer.singleShot(0, self._update_avatar_occlusion)
+
+    def _update_avatar_occlusion(self) -> None:
+        if not hasattr(self, "bottom_area") or not hasattr(self, "chat_view"):
+            return
+
+        if not self.settings.expand_chat_over_character_area:
+            self.bottom_area.set_character_occluded(False, 1.0)
+            return
+
+        character_rect = self.bottom_area.character_global_rect()
+        is_occluded = False
+
+        for message_widget in self.chat_view.message_widgets():
+            if not message_widget.isVisible():
+                continue
+
+            message_top_left = message_widget.mapToGlobal(
+                message_widget.rect().topLeft()
+            )
+            message_rect = message_widget.rect().translated(message_top_left)
+
+            if character_rect.intersects(message_rect):
+                is_occluded = True
+                break
+
+        self.bottom_area.set_character_occluded(
+            is_occluded=is_occluded,
+            occluded_opacity=self.settings.avatar_occluded_opacity,
+        )
 
     def _restore_window_geometry(self) -> None:
         width = max(self.MIN_WINDOW_WIDTH, self.settings.window_width)
         height = max(self.MIN_WINDOW_HEIGHT, self.settings.window_height)
 
         self.resize(width, height)
+
+    def _check_backend_health(self) -> None:
+        result = self.backend_client.health()
+
+        if result is None:
+            print("[Backend] unavailable")
+            return
+
+        print(f"[Backend] health ok: {result}")
+
+    def _check_local_ai_model(self) -> None:
+        if not self.settings.auto_download_models:
+            print("[LocalAI] auto_download_models is disabled.")
+            return
+
+        status = self.backend_client.ollama_status()
+
+        if status is None:
+            print("[LocalAI] Failed to check Ollama status.")
+            return
+
+        ollama_status = status.get("status", {})
+        installed = bool(ollama_status.get("installed"))
+        server_available = bool(ollama_status.get("server_available"))
+        model_name = self.settings.local_model
+
+        print(f"[LocalAI] Ollama status: {ollama_status}")
+
+        if not installed:
+            self._handle_missing_ollama(model_name)
+            return
+
+        if not server_available:
+            print("[LocalAI] Ollama is installed but server is not available.")
+
+        self._ensure_local_model(model_name)
+
+    def _handle_missing_ollama(self, model_name: str) -> None:
+        if self.settings.ask_before_model_download:
+            result = QMessageBox.question(
+                self,
+                "CharAIface",
+                (
+                    "로컬 AI 실행에 필요한 Ollama가 설치되어 있지 않습니다.\n\n"
+                    "winget을 사용해 Ollama 설치를 시도할까요?"
+                ),
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+
+            if result != QMessageBox.StandardButton.Yes:
+                print("[LocalAI] User skipped Ollama installation.")
+                return
+
+        self._ensure_local_model(
+            model_name=model_name,
+            auto_install_ollama=True,
+        )
+
+    def _ensure_local_model(
+        self,
+        model_name: str,
+        auto_install_ollama: bool = False,
+    ) -> None:
+        if self.settings.ask_before_model_download:
+            result = QMessageBox.question(
+                self,
+                "CharAIface",
+                (
+                    f'로컬 AI 모델 "{model_name}" 상태를 확인하고, '
+                    "없으면 다운로드합니다.\n\n"
+                    "진행할까요?"
+                ),
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+
+            if result != QMessageBox.StandardButton.Yes:
+                print("[LocalAI] User skipped model ensure.")
+                return
+
+        print(f"[LocalAI] Ensuring local model: {model_name}")
+
+        result = self.backend_client.ensure_ollama_model(
+            model=model_name,
+            auto_pull=True,
+            auto_install_ollama=auto_install_ollama,
+        )
+
+        if result is None:
+            QMessageBox.warning(
+                self,
+                "CharAIface",
+                "로컬 AI 모델 확인/다운로드 요청에 실패했습니다.",
+            )
+            return
+
+        print(f"[LocalAI] Ensure model result: {result}")
+
+        if not result.get("success"):
+            QMessageBox.warning(
+                self,
+                "CharAIface",
+                (
+                    "로컬 AI 모델 준비에 실패했습니다.\n\n"
+                    f"{result.get('error')}"
+                ),
+            )
+            return
+
+        if result.get("pulled"):
+            QMessageBox.information(
+                self,
+                "CharAIface",
+                f'로컬 AI 모델 "{model_name}" 다운로드가 완료되었습니다.',
+            )
+        else:
+            print(f'[LocalAI] Model "{model_name}" is already available.')
+    def eventFilter(self, watched, event) -> bool:
+        if event.type() == QEvent.Type.Wheel:
+            if self._should_forward_wheel_to_chat_view(watched):
+                self._scroll_chat_view_by_wheel(event)
+                return True
+
+        return super().eventFilter(watched, event)
+
+    def _should_forward_wheel_to_chat_view(self, watched) -> bool:
+        if not hasattr(self, "bottom_area"):
+            return False
+
+        if watched is self.bottom_area.composer:
+            return False
+
+        if watched is self.bottom_area.send_button:
+            return False
+
+        return True
+
+    def _scroll_chat_view_by_wheel(self, event) -> None:
+        if not hasattr(self, "chat_view"):
+            return
+
+        scroll_bar = self.chat_view.verticalScrollBar()
+        delta_y = event.angleDelta().y()
+
+        if delta_y == 0:
+            return
+
+        # Qt wheel delta는 보통 120 단위.
+        # 값이 너무 작으면 답답하고, 너무 크면 튀니까 3배 정도로 보정.
+        step = scroll_bar.singleStep() * 3
+
+        if delta_y > 0:
+            scroll_bar.setValue(scroll_bar.value() - step)
+        else:
+            scroll_bar.setValue(scroll_bar.value() + step)
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._update_content_geometry()
 
     def closeEvent(self, event) -> None:
         self.settings.window_width = self.width()

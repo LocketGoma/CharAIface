@@ -14,7 +14,7 @@
   "auto_download_models": true,
   "ask_before_model_download": true,
   "warn_large_local_model": true,
-  "window_width": 804,
-  "window_height": 552,
+  "window_width": 1080,
+  "window_height": 799,
   "extra": {}
 }

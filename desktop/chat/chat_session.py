@@ -24,11 +24,69 @@ class ChatSession:
         self._messages.append(message)
         return message
 
-    def add_user_message(self, content: str) -> ChatMessage:
-        return self.add_message(role="user", content=content)
+    def append_message(self, message: ChatMessage) -> ChatMessage:
+        self._messages.append(message)
+        return message
 
-    def add_assistant_message(self, content: str) -> ChatMessage:
-        return self.add_message(role="assistant", content=content)
+    def add_user_message(
+        self,
+        content: str,
+        metadata: dict | None = None,
+    ) -> ChatMessage:
+        return self.add_message(
+            role="user",
+            content=content,
+            metadata=metadata,
+        )
+
+    def add_assistant_message(
+        self,
+        content: str,
+        metadata: dict | None = None,
+    ) -> ChatMessage:
+        return self.add_message(
+            role="assistant",
+            content=content,
+            metadata=metadata,
+        )
+
+    def add_system_message(
+        self,
+        content: str,
+        metadata: dict | None = None,
+    ) -> ChatMessage:
+        return self.add_message(
+            role="system",
+            content=content,
+            metadata=metadata,
+        )
+
+    def add_tool_message(
+        self,
+        content: str,
+        metadata: dict | None = None,
+    ) -> ChatMessage:
+        return self.add_message(
+            role="tool",
+            content=content,
+            metadata=metadata,
+        )
+
+    def latest_user_message(self) -> ChatMessage | None:
+        for message in reversed(self._messages):
+            if message.role == "user":
+                return message
+
+        return None
+
+    def last_message(self) -> ChatMessage | None:
+        if not self._messages:
+            return None
+
+        return self._messages[-1]
+
+    def replace_messages(self, messages: list[ChatMessage]) -> None:
+        self._messages = messages.copy()
 
     def clear(self) -> None:
         self._messages.clear()
