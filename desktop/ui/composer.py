@@ -18,6 +18,12 @@ class ComposerTextEdit(QTextEdit):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
 
+    def set_fixed_height(self, height: int) -> None:
+        height = max(80, int(height))
+        self.setMinimumHeight(height)
+        self.setMaximumHeight(height)
+        self.setFixedHeight(height)
+
     def set_placeholder_text(self, text: str) -> None:
         self.setPlaceholderText(text)
 

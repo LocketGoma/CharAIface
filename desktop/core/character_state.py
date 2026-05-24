@@ -34,6 +34,7 @@ class CharacterStateController(QObject):
             "thinking",
             "searching",
             "assistant_typing",
+            "panic",
         }:
             return
 

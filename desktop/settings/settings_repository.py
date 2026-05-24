@@ -69,8 +69,19 @@ class SettingsRepository:
         if "auto_start_local_ai_server" not in migrated:
             migrated["auto_start_local_ai_server"] = True
 
+        # Migrate the old lightweight test default to the new practical Korean-capable default.
+        # This only affects missing values or the previous built-in default, not custom user choices.
+        if "local_model" not in migrated or str(migrated.get("local_model", "")).strip() == "llama3.2:1b":
+            migrated["local_model"] = AppSettings().local_model
+
+        if "style_model" not in migrated or str(migrated.get("style_model", "")).strip() == "llama3.2:1b":
+            migrated["style_model"] = migrated.get("local_model", AppSettings().style_model)
+
         if "model_download_timeout_seconds" not in migrated:
             migrated["model_download_timeout_seconds"] = 600
+
+        if "ai_route_policy" not in migrated:
+            migrated["ai_route_policy"] = "auto"
 
         self._migrate_cloud_ai_settings(migrated)
 

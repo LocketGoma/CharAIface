@@ -3,6 +3,7 @@ from shared.schema.chat import ChatRequest
 from desktop.chat.chat_session import ChatSession
 from desktop.client.backend_http_client import BackendHttpClient
 from desktop.workers.local_model_prepare_worker import LocalModelPrepareWorker
+from desktop.workers.chat_response_worker import ChatResponseWorker
 from PySide6.QtCore import QEvent, QThread, QTimer
 from PySide6.QtWidgets import (
     QApplication,
@@ -19,6 +20,7 @@ from PySide6.QtWidgets import (
 from desktop.characters.character_pack import CharacterPack
 from desktop.characters.character_registry import CharacterRegistry
 from desktop.core.character_state import CharacterStateController
+from desktop.core.system_status import get_process_status
 from desktop.localization.localization_manager import LocalizationManager
 from desktop.settings.app_settings import AppSettings
 from desktop.settings.settings_repository import SettingsRepository
@@ -55,6 +57,8 @@ class MainWindow(QMainWindow):
         self.current_character_pack: CharacterPack | None = None
         self.local_model_prepare_thread: QThread | None = None
         self.local_model_prepare_worker: LocalModelPrepareWorker | None = None
+        self.chat_response_thread: QThread | None = None
+        self.chat_response_worker: ChatResponseWorker | None = None
         self.initial_notice_added = False
         self.chat_session = ChatSession()
         self.backend_client = BackendHttpClient()
@@ -156,9 +160,16 @@ class MainWindow(QMainWindow):
             / "characters"
         )
 
+        additional_user_characters_dirs = [
+            project_root / "resources" / "character",
+            project_root / "resource" / "characters",
+            project_root / "resource" / "character",
+        ]
+
         self.character_registry = CharacterRegistry(
             builtin_characters_dir=builtin_characters_dir,
             user_characters_dir=user_characters_dir,
+            additional_user_characters_dirs=additional_user_characters_dirs,
         )
         self.character_registry.load()
 
@@ -246,6 +257,15 @@ class MainWindow(QMainWindow):
             theme_manager=self.theme_manager,
             character_registry=self.character_registry,
             parent=self,
+        )
+        dialog.local_model_prepare_requested.connect(
+            self._on_settings_local_model_prepare_requested
+        )
+        dialog.local_model_delete_requested.connect(
+            self._on_settings_local_model_delete_requested
+        )
+        dialog.local_model_list_requested.connect(
+            self._on_settings_local_model_list_requested
         )
 
         if not dialog.exec():
@@ -426,13 +446,16 @@ class MainWindow(QMainWindow):
             if self._handle_command(normalized_text):
                 return
 
+        if self.chat_response_thread is not None:
+            print("[Chat] Chat response request is already running.")
+            return
+
         self.bottom_area.raise_()
         self.character_state.on_message_sent()
         self._add_user_message(text)
         self._update_avatar_occlusion_later()
 
-        QTimer.singleShot(300, self._show_fake_assistant_typing)
-        QTimer.singleShot(700, self._request_backend_chat_response)
+        self._start_chat_response_worker()
 
     def _handle_command(self, command: str) -> bool:
         if command == "/clear":
@@ -451,6 +474,10 @@ class MainWindow(QMainWindow):
             self._add_assistant_message(self._command_health_text())
             return True
 
+        if command == "/systemstatus":
+            self._add_assistant_message(self._command_system_status_text())
+            return True
+
         return False
 
     def _command_help_text(self) -> str:
@@ -458,11 +485,15 @@ class MainWindow(QMainWindow):
             "Available commands:\n"
             "- /help: Show this command list.\n"
             "- /clear: Clear displayed chat messages only. The internal session remains.\n"
-            "- /status: Show current desktop/session settings.\n"
-            "- /health: Show backend health payload."
+            "- /status: Show current desktop/session settings and a brief memory summary.\n"
+            "- /health: Show backend health payload.\n"
+            "- /systemstatus: Show desktop/backend CPU and memory usage."
         )
 
     def _command_status_text(self) -> str:
+        desktop_status = get_process_status(sample_seconds=0.0)
+        desktop_memory = self._format_mb(desktop_status.get("memory_rss_mb"))
+
         return (
             "Status:\n"
             f"- user_name: {self.settings.user_name}\n"
@@ -470,10 +501,110 @@ class MainWindow(QMainWindow):
             f"- character_name: {self._character_display_name()}\n"
             f"- developer_mode: {self.settings.developer_mode}\n"
             f"- local_model: {self.settings.local_model}\n"
+            f"- ai_route_policy: {getattr(self.settings, 'ai_route_policy', 'auto')}\n"
             f"- cloud_ai_enabled: {self.settings.cloud_ai_enabled}\n"
             f"- cloud_ai_provider: {self.settings.cloud_ai_provider}\n"
-            f"- cloud_model: {self.settings.cloud_model}"
+            f"- cloud_model: {self.settings.cloud_model}\n"
+            f"- desktop_memory: {desktop_memory}"
         )
+
+
+    def _command_system_status_text(self) -> str:
+        desktop_status = get_process_status(sample_seconds=0.2)
+        backend_status = self.backend_client.system_status()
+
+        lines = [
+            "System Status:",
+            "",
+            "Desktop process:",
+            *self._format_process_status_lines(desktop_status),
+        ]
+
+        if backend_status is None:
+            lines.extend([
+                "",
+                "Backend process:",
+                "- status: unavailable",
+            ])
+        else:
+            backend_process = backend_status.get("process", {})
+            lines.extend([
+                "",
+                "Backend process:",
+                *self._format_process_status_lines(backend_process),
+            ])
+
+        total_memory = self._sum_numeric_values(
+            desktop_status.get("memory_rss_mb"),
+            (backend_status or {}).get("process", {}).get("memory_rss_mb"),
+        )
+        if total_memory is not None:
+            lines.extend([
+                "",
+                f"Total app memory: {self._format_mb(total_memory)}",
+            ])
+
+        return "\n".join(lines)
+
+    def _format_process_status_lines(self, status: dict) -> list[str]:
+        return [
+            f"- pid: {status.get('pid', 'unknown')}",
+            f"- process: {status.get('process_name', 'unknown')}",
+            f"- memory_rss: {self._format_mb(status.get('memory_rss_mb'))}",
+            f"- memory_peak_rss: {self._format_mb(status.get('memory_peak_rss_mb'))}",
+            f"- cpu_usage: {self._format_percent(status.get('cpu_percent'))}",
+            f"- cpu_sample_seconds: {status.get('cpu_sample_seconds', 'unknown')}",
+            f"- threads: {status.get('thread_count', 'unknown')}",
+            f"- uptime_seconds: {status.get('uptime_seconds', 'unknown')}",
+        ]
+
+    def _format_mb(self, value) -> str:
+        if value is None:
+            return "unknown"
+        try:
+            return f"{float(value):.1f} MB"
+        except (TypeError, ValueError):
+            return str(value)
+
+    def _format_bytes(self, value) -> str:
+        if value is None:
+            return "unknown"
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return str(value)
+
+        units = ["B", "KB", "MB", "GB", "TB"]
+        unit_index = 0
+        while number >= 1024.0 and unit_index < len(units) - 1:
+            number /= 1024.0
+            unit_index += 1
+
+        if unit_index == 0:
+            return f"{number:.0f} {units[unit_index]}"
+
+        return f"{number:.1f} {units[unit_index]}"
+
+    def _format_percent(self, value) -> str:
+        if value is None:
+            return "unknown"
+        try:
+            return f"{float(value):.1f}%"
+        except (TypeError, ValueError):
+            return str(value)
+
+    def _sum_numeric_values(self, *values):
+        total = 0.0
+        found = False
+        for value in values:
+            try:
+                if value is None:
+                    continue
+                total += float(value)
+                found = True
+            except (TypeError, ValueError):
+                continue
+        return round(total, 1) if found else None
 
     def _command_health_text(self) -> str:
         result = self.backend_client.health()
@@ -506,32 +637,71 @@ class MainWindow(QMainWindow):
         self._update_avatar_occlusion_later()
 
     def _show_fake_assistant_typing(self) -> None:
-        self.character_state.on_assistant_typing()
+        if self.chat_response_thread is not None:
+            self.character_state.on_assistant_typing()
 
-    def _request_backend_chat_response(self) -> None:
+    def _start_chat_response_worker(self) -> None:
+        if self.chat_response_thread is not None:
+            print("[Chat] Chat response request is already running.")
+            return
+
         request = ChatRequest(
             messages=self.chat_session.messages,
             character_id=self.settings.selected_character_id,
             user_name=self.settings.user_name,
             developer_mode=self.settings.developer_mode,
+            language=self.settings.language,
         )
 
-        response = self.backend_client.chat(request)
+        self.chat_response_thread = QThread(self)
+        self.chat_response_worker = ChatResponseWorker(
+            backend_client=self.backend_client,
+            request=request,
+        )
+        self.chat_response_worker.moveToThread(self.chat_response_thread)
 
-        if response is None:
-            self._add_backend_fallback_response()
-            return
+        self.chat_response_thread.started.connect(self.chat_response_worker.run)
+        self.chat_response_worker.finished.connect(self._on_chat_response_finished)
+        self.chat_response_worker.failed.connect(self._on_chat_response_failed)
+        self.chat_response_worker.finished.connect(self.chat_response_thread.quit)
+        self.chat_response_worker.failed.connect(self.chat_response_thread.quit)
+        self.chat_response_thread.finished.connect(self._cleanup_chat_response_worker)
 
+        QTimer.singleShot(300, self._show_fake_assistant_typing)
+        self.chat_response_thread.start()
+
+    def _on_chat_response_finished(self, response) -> None:
         self.chat_session.append_message(response.message)
         self.chat_view.add_chat_message(response.message)
 
-        self.character_state.on_assistant_done()
+        metadata = getattr(response.message, "metadata", {}) or {}
+        if metadata.get("paid_model_unavailable"):
+            self.character_state.on_panic()
+        elif metadata.get("error"):
+            self.character_state.on_error()
+        else:
+            self.character_state.on_assistant_done()
+
         self._update_avatar_occlusion_later()
+
+    def _on_chat_response_failed(self, error: str) -> None:
+        print(f"[Chat] Backend chat response failed: {error}")
+        self._add_backend_fallback_response()
+
+    def _cleanup_chat_response_worker(self) -> None:
+        if self.chat_response_worker is not None:
+            self.chat_response_worker.deleteLater()
+            self.chat_response_worker = None
+
+        if self.chat_response_thread is not None:
+            self.chat_response_thread.deleteLater()
+            self.chat_response_thread = None
 
     def _add_backend_fallback_response(self) -> None:
         self._add_assistant_message(self.localization.t("chat.backend_fallback"))
 
-        self.character_state.on_assistant_done()
+        self.character_state.on_error()
+        QTimer.singleShot(3000, self.character_state.on_assistant_done)
         self._update_avatar_occlusion_later()
 
     def _update_content_geometry(self) -> None:
@@ -542,8 +712,8 @@ class MainWindow(QMainWindow):
         area_height = self.content_area.height()
 
         # 하단 입력 UI가 차지하는 실제 높이.
-        # composer 110 + margins + 여유분.
-        input_area_height = 150
+        # composer height is synchronized with the left character/name label stack.
+        input_area_height = max(150, self.bottom_area.recommended_input_area_height())
 
         # 캐릭터가 포함된 overlay 전체 높이.
         # 캐릭터가 잘리지 않도록 충분히 크게 잡는다.
@@ -763,11 +933,143 @@ class MainWindow(QMainWindow):
             auto_install_runtime=False,
         )
 
+
+    def _on_settings_local_model_prepare_requested(
+        self,
+        model_name: str,
+        auto_pull: bool,
+        auto_install_runtime: bool,
+        auto_start_server: bool,
+        timeout_seconds: float,
+    ) -> None:
+        self._start_local_model_prepare_worker(
+            model_name=model_name,
+            auto_pull=auto_pull,
+            auto_install_runtime=auto_install_runtime,
+            auto_start_server=auto_start_server,
+            timeout_seconds=timeout_seconds,
+        )
+
+
+    def _on_settings_local_model_delete_requested(
+        self,
+        model_name: str,
+        auto_start_server: bool,
+    ) -> None:
+        result = self.backend_client.delete_ollama_model(
+            model=model_name,
+            auto_start_server=auto_start_server,
+            timeout_seconds=30.0,
+        )
+
+        if result is None:
+            QMessageBox.warning(
+                self,
+                self.localization.t("app.title"),
+                self.localization.t(
+                    "local_ai.model.delete.failed",
+                    error=self._local_ai_error_message("request_failed"),
+                ),
+            )
+            return
+
+        if not result.get("success"):
+            error_code = str(result.get("error_code") or "unknown")
+            QMessageBox.warning(
+                self,
+                self.localization.t("app.title"),
+                self.localization.t(
+                    "local_ai.model.delete.failed",
+                    error=self._local_ai_error_message(error_code),
+                ),
+            )
+            return
+
+        if result.get("deleted"):
+            QMessageBox.information(
+                self,
+                self.localization.t("app.title"),
+                self.localization.t(
+                    "local_ai.model.delete.completed",
+                    model=result.get("model") or model_name,
+                ),
+            )
+        else:
+            QMessageBox.information(
+                self,
+                self.localization.t("app.title"),
+                self.localization.t(
+                    "local_ai.model.delete.not_installed",
+                    model=result.get("model") or model_name,
+                ),
+            )
+
+
+    def _on_settings_local_model_list_requested(
+        self,
+        auto_start_server: bool,
+    ) -> None:
+        result = self.backend_client.list_ollama_models(
+            auto_start_server=auto_start_server,
+            timeout_seconds=15.0,
+        )
+
+        if result is None:
+            QMessageBox.warning(
+                self,
+                self.localization.t("app.title"),
+                self.localization.t(
+                    "local_ai.model.list.failed",
+                    error=self._local_ai_error_message("request_failed"),
+                ),
+            )
+            return
+
+        if not result.get("success"):
+            error_code = str(result.get("error_code") or "unknown")
+            QMessageBox.warning(
+                self,
+                self.localization.t("app.title"),
+                self.localization.t(
+                    "local_ai.model.list.failed",
+                    error=self._local_ai_error_message(error_code),
+                ),
+            )
+            return
+
+        models = result.get("models") or []
+        if not models:
+            message = self.localization.t("local_ai.model.list.empty")
+        else:
+            lines = []
+            for model in models:
+                if not isinstance(model, dict):
+                    continue
+                name = str(model.get("name") or model.get("model") or "unknown")
+                size = self._format_bytes(model.get("size"))
+                modified_at = str(model.get("modified_at") or "unknown")
+                lines.append(f"- {name} / {size} / {modified_at}")
+
+            message = self.localization.t(
+                "local_ai.model.list.result",
+                count=len(lines),
+                models="\n".join(lines),
+            )
+
+        QMessageBox.information(
+            self,
+            self.localization.t("app.title"),
+            message,
+        )
+
+
     def _start_local_model_prepare_worker(
         self,
         model_name: str,
         auto_pull: bool,
         auto_install_runtime: bool,
+        auto_start_server: bool | None = None,
+        timeout_seconds: float | None = None,
     ) -> None:
         if self.local_model_prepare_thread is not None:
             QMessageBox.information(
@@ -778,6 +1080,18 @@ class MainWindow(QMainWindow):
             return
         
         self.character_state.on_assistant_typing()
+        self.bottom_area.set_state_text(
+            self.localization.t(
+                "local_ai.model.download.progress",
+                progress=0,
+            )
+        )
+
+        if auto_start_server is None:
+            auto_start_server = self.settings.auto_start_local_ai_server
+
+        if timeout_seconds is None:
+            timeout_seconds = float(self.settings.model_download_timeout_seconds)
 
         self.local_model_prepare_thread = QThread(self)
         self.local_model_prepare_worker = LocalModelPrepareWorker(
@@ -785,8 +1099,8 @@ class MainWindow(QMainWindow):
             model=model_name,
             auto_pull=auto_pull,
             auto_install_runtime=auto_install_runtime,
-            auto_start_server=self.settings.auto_start_local_ai_server,
-            timeout_seconds=float(self.settings.model_download_timeout_seconds),
+            auto_start_server=auto_start_server,
+            timeout_seconds=timeout_seconds,
         )
 
         self.local_model_prepare_worker.moveToThread(
@@ -802,6 +1116,9 @@ class MainWindow(QMainWindow):
         self.local_model_prepare_worker.failed.connect(
             self._on_local_model_prepare_failed
         )
+        self.local_model_prepare_worker.progress.connect(
+            self._on_local_model_prepare_progress
+        )
 
         self.local_model_prepare_worker.finished.connect(
             self.local_model_prepare_thread.quit
@@ -814,6 +1131,36 @@ class MainWindow(QMainWindow):
         )
 
         self.local_model_prepare_thread.start()
+
+
+    def _on_local_model_prepare_progress(self, payload: dict) -> None:
+        progress = payload.get("progress")
+
+        if isinstance(progress, (int, float)):
+            progress_value = int(max(0, min(100, round(progress))))
+            self.bottom_area.set_state_text(
+                self.localization.t(
+                    "local_ai.model.download.progress",
+                    progress=progress_value,
+                )
+            )
+            return
+
+        status = str(payload.get("status") or "").strip()
+        if status:
+            self.bottom_area.set_state_text(
+                self.localization.t(
+                    "local_ai.model.download.progress.status",
+                    status=status,
+                )
+            )
+        else:
+            self.bottom_area.set_state_text(
+                self.localization.t(
+                    "local_ai.model.download.progress",
+                    progress=0,
+                )
+            )
 
     def _on_local_model_prepare_finished(self, result: dict) -> None:
         print(f"[LocalAI] Prepare model result: {result}")

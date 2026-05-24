@@ -1,18 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
-
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
-
 if [[ -f ".venv/bin/activate" ]]; then
-    # shellcheck disable=SC1091
-    source ".venv/bin/activate"
+  source ".venv/bin/activate"
 fi
-
 if command -v python >/dev/null 2>&1; then
-    PYTHON_BIN="python"
+  python run_char_aiface.py "$@"
 else
-    PYTHON_BIN="python3"
+  python3 run_char_aiface.py "$@"
 fi
-
-exec "$PYTHON_BIN" run_char_aiface.py "$@"

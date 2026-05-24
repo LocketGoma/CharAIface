@@ -1,3 +1,5 @@
+import json
+
 import httpx
 
 from shared.schema.chat import ChatRequest, ChatResponse
@@ -38,14 +40,38 @@ class BackendHttpClient:
             print(f"[Backend] Health response was not JSON: {error}")
             return None
 
-    def chat(self, request: ChatRequest) -> ChatResponse | None:
+
+    def system_status(self) -> dict | None:
+        url = f"{self.base_url}/system/status"
+
+        try:
+            response = httpx.get(
+                url,
+                timeout=max(5.0, self.timeout_seconds),
+            )
+            response.raise_for_status()
+            return response.json()
+
+        except httpx.HTTPError as error:
+            print(f"[Backend] System status request failed: {error}")
+            return None
+        except ValueError as error:
+            print(f"[Backend] System status response was not JSON: {error}")
+            return None
+
+    def chat(
+        self,
+        request: ChatRequest,
+        timeout_seconds: float | None = None,
+    ) -> ChatResponse | None:
         url = f"{self.base_url}/chat"
+        request_timeout = timeout_seconds if timeout_seconds is not None else max(120.0, self.timeout_seconds)
 
         try:
             response = httpx.post(
                 url,
                 json=request.model_dump(mode="json"),
-                timeout=self.timeout_seconds,
+                timeout=request_timeout,
             )
             response.raise_for_status()
             return ChatResponse.model_validate(response.json())
@@ -95,6 +121,108 @@ class BackendHttpClient:
 
         except httpx.HTTPError as error:
             print(f"[Backend] Prepare Ollama model failed: {error}")
+            return None
+
+    def stream_prepare_ollama_model(
+        self,
+        model: str,
+        auto_pull: bool,
+        auto_install_runtime: bool,
+        auto_start_server: bool,
+        timeout_seconds: float,
+    ):
+        url = f"{self.base_url}/local-ai/ollama/prepare-model-stream"
+
+        try:
+            with httpx.stream(
+                "POST",
+                url,
+                json={
+                    "model": model,
+                    "auto_pull": auto_pull,
+                    "auto_install_runtime": auto_install_runtime,
+                    "auto_start_server": auto_start_server,
+                },
+                timeout=timeout_seconds,
+            ) as response:
+                response.raise_for_status()
+
+                for line in response.iter_lines():
+                    if not line:
+                        continue
+
+                    try:
+                        yield json.loads(line)
+                    except ValueError as error:
+                        print(f"[Backend] Invalid Ollama prepare stream payload: {error}")
+
+        except httpx.HTTPError as error:
+            print(f"[Backend] Stream prepare Ollama model failed: {error}")
+            yield {
+                "event": "finished",
+                "success": False,
+                "error_code": "request_failed",
+                "model": {
+                    "model": model,
+                    "installed": False,
+                    "pulled": False,
+                    "state": "unknown",
+                    "error_code": "request_failed",
+                },
+            }
+
+
+    def list_ollama_models(
+        self,
+        auto_start_server: bool,
+        timeout_seconds: float = 10.0,
+    ) -> dict | None:
+        url = f"{self.base_url}/local-ai/ollama/list-models"
+
+        try:
+            response = httpx.post(
+                url,
+                json={
+                    "auto_start_server": auto_start_server,
+                },
+                timeout=timeout_seconds,
+            )
+            response.raise_for_status()
+            return response.json()
+
+        except httpx.HTTPError as error:
+            print(f"[Backend] List Ollama models failed: {error}")
+            return None
+        except ValueError as error:
+            print(f"[Backend] List Ollama models response was not JSON: {error}")
+            return None
+
+
+    def delete_ollama_model(
+        self,
+        model: str,
+        auto_start_server: bool,
+        timeout_seconds: float = 30.0,
+    ) -> dict | None:
+        url = f"{self.base_url}/local-ai/ollama/delete-model"
+
+        try:
+            response = httpx.post(
+                url,
+                json={
+                    "model": model,
+                    "auto_start_server": auto_start_server,
+                },
+                timeout=timeout_seconds,
+            )
+            response.raise_for_status()
+            return response.json()
+
+        except httpx.HTTPError as error:
+            print(f"[Backend] Delete Ollama model failed: {error}")
+            return None
+        except ValueError as error:
+            print(f"[Backend] Delete Ollama model response was not JSON: {error}")
             return None
 
     def fetch_cloud_ai_models(

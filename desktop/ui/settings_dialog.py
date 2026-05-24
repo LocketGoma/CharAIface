@@ -1,4 +1,4 @@
-from PySide6.QtCore import Qt, QUrl
+from PySide6.QtCore import Qt, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 
 import httpx
@@ -34,6 +34,10 @@ from desktop.theme.theme_model import ThemePalette
 
 
 class SettingsDialog(QDialog):
+    local_model_prepare_requested = Signal(str, bool, bool, bool, float)
+    local_model_delete_requested = Signal(str, bool)
+    local_model_list_requested = Signal(bool)
+
     def __init__(
         self,
         settings: AppSettings,
@@ -278,6 +282,36 @@ class SettingsDialog(QDialog):
             str(self.settings.model_download_timeout_seconds)
         )
 
+        self.local_model_download_button = QPushButton(
+            self.localization.t("local_ai.model.download.button")
+        )
+        self.local_model_download_button.clicked.connect(
+            self._request_local_model_prepare
+        )
+
+        self.local_model_delete_button = QPushButton(
+            self.localization.t("local_ai.model.delete.button")
+        )
+        self.local_model_delete_button.clicked.connect(
+            self._request_local_model_delete
+        )
+
+        self.local_model_list_button = QPushButton(
+            self.localization.t("local_ai.model.list.button")
+        )
+        self.local_model_list_button.clicked.connect(
+            self._request_local_model_list
+        )
+
+        local_model_action_widget = QWidget()
+        local_model_action_layout = QHBoxLayout(local_model_action_widget)
+        local_model_action_layout.setContentsMargins(0, 0, 0, 0)
+        local_model_action_layout.setSpacing(8)
+        local_model_action_layout.addWidget(self.local_model_download_button)
+        local_model_action_layout.addWidget(self.local_model_delete_button)
+        local_model_action_layout.addWidget(self.local_model_list_button)
+        local_model_action_layout.addStretch()
+
         form_layout.addRow(self.localization.t("settings.local_ai.provider"), self.local_ai_provider_combo)
         form_layout.addRow(self.localization.t("settings.local_ai.base_url"), self.local_ai_base_url_edit)
         form_layout.addRow(self.localization.t("settings.model.local_ai"), self.local_model_edit)
@@ -287,6 +321,7 @@ class SettingsDialog(QDialog):
         form_layout.addRow(self.localization.t("settings.auto_start_local_ai_server"), self.auto_start_local_ai_server_checkbox)
         form_layout.addRow(self.localization.t("settings.warn_large_local_model"), self.warn_large_local_model_checkbox)
         form_layout.addRow(self.localization.t("settings.model_download_timeout_seconds"), self.model_download_timeout_edit)
+        form_layout.addRow("", local_model_action_widget)
 
         layout.addLayout(form_layout)
 
@@ -298,6 +333,65 @@ class SettingsDialog(QDialog):
         layout.addStretch()
 
         return tab
+
+
+    def _request_local_model_prepare(self) -> None:
+        model_name = self.local_model_edit.text().strip()
+
+        if not model_name:
+            QMessageBox.warning(
+                self,
+                self.localization.t("settings.title"),
+                self.localization.t("local_ai.model.empty"),
+            )
+            return
+
+        try:
+            timeout_seconds = float(self.model_download_timeout_edit.text().strip())
+        except ValueError:
+            timeout_seconds = float(AppSettings().model_download_timeout_seconds)
+
+        timeout_seconds = max(30.0, timeout_seconds)
+        auto_start_server = self.auto_start_local_ai_server_checkbox.isChecked()
+
+        self.local_model_prepare_requested.emit(
+            model_name,
+            True,
+            False,
+            auto_start_server,
+            timeout_seconds,
+        )
+
+    def _request_local_model_delete(self) -> None:
+        model_name = self.local_model_edit.text().strip()
+
+        if not model_name:
+            QMessageBox.warning(
+                self,
+                self.localization.t("settings.title"),
+                self.localization.t("local_ai.model.empty"),
+            )
+            return
+
+        result = QMessageBox.question(
+            self,
+            self.localization.t("settings.title"),
+            self.localization.t(
+                "local_ai.model.delete.confirm",
+                model=model_name,
+            ),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+
+        if result != QMessageBox.StandardButton.Yes:
+            return
+
+        auto_start_server = self.auto_start_local_ai_server_checkbox.isChecked()
+        self.local_model_delete_requested.emit(model_name, auto_start_server)
+
+    def _request_local_model_list(self) -> None:
+        auto_start_server = self.auto_start_local_ai_server_checkbox.isChecked()
+        self.local_model_list_requested.emit(auto_start_server)
 
     def _create_cloud_ai_tab(self) -> QWidget:
         tab = QWidget()

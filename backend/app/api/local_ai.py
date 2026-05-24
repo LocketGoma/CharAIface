@@ -1,4 +1,8 @@
+import json
+
+import httpx
 from fastapi import APIRouter
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from backend.app.services.local_ai.ollama_manager import OllamaManager
@@ -13,6 +17,15 @@ class PrepareLocalModelRequest(BaseModel):
     model: str
     auto_pull: bool = True
     auto_install_runtime: bool = False
+    auto_start_server: bool = True
+
+
+class DeleteLocalModelRequest(BaseModel):
+    model: str
+    auto_start_server: bool = True
+
+
+class ListLocalModelsRequest(BaseModel):
     auto_start_server: bool = True
 
 
@@ -31,6 +44,50 @@ def install_ollama_runtime() -> dict:
     return {
         "provider": "ollama",
         "runtime": "ollama",
+        **result,
+    }
+
+
+@router.post("/ollama/prepare-model-stream")
+def prepare_ollama_model_stream(request: PrepareLocalModelRequest):
+    def event_stream():
+        for payload in ollama_manager.prepare_model_stream(
+            model_name=request.model,
+            auto_pull=request.auto_pull,
+            auto_start_server=request.auto_start_server,
+            auto_install_runtime=request.auto_install_runtime,
+        ):
+            yield json.dumps(payload, ensure_ascii=False) + "\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="application/x-ndjson",
+    )
+
+
+
+
+@router.post("/ollama/list-models")
+def list_ollama_models(request: ListLocalModelsRequest) -> dict:
+    result = ollama_manager.list_models_payload(
+        auto_start_server=request.auto_start_server,
+    )
+
+    return {
+        "provider": "ollama",
+        **result,
+    }
+
+
+@router.post("/ollama/delete-model")
+def delete_ollama_model(request: DeleteLocalModelRequest) -> dict:
+    result = ollama_manager.delete_model(
+        model_name=request.model,
+        auto_start_server=request.auto_start_server,
+    )
+
+    return {
+        "provider": "ollama",
         **result,
     }
 

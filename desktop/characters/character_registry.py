@@ -9,9 +9,14 @@ class CharacterRegistry:
         self,
         builtin_characters_dir: str | Path,
         user_characters_dir: str | Path,
+        additional_user_characters_dirs: list[str | Path] | None = None,
     ) -> None:
         self.builtin_characters_dir = Path(builtin_characters_dir)
         self.user_characters_dir = Path(user_characters_dir)
+        self.additional_user_characters_dirs = [
+            Path(path)
+            for path in (additional_user_characters_dirs or [])
+        ]
 
         self._packs: dict[str, CharacterPack] = {}
         self._builtin_pack_ids: set[str] = set()
@@ -80,15 +85,47 @@ class CharacterRegistry:
             self._register_pack(pack=pack, source="builtin")
 
     def _load_user_characters(self) -> None:
-        scanner = CharacterPackScanner(characters_dir=self.user_characters_dir)
+        self._scan_user_character_dir(
+            characters_dir=self.user_characters_dir,
+            source="user",
+            create_if_missing=True,
+        )
+
+        seen_dirs = {self.user_characters_dir.resolve()}
+        for characters_dir in self.additional_user_characters_dirs:
+            try:
+                resolved_dir = characters_dir.resolve()
+            except Exception:
+                resolved_dir = characters_dir
+
+            if resolved_dir in seen_dirs:
+                continue
+
+            seen_dirs.add(resolved_dir)
+            self._scan_user_character_dir(
+                characters_dir=characters_dir,
+                source="user",
+                create_if_missing=False,
+            )
+
+    def _scan_user_character_dir(
+        self,
+        characters_dir: Path,
+        source: str,
+        create_if_missing: bool,
+    ) -> None:
+        if not create_if_missing and not characters_dir.exists():
+            return
+
+        scanner = CharacterPackScanner(characters_dir=characters_dir)
         result = scanner.scan()
 
         self._invalid_packs.extend(
-            self._with_source(result.invalid_packs, source="user")
+            self._with_source(result.invalid_packs, source=source)
         )
 
         for pack in result.valid_packs:
-            self._register_pack(pack=pack, source="user")
+            self._register_pack(pack=pack, source=source)
 
     def _register_pack(self, pack: CharacterPack, source: str) -> None:
         if pack.id in self._packs:

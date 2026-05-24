@@ -1,4 +1,4 @@
-from PySide6.QtCore import Signal, Qt
+from PySide6.QtCore import QTimer, Signal, Qt
 from PySide6.QtWidgets import (
     QFrame,
     QGraphicsOpacityEffect,
@@ -69,6 +69,7 @@ class BottomUserArea(QWidget):
 
         self.retranslate_ui()
         self.set_state("idle")
+        QTimer.singleShot(0, self.sync_composer_height_to_left_name_area)
 
     def _create_character_area(self) -> QWidget:
         wrapper = QWidget()
@@ -141,6 +142,30 @@ class BottomUserArea(QWidget):
         layout.addWidget(user_name_box)
 
         return wrapper
+
+    def sync_composer_height_to_left_name_area(self) -> None:
+        target_height = self._left_name_stack_height()
+        self.composer.set_fixed_height(target_height)
+
+    def _left_name_stack_height(self) -> int:
+        spacing = 8
+        if self.character_area.layout() is not None:
+            spacing = max(spacing, self.character_area.layout().spacing())
+
+        character_info_height = max(
+            self.character_info_box.sizeHint().height(),
+            self.character_info_box.minimumSizeHint().height(),
+        )
+        user_name_height = max(
+            self.user_name_label.parentWidget().height(),
+            self.user_name_label.parentWidget().sizeHint().height(),
+            44,
+        )
+
+        return character_info_height + spacing + user_name_height
+
+    def recommended_input_area_height(self) -> int:
+        return self.composer.height() + 40
 
     def retranslate_ui(self) -> None:
         self.send_button.setText(self.localization.t("chat.send"))

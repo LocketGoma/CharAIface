@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 LocalAIProvider = Literal["ollama"]
 RuntimeInstallPolicy = Literal["never", "ask"]
 ModelInstallPolicy = Literal["never", "ask", "auto"]
+AIRoutePolicy = Literal["local_only", "cloud_only", "local_first", "cloud_first", "auto"]
 CloudAIAuthMode = Literal["secure_store", "env_var"]
 CloudAIProvider = Literal[
     "none",
@@ -42,8 +43,11 @@ class AppSettings(BaseModel):
     runtime_install_policy: RuntimeInstallPolicy = "ask"
 
     # Local model names
-    local_model: str = "llama3.2:1b"
-    style_model: str = "llama3.2:1b"
+    local_model: str = "qwen2.5:3b"
+    style_model: str = "qwen2.5:3b"
+
+    # AI routing
+    ai_route_policy: AIRoutePolicy = "auto"
 
     # Cloud AI routing / API settings
     cloud_ai_enabled: bool = False

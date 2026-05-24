@@ -4,6 +4,7 @@ from desktop.client.backend_http_client import BackendHttpClient
 
 
 class LocalModelPrepareWorker(QObject):
+    progress = Signal(dict)
     finished = Signal(dict)
     failed = Signal(str)
 
@@ -27,16 +28,23 @@ class LocalModelPrepareWorker(QObject):
 
     @Slot()
     def run(self) -> None:
-        result = self.backend_client.prepare_ollama_model(
+        final_result: dict | None = None
+
+        for payload in self.backend_client.stream_prepare_ollama_model(
             model=self.model,
             auto_pull=self.auto_pull,
             auto_install_runtime=self.auto_install_runtime,
             auto_start_server=self.auto_start_server,
             timeout_seconds=self.timeout_seconds,
-        )
+        ):
+            if payload.get("event") == "finished":
+                final_result = payload
+                break
 
-        if result is None:
+            self.progress.emit(payload)
+
+        if final_result is None:
             self.failed.emit("request_failed")
             return
 
-        self.finished.emit(result)
+        self.finished.emit(final_result)

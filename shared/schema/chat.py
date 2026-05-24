@@ -25,6 +25,7 @@ class ChatRequest(BaseModel):
     character_id: str | None = None
     user_name: str | None = None
     developer_mode: bool = False
+    language: str | None = None
 
 
 class ChatResponse(BaseModel):
