@@ -20,11 +20,22 @@ class BackendHttpClient:
                 url,
                 timeout=self.timeout_seconds,
             )
-            response.raise_for_status()
-            return response.json()
+
+            data = response.json()
+
+            if response.status_code >= 400:
+                print(
+                    "[Backend] Health check returned non-ok status "
+                    f"{response.status_code}: {data}"
+                )
+
+            return data
 
         except httpx.HTTPError as error:
             print(f"[Backend] Health check failed: {error}")
+            return None
+        except ValueError as error:
+            print(f"[Backend] Health response was not JSON: {error}")
             return None
 
     def chat(self, request: ChatRequest) -> ChatResponse | None:
@@ -42,6 +53,7 @@ class BackendHttpClient:
         except httpx.HTTPError as error:
             print(f"[Backend] Chat request failed: {error}")
             return None
+
     def ollama_status(self) -> dict | None:
         url = f"{self.base_url}/local-ai/ollama/status"
 
@@ -57,13 +69,15 @@ class BackendHttpClient:
             print(f"[Backend] Ollama status request failed: {error}")
             return None
 
-    def ensure_ollama_model(
+    def prepare_ollama_model(
         self,
         model: str,
-        auto_pull: bool = True,
-        auto_install_ollama: bool = False,
+        auto_pull: bool,
+        auto_install_runtime: bool,
+        auto_start_server: bool,
+        timeout_seconds: float,
     ) -> dict | None:
-        url = f"{self.base_url}/local-ai/ollama/ensure-model"
+        url = f"{self.base_url}/local-ai/ollama/prepare-model"
 
         try:
             response = httpx.post(
@@ -71,13 +85,14 @@ class BackendHttpClient:
                 json={
                     "model": model,
                     "auto_pull": auto_pull,
-                    "auto_install_ollama": auto_install_ollama,
+                    "auto_install_runtime": auto_install_runtime,
+                    "auto_start_server": auto_start_server,
                 },
-                timeout=600.0,
+                timeout=timeout_seconds,
             )
             response.raise_for_status()
             return response.json()
 
         except httpx.HTTPError as error:
-            print(f"[Backend] Ensure Ollama model failed: {error}")
+            print(f"[Backend] Prepare Ollama model failed: {error}")
             return None

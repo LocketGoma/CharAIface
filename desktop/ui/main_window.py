@@ -2,7 +2,8 @@ from pathlib import Path
 from shared.schema.chat import ChatRequest
 from desktop.chat.chat_session import ChatSession
 from desktop.client.backend_http_client import BackendHttpClient
-from PySide6.QtCore import QEvent, QTimer
+from desktop.workers.local_model_prepare_worker import LocalModelPrepareWorker
+from PySide6.QtCore import QEvent, QThread, QTimer
 from PySide6.QtWidgets import (
     QApplication,
     QFrame,
@@ -52,6 +53,9 @@ class MainWindow(QMainWindow):
         self.character_state = CharacterStateController(done_to_idle_ms=3000)
         self.character_registry: CharacterRegistry | None = None
         self.current_character_pack: CharacterPack | None = None
+        self.local_model_prepare_thread: QThread | None = None
+        self.local_model_prepare_worker: LocalModelPrepareWorker | None = None
+        self.initial_notice_added = False
         self.chat_session = ChatSession()
         self.backend_client = BackendHttpClient()
 
@@ -76,10 +80,6 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, self._restore_window_geometry)
         QTimer.singleShot(100, self._check_backend_health)
         QTimer.singleShot(500, self._check_local_ai_model)
-
-        self._add_assistant_message(
-            "CharAIface 기본 화면 출력 테스트입니다. 아직 AI 연결 전입니다."
-        )
 
     def _create_content_area(self) -> QWidget:
         self.content_area = QWidget()
@@ -224,8 +224,8 @@ class MainWindow(QMainWindow):
     def _show_missing_default_character_warning(self) -> None:
         QMessageBox.critical(
             self,
-            "CharAIface",
-            "기본 캐릭터가 없습니다!",
+            self.localization.t("app.title"),
+            self.localization.t("character.default_missing"),
         )
 
         app = QApplication.instance()
@@ -356,16 +356,45 @@ class MainWindow(QMainWindow):
             return
 
         user_name = self.settings.user_name
-
-        if self.current_character_pack is not None:
-            assistant_name = self.current_character_pack.name
-        else:
-            assistant_name = "Assistant"
+        assistant_name = self._character_display_name()
 
         self.chat_view.set_display_names(
             user_name=user_name,
             assistant_name=assistant_name,
         )
+
+    def _application_display_name(self) -> str:
+        app_name = self.localization.t("app.title")
+
+        if app_name == "{app.title}":
+            return "CharAIface"
+
+        return app_name
+
+    def _character_display_name(self) -> str:
+        if self.current_character_pack is not None:
+            return self.current_character_pack.name
+
+        return "Assistant"
+
+    def _add_initial_session_notice(self, local_model_installed: bool) -> None:
+        if self.initial_notice_added:
+            return
+
+        key = (
+            "chat.initial_notice.new_session"
+            if local_model_installed
+            else "chat.initial_notice.model_required"
+        )
+
+        self._add_assistant_message(
+            self.localization.t(
+                key,
+                app_name=self._application_display_name(),
+                character_name=self._character_display_name(),
+            )
+        )
+        self.initial_notice_added = True
 
     def _add_user_message(self, content: str) -> None:
         message = self.chat_session.add_user_message(content)
@@ -419,9 +448,7 @@ class MainWindow(QMainWindow):
         self._update_avatar_occlusion_later()
 
     def _add_backend_fallback_response(self) -> None:
-        self._add_assistant_message(
-            "백엔드 응답을 가져오지 못했습니다. 임시 로컬 응답입니다."
-        )
+        self._add_assistant_message(self.localization.t("chat.backend_fallback"))
 
         self.character_state.on_assistant_done()
         self._update_avatar_occlusion_later()
@@ -522,111 +549,255 @@ class MainWindow(QMainWindow):
         print(f"[Backend] health ok: {result}")
 
     def _check_local_ai_model(self) -> None:
-        if not self.settings.auto_download_models:
-            print("[LocalAI] auto_download_models is disabled.")
+        model_name = self.settings.local_model
+
+        if not model_name:
+            print("[LocalAI] local_model is empty.")
+            self._add_initial_session_notice(local_model_installed=False)
             return
 
         status = self.backend_client.ollama_status()
 
         if status is None:
             print("[LocalAI] Failed to check Ollama status.")
+            self._add_initial_session_notice(local_model_installed=False)
             return
 
         ollama_status = status.get("status", {})
-        installed = bool(ollama_status.get("installed"))
-        server_available = bool(ollama_status.get("server_available"))
-        model_name = self.settings.local_model
+        runtime = ollama_status.get("runtime", {})
+        installed = bool(runtime.get("installed"))
+        server_available = bool(runtime.get("server_available"))
+        local_model_installed = self._is_local_model_installed(
+            ollama_status,
+            model_name,
+        )
 
         print(f"[LocalAI] Ollama status: {ollama_status}")
+        self._add_initial_session_notice(local_model_installed=local_model_installed)
+
+        # 이미 로컬 모델이 확인되었으면 다운로드/준비 확인창을 띄우지 않는다.
+        if local_model_installed:
+            print(f'[LocalAI] Local model "{model_name}" is already available.')
+            return
+
+        if self.settings.model_install_policy == "never":
+            print("[LocalAI] model_install_policy is never.")
+            return
 
         if not installed:
-            self._handle_missing_ollama(model_name)
+            self._handle_missing_local_ai_runtime(model_name)
             return
 
         if not server_available:
             print("[LocalAI] Ollama is installed but server is not available.")
 
-        self._ensure_local_model(model_name)
+        # 여기까지 온 경우만:
+        # - settings.local_model 값은 있음
+        # - Ollama status 조회는 됨
+        # - 모델 목록에서 해당 모델을 찾지 못함
+        # 따라서 이때만 모델 준비/다운로드 확인창을 띄운다.
+        self._handle_local_model_prepare(model_name)
+        
+    def _is_local_model_installed(self, ollama_status: dict, model_name: str) -> bool:
+        models = ollama_status.get("models", [])
 
-    def _handle_missing_ollama(self, model_name: str) -> None:
-        if self.settings.ask_before_model_download:
+        if not isinstance(models, list):
+            return False
+
+        normalized_target = self._normalize_ollama_model_name(model_name)
+
+        for model in models:
+            if not isinstance(model, str):
+                continue
+
+            if self._normalize_ollama_model_name(model) == normalized_target:
+                return True
+
+        return False
+
+    def _normalize_ollama_model_name(self, model_name: str) -> str:
+        normalized = model_name.strip().lower()
+
+        if not normalized:
+            return normalized
+
+        if ":" not in normalized:
+            return f"{normalized}:latest"
+
+        return normalized
+
+    def _handle_missing_local_ai_runtime(self, model_name: str) -> None:
+        if self.settings.runtime_install_policy == "never":
+            QMessageBox.warning(
+                self,
+                self.localization.t("app.title"),
+                self.localization.t("local_ai.runtime.missing"),
+            )
+            return
+
+        result = QMessageBox.question(
+            self,
+            self.localization.t("app.title"),
+            self.localization.t("local_ai.ollama.install.confirm"),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+
+        if result != QMessageBox.StandardButton.Yes:
+            print("[LocalAI] User skipped Ollama installation.")
+            return
+
+        self._start_local_model_prepare_worker(
+            model_name=model_name,
+            auto_pull=self.settings.model_install_policy != "never",
+            auto_install_runtime=True,
+        )
+
+    def _handle_local_model_prepare(self, model_name: str) -> None:
+        if self.settings.model_install_policy == "never":
+            return
+
+        if self.settings.model_install_policy == "ask":
             result = QMessageBox.question(
                 self,
-                "CharAIface",
-                (
-                    "로컬 AI 실행에 필요한 Ollama가 설치되어 있지 않습니다.\n\n"
-                    "winget을 사용해 Ollama 설치를 시도할까요?"
+                self.localization.t("app.title"),
+                self.localization.t(
+                    "local_ai.model.ensure.confirm",
+                    model=model_name,
                 ),
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             )
 
             if result != QMessageBox.StandardButton.Yes:
-                print("[LocalAI] User skipped Ollama installation.")
+                print("[LocalAI] User skipped model prepare.")
                 return
 
-        self._ensure_local_model(
+        self._start_local_model_prepare_worker(
             model_name=model_name,
-            auto_install_ollama=True,
+            auto_pull=True,
+            auto_install_runtime=False,
         )
 
-    def _ensure_local_model(
+    def _start_local_model_prepare_worker(
         self,
         model_name: str,
-        auto_install_ollama: bool = False,
+        auto_pull: bool,
+        auto_install_runtime: bool,
     ) -> None:
-        if self.settings.ask_before_model_download:
-            result = QMessageBox.question(
-                self,
-                "CharAIface",
-                (
-                    f'로컬 AI 모델 "{model_name}" 상태를 확인하고, '
-                    "없으면 다운로드합니다.\n\n"
-                    "진행할까요?"
-                ),
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            )
-
-            if result != QMessageBox.StandardButton.Yes:
-                print("[LocalAI] User skipped model ensure.")
-                return
-
-        print(f"[LocalAI] Ensuring local model: {model_name}")
-
-        result = self.backend_client.ensure_ollama_model(
-            model=model_name,
-            auto_pull=True,
-            auto_install_ollama=auto_install_ollama,
-        )
-
-        if result is None:
-            QMessageBox.warning(
-                self,
-                "CharAIface",
-                "로컬 AI 모델 확인/다운로드 요청에 실패했습니다.",
-            )
-            return
-
-        print(f"[LocalAI] Ensure model result: {result}")
-
-        if not result.get("success"):
-            QMessageBox.warning(
-                self,
-                "CharAIface",
-                (
-                    "로컬 AI 모델 준비에 실패했습니다.\n\n"
-                    f"{result.get('error')}"
-                ),
-            )
-            return
-
-        if result.get("pulled"):
+        if self.local_model_prepare_thread is not None:
             QMessageBox.information(
                 self,
-                "CharAIface",
-                f'로컬 AI 모델 "{model_name}" 다운로드가 완료되었습니다.',
+                self.localization.t("app.title"),
+                self.localization.t("local_ai.model.prepare.already_running"),
+            )
+            return
+        
+        self.character_state.on_assistant_typing()
+
+        self.local_model_prepare_thread = QThread(self)
+        self.local_model_prepare_worker = LocalModelPrepareWorker(
+            backend_client=self.backend_client,
+            model=model_name,
+            auto_pull=auto_pull,
+            auto_install_runtime=auto_install_runtime,
+            auto_start_server=self.settings.auto_start_local_ai_server,
+            timeout_seconds=float(self.settings.model_download_timeout_seconds),
+        )
+
+        self.local_model_prepare_worker.moveToThread(
+            self.local_model_prepare_thread
+        )
+
+        self.local_model_prepare_thread.started.connect(
+            self.local_model_prepare_worker.run
+        )
+        self.local_model_prepare_worker.finished.connect(
+            self._on_local_model_prepare_finished
+        )
+        self.local_model_prepare_worker.failed.connect(
+            self._on_local_model_prepare_failed
+        )
+
+        self.local_model_prepare_worker.finished.connect(
+            self.local_model_prepare_thread.quit
+        )
+        self.local_model_prepare_worker.failed.connect(
+            self.local_model_prepare_thread.quit
+        )
+        self.local_model_prepare_thread.finished.connect(
+            self._cleanup_local_model_prepare_worker
+        )
+
+        self.local_model_prepare_thread.start()
+
+    def _on_local_model_prepare_finished(self, result: dict) -> None:
+        print(f"[LocalAI] Prepare model result: {result}")
+
+        if not result.get("success"):
+            model_payload = result.get("model", {})
+            error_code = (
+                model_payload.get("error_code")
+                or result.get("error_code")
+                or "unknown"
+            )
+
+            QMessageBox.warning(
+                self,
+                self.localization.t("app.title"),
+                self.localization.t(
+                    "local_ai.model.prepare.failed",
+                    error=self._local_ai_error_message(str(error_code)),
+                ),
+            )
+            self.character_state.on_assistant_done()
+            return
+
+        model_payload = result.get("model", {})
+        model_name = model_payload.get("model") or self.settings.local_model
+
+        if model_payload.get("pulled"):
+            QMessageBox.information(
+                self,
+                self.localization.t("app.title"),
+                self.localization.t(
+                    "local_ai.model.download.completed",
+                    model=model_name,
+                ),
             )
         else:
             print(f'[LocalAI] Model "{model_name}" is already available.')
+
+        self.character_state.on_assistant_done()
+
+    def _on_local_model_prepare_failed(self, error_code: str) -> None:
+        QMessageBox.warning(
+            self,
+            self.localization.t("app.title"),
+            self.localization.t(
+                "local_ai.model.prepare.failed",
+                error=self._local_ai_error_message(error_code),
+            ),
+        )
+
+        self.character_state.on_assistant_done()
+
+    def _cleanup_local_model_prepare_worker(self) -> None:
+        if self.local_model_prepare_worker is not None:
+            self.local_model_prepare_worker.deleteLater()
+            self.local_model_prepare_worker = None
+
+        if self.local_model_prepare_thread is not None:
+            self.local_model_prepare_thread.deleteLater()
+            self.local_model_prepare_thread = None
+
+    def _local_ai_error_message(self, error_code: str) -> str:
+        key = f"local_ai.error.{error_code}"
+        text = self.localization.t(key)
+
+        if text == f"{{{key}}}":
+            return error_code
+
+        return text
+
     def eventFilter(self, watched, event) -> bool:
         if event.type() == QEvent.Type.Wheel:
             if self._should_forward_wheel_to_chat_view(watched):

@@ -1,6 +1,6 @@
-from datetime import datetime, timezone
 from typing import Literal
 
+from backend.app.services.health_service import HealthService
 from shared.schema.chat import ChatMessage, ChatRequest, ChatResponse
 
 
@@ -8,6 +8,9 @@ ChatRoute = Literal["local_mock", "cloud_mock", "command"]
 
 
 class ChatService:
+    def __init__(self) -> None:
+        self.health_service = HealthService()
+
     def create_response(self, request: ChatRequest) -> ChatResponse:
         latest_user_message = self._find_latest_user_message(request)
 
@@ -66,6 +69,9 @@ class ChatService:
 
         if normalized_command == "/health":
             return self._create_health_response()
+
+        if normalized_command == "/help":
+            return self._create_help_response()
 
         return None
 
@@ -167,17 +173,43 @@ class ChatService:
             },
         )
 
-    def _create_health_response(self) -> ChatResponse:
-        health = {
-            "status": "ok",
-            "app": "CharAIface Backend",
-            "backend_api": "available",
-            "chat_service": "available",
-            "chat_route": "available",
-            "server_time_utc": datetime.now(timezone.utc).isoformat(),
-        }
+    def _create_help_response(self) -> ChatResponse:
+        content = (
+            "Help\n\n"
+            "Available commands:\n"
+            "- /help: Show this command list.\n"
+            "- /clear: Clear only the visible chat messages. The current ChatSession data is kept.\n"
+            "- /status: Show current user, character, route, model, and session state.\n"
+            "- /health: Show backend, local AI, cloud AI, and overall AI health.\n"
+        )
 
-        content = f"[Backend] health ok: {health}"
+        return self._create_assistant_response(
+            content=content,
+            route="command",
+            model="system_command",
+            paid_model_used=False,
+            metadata={
+                "source": "chat_service",
+                "command": "help",
+            },
+        )
+
+    def _create_health_response(self) -> ChatResponse:
+        health = self.health_service.build_payload()
+        status = health.get("status", "error")
+        errors = health.get("errors", [])
+
+        content = (
+            f"Health: {status}\n\n"
+            f"- backend_api: {health.get('backend_api')}\n"
+            f"- chat_api: {health.get('chat_api')}\n"
+            f"- chat_service: {health.get('chat_service')}\n"
+            f"- local_ai_available: {health.get('checks', {}).get('local_ai_available')}\n"
+            f"- cloud_ai_available: {health.get('checks', {}).get('cloud_ai_available')}\n"
+            f"- ai_available: {health.get('checks', {}).get('ai_available')}\n"
+            f"- errors: {errors}\n"
+            f"- server_time_utc: {health.get('server_time_utc')}"
+        )
 
         return self._create_assistant_response(
             content=content,

@@ -1,4 +1,19 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field
+
+
+LocalAIProvider = Literal["ollama"]
+RuntimeInstallPolicy = Literal["never", "ask"]
+ModelInstallPolicy = Literal["never", "ask", "auto"]
+CloudAIProvider = Literal[
+    "none",
+    "openai",
+    "openrouter",
+    "anthropic",
+    "gemini",
+    "custom",
+]
 
 
 class AppSettings(BaseModel):
@@ -16,13 +31,36 @@ class AppSettings(BaseModel):
     avatar_occluded_opacity: float = 0.7
     enable_avatar_embarrassed_when_occluded: bool = True
 
+    # Local AI runtime
+    local_ai_provider: LocalAIProvider = "ollama"
+    local_ai_base_url: str = "http://127.0.0.1:11434"
+    auto_start_local_ai_server: bool = True
+
+    # never: 설치 시도 안 함
+    # ask: 사용자 확인 후 설치 시도
+    runtime_install_policy: RuntimeInstallPolicy = "ask"
+
+    # Local model names
     local_model: str = "llama3.2:1b"
     style_model: str = "llama3.2:1b"
-    cloud_model: str = "openai/gpt-5.1"
 
-    auto_download_models: bool = True
-    ask_before_model_download: bool = True
+    # Cloud AI routing / API settings
+    cloud_ai_enabled: bool = False
+    cloud_ai_provider: CloudAIProvider = "openai"
+    cloud_ai_base_url: str = ""
+    cloud_ai_api_key_env: str = "OPENAI_API_KEY"
+    cloud_model: str = "openai/gpt-5.1"
+    cloud_ai_models: list[str] = Field(
+        default_factory=lambda: ["openai/gpt-5.1"]
+    )
+
+    # never: 모델 다운로드 안 함
+    # ask: 사용자 확인 후 다운로드
+    # auto: 사용자 확인 없이 다운로드
+    model_install_policy: ModelInstallPolicy = "ask"
+
     warn_large_local_model: bool = True
+    model_download_timeout_seconds: int = 600
 
     window_width: int = 980
     window_height: int = 720

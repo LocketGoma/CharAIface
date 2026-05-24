@@ -9,10 +9,11 @@ router = APIRouter(prefix="/local-ai", tags=["local-ai"])
 ollama_manager = OllamaManager()
 
 
-class EnsureLocalModelRequest(BaseModel):
+class PrepareLocalModelRequest(BaseModel):
     model: str
     auto_pull: bool = True
-    auto_install_ollama: bool = False
+    auto_install_runtime: bool = False
+    auto_start_server: bool = True
 
 
 @router.get("/ollama/status")
@@ -23,49 +24,52 @@ def get_ollama_status() -> dict:
     }
 
 
-@router.post("/ollama/install")
-def install_ollama() -> dict:
-    result = ollama_manager.install_ollama_with_winget()
+@router.post("/ollama/install-runtime")
+def install_ollama_runtime() -> dict:
+    result = ollama_manager.install_runtime_with_winget()
 
     return {
         "provider": "ollama",
-        "install_method": "winget",
-        "success": result.returncode == 0,
-        "returncode": result.returncode,
-        "stdout": result.stdout,
-        "stderr": result.stderr,
+        "runtime": "ollama",
+        **result,
     }
 
 
-@router.post("/ollama/ensure-model")
-def ensure_ollama_model(request: EnsureLocalModelRequest) -> dict:
-    status = ollama_manager.check()
+@router.post("/ollama/prepare-model")
+def prepare_ollama_model(request: PrepareLocalModelRequest) -> dict:
+    runtime = ollama_manager.runtime_status()
+    install_result = None
 
-    if not status.installed and request.auto_install_ollama:
-        install_result = ollama_manager.install_ollama_with_winget()
+    if not runtime.installed and request.auto_install_runtime:
+        install_result = ollama_manager.install_runtime_with_winget()
+        runtime = ollama_manager.runtime_status()
 
-        if install_result.returncode != 0:
+        if not install_result.get("success"):
             return {
                 "provider": "ollama",
-                "model": request.model,
                 "success": False,
-                "installed": False,
-                "pulled": False,
-                "error": install_result.stderr or install_result.stdout,
-                "install_attempted": True,
+                "runtime": runtime.to_dict(),
+                "model": {
+                    "model": request.model,
+                    "installed": False,
+                    "pulled": False,
+                    "state": "unknown",
+                    "error_code": install_result.get("error_code")
+                    or "ollama_install_failed",
+                },
+                "install_result": install_result,
             }
 
-    result = ollama_manager.ensure_model(
+    model_status = ollama_manager.prepare_model(
         model_name=request.model,
         auto_pull=request.auto_pull,
+        auto_start_server=request.auto_start_server,
     )
 
     return {
         "provider": "ollama",
-        "model": result.model,
-        "success": result.installed,
-        "installed": result.installed,
-        "pulled": result.pulled,
-        "error": result.error,
-        "install_attempted": not status.installed and request.auto_install_ollama,
+        "success": model_status.installed,
+        "runtime": ollama_manager.runtime_status().to_dict(),
+        "model": model_status.to_dict(),
+        "install_result": install_result,
     }
