@@ -231,3 +231,4 @@ resources/builtin/
 # Env
 .env
 .idea
+resources/data/settings.json
