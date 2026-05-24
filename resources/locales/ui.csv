@@ -97,7 +97,7 @@ settings.warn_large_local_model,큰 로컬 모델 경고,Warn for large local mo
 settings.model_download_timeout_seconds,모델 다운로드 제한 시간(초),Model download timeout (seconds)
 character.default_missing,기본 캐릭터가 없습니다!,Default character is missing!
 settings.tab.cloud_ai,클라우드 AI,Cloud AI
-settings.cloud_ai.description,API 키 환경변수와 사용 가능한 클라우드 모델 목록을 설정합니다. 실제 API 키 값은 설정 파일에 저장하지 않습니다.,Configure API key environment variables and available cloud model IDs. Actual API key values are not saved in the settings file.
+settings.cloud_ai.description,클라우드 AI 제공자와 API 키 인증을 설정합니다. 실제 API 키는 설정 파일에 저장하지 않습니다.,Configure cloud AI providers and API key authentication. Actual API keys are not saved in the settings file.
 settings.cloud_ai.enabled,클라우드 AI 사용,Enable Cloud AI
 settings.cloud_ai.provider,클라우드 AI 제공자,Cloud AI Provider
 settings.cloud_ai.provider.none,사용 안 함,Disabled
@@ -106,14 +106,47 @@ settings.cloud_ai.provider.openrouter,OpenRouter,OpenRouter
 settings.cloud_ai.provider.anthropic,Anthropic,Anthropic
 settings.cloud_ai.provider.gemini,Gemini,Gemini
 settings.cloud_ai.provider.custom,직접 설정,Custom
-settings.cloud_ai.base_url,API Base URL,API Base URL
-settings.cloud_ai.base_url.placeholder,비워두면 제공자 기본값을 사용합니다.,Leave empty to use the provider default.
-settings.cloud_ai.api_key_env,API 키 환경변수명,API Key Env Name
-settings.cloud_ai.default_model,기본 클라우드 모델,Default Cloud Model
+settings.cloud_ai.base_url,Custom API Base URL,Custom API Base URL
+settings.cloud_ai.base_url.placeholder,Custom 제공자에서만 사용합니다. 비워두면 제공자 기본값을 사용합니다.,Used only for Custom providers. Leave empty to use the provider default.
+settings.cloud_ai.api_key_env,API 키가 저장된 환경변수 이름,Environment variable name that stores the API key
+settings.cloud_ai.default_model,선택된 클라우드 모델,Selected Cloud Model
 settings.cloud_ai.model_list,사용 가능 모델 목록,Available Model List
-settings.cloud_ai.model_list.placeholder,한 줄에 모델 ID 하나씩 입력하세요. 예: openai/gpt-5.1,Enter one model ID per line. Example: openai/gpt-5.1
-settings.cloud_ai.note,여기서는 모델 ID와 API 키 환경변수명만 저장합니다. 실제 키 값은 Windows 환경변수 또는 .env 쪽에서 관리하세요.,This tab only stores model IDs and API key environment variable names. Manage actual key values through Windows environment variables or .env.
+settings.cloud_ai.model_list.placeholder,사용할 모델을 목록에서 선택하세요.,Select a model from the list.
+settings.cloud_ai.note,기본 방식은 API Key를 OS 보안 저장소에 저장합니다. 환경변수 방식은 고급 사용자용입니다.,"By default, API keys are stored in the OS secure store. Environment variable mode is for advanced users."
 settings.cloud_ai.open_api_key_page,API 키 페이지 열기,Open API Key Page
-settings.cloud_ai.api_key_env,API 키 환경변수명,API key environment variable
-settings.cloud_ai.open_api_key_page,API 키 페이지 열기,Open API Key Page
-settings.cloud_ai.default_model,기본 클라우드 모델,Default cloud model
+settings.character.reload,캐릭터 다시 불러오기,Reload Characters
+settings.character.reload.completed,캐릭터팩 {count}개를 다시 불러왔습니다.,Reloaded {count} character pack(s).
+settings.cloud_ai.auth_mode,인증 방식,Authentication mode
+settings.cloud_ai.auth_mode.secure_store,앱에 안전하게 저장,Store safely in this app
+settings.cloud_ai.auth_mode.env_var,환경변수에서 읽기,Read from environment variable
+settings.cloud_ai.api_key,API Key,API Key
+settings.cloud_ai.api_key.placeholder,API Key를 입력하세요. 저장 후에는 다시 표시되지 않습니다.,Enter an API key. It will not be shown again after saving.
+settings.cloud_ai.credential_id,보안 저장소 ID,Secure credential ID
+settings.cloud_ai.api_key.save,API Key 저장,Save API Key
+settings.cloud_ai.api_key.delete,API Key 삭제,Delete API Key
+settings.cloud_ai.api_key.empty,저장할 API Key를 입력하세요.,Enter an API key to save.
+settings.cloud_ai.api_key.saved,API Key가 안전 저장소에 저장되었습니다.,The API key has been saved in the secure store.
+settings.cloud_ai.api_key.deleted,API Key를 안전 저장소에서 삭제했습니다.,The API key has been deleted from the secure store.
+settings.cloud_ai.api_key.save_failed,API Key 저장에 실패했습니다: {error},Failed to save API key: {error}
+settings.cloud_ai.api_key.delete_failed,API Key 삭제에 실패했습니다: {error},Failed to delete API key: {error}
+settings.cloud_ai.api_key.status.saved,API Key가 안전 저장소에 저장되어 있습니다.,An API key is saved in the secure store.
+settings.cloud_ai.api_key.status.not_saved,저장된 API Key가 없습니다.,No API key is saved.
+settings.cloud_ai.api_key.status.env_var,환경변수 {env}에서 API Key를 읽습니다.,The API key will be read from environment variable {env}.
+settings.cloud_ai.api_key.status.missing,API Key 환경변수명이 설정되지 않았습니다.,No API key environment variable is configured.
+settings.cloud_ai.selected_model,선택된 클라우드 모델,Selected Cloud Model
+settings.cloud_ai.test_connection,연결 테스트,Test Connection
+settings.cloud_ai.message.title,클라우드 AI,Cloud AI
+settings.cloud_ai.test.save_first,입력한 API Key를 먼저 저장한 뒤 연결 테스트를 실행하세요.,Save the entered API key before testing the connection.
+settings.cloud_ai.test.request_failed,연결 테스트 요청에 실패했습니다: {error},Connection test request failed: {error}
+settings.cloud_ai.test.succeeded,클라우드 AI 연결 테스트에 성공했습니다.,Cloud AI connection test succeeded.
+settings.cloud_ai.test.failed,클라우드 AI 연결 테스트에 실패했습니다: {error},Cloud AI connection test failed: {error}
+settings.cloud_ai.selected_model.none,선택되지 않음,Not selected
+settings.theme.palette.show,색상표 확인,Show Color Palette
+settings.theme.palette.hide,색상표 숨기기,Hide Color Palette
+settings.cloud_ai.refresh_models,모델 목록 새로고침,Refresh Model List
+settings.cloud_ai.models.save_first,입력한 API Key를 먼저 저장한 뒤 모델 목록을 새로고침하세요.,Save the entered API key before refreshing the model list.
+settings.cloud_ai.models.provider_disabled,클라우드 AI 제공자가 사용 안 함으로 설정되어 있습니다.,Cloud AI provider is disabled.
+settings.cloud_ai.models.request_failed,모델 목록 요청에 실패했습니다: {error},Model list request failed: {error}
+settings.cloud_ai.models.failed,모델 목록을 불러오지 못했습니다: {error},Failed to load model list: {error}
+settings.cloud_ai.models.empty,불러온 모델 목록이 비어 있습니다.,Loaded model list is empty.
+settings.cloud_ai.models.loaded,{count}개의 모델을 불러왔습니다.,Loaded {count} models.

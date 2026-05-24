@@ -96,3 +96,37 @@ class BackendHttpClient:
         except httpx.HTTPError as error:
             print(f"[Backend] Prepare Ollama model failed: {error}")
             return None
+
+    def fetch_cloud_ai_models(
+        self,
+        provider: str,
+        auth_mode: str,
+        credential_id: str,
+        api_key_env: str | None,
+        base_url: str = "",
+        timeout_seconds: float = 30.0,
+    ) -> dict | None:
+        url = f"{self.base_url}/cloud-ai/models"
+
+        try:
+            response = httpx.post(
+                url,
+                json={
+                    "provider": provider,
+                    "auth_mode": auth_mode,
+                    "credential_id": credential_id,
+                    "api_key_env": api_key_env,
+                    "base_url": base_url,
+                },
+                timeout=timeout_seconds,
+            )
+            response.raise_for_status()
+            return response.json()
+
+        except httpx.HTTPError as error:
+            print(f"[Backend] Cloud AI model list request failed: {error}")
+            return None
+        except ValueError as error:
+            print(f"[Backend] Cloud AI model list response was not JSON: {error}")
+            return None
+

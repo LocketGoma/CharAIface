@@ -1,9 +1,14 @@
-import os
+import json
+from pathlib import Path
 from datetime import datetime, timezone
 from typing import Any
 
 import httpx
 
+from backend.app.services.cloud_auth_manager import (
+    CloudAuthManager,
+    CloudCredentialConfig,
+)
 from backend.app.services.local_ai.ollama_manager import OllamaManager
 
 
@@ -113,9 +118,19 @@ class HealthService:
         }
 
     def _cloud_ai_status(self) -> dict[str, Any]:
-        provider = self._detect_cloud_provider()
+        settings = self._load_settings()
 
-        if provider is None:
+        if not settings.get("cloud_ai_enabled", False):
+            return {
+                "configured": False,
+                "available": False,
+                "provider": None,
+                "state": "disabled",
+                "error_code": "cloud_ai_disabled",
+            }
+
+        provider = str(settings.get("cloud_ai_provider", "none")).strip().lower()
+        if not provider or provider == "none":
             return {
                 "configured": False,
                 "available": False,
@@ -124,18 +139,53 @@ class HealthService:
                 "error_code": "cloud_ai_not_configured",
             }
 
+        config = CloudCredentialConfig(
+            provider=provider,
+            auth_mode=str(settings.get("cloud_ai_auth_mode", "secure_store")),
+            credential_id=str(
+                settings.get(
+                    "cloud_ai_credential_id",
+                    CloudAuthManager.default_credential_id(provider),
+                )
+            ),
+            api_key_env=str(settings.get("cloud_ai_api_key_env", "")) or None,
+        )
+
+        try:
+            api_key = CloudAuthManager.get_api_key(config)
+        except Exception as error:
+            return {
+                "configured": True,
+                "available": False,
+                "provider": provider,
+                "state": "credential_error",
+                "error_code": "cloud_ai_credential_error",
+                "error_detail": str(error),
+            }
+
+        if not api_key:
+            return {
+                "configured": True,
+                "available": False,
+                "provider": provider,
+                "state": "missing_api_key",
+                "error_code": "cloud_ai_api_key_missing",
+            }
+
+        base_url = str(settings.get("cloud_ai_base_url", "")).strip()
+
         try:
             if provider == "openai":
-                return self._check_openai()
+                return self._check_openai(api_key, base_url)
 
             if provider == "openrouter":
-                return self._check_openrouter()
+                return self._check_openrouter(api_key, base_url)
 
             if provider == "anthropic":
-                return self._check_anthropic()
+                return self._check_anthropic(api_key, base_url)
 
             if provider == "gemini":
-                return self._check_gemini()
+                return self._check_gemini(api_key, base_url)
 
             return {
                 "configured": True,
@@ -153,7 +203,6 @@ class HealthService:
                 "state": "http_error",
                 "error_code": "cloud_ai_http_error",
                 "http_status": error.response.status_code,
-                "error_detail": str(error),
             }
         except httpx.HTTPError as error:
             return {
@@ -174,30 +223,17 @@ class HealthService:
                 "error_detail": str(error),
             }
 
-    def _detect_cloud_provider(self) -> str | None:
-        if os.getenv("OPENAI_API_KEY"):
-            return "openai"
+    def _load_settings(self) -> dict[str, Any]:
+        settings_path = Path(__file__).resolve().parents[3] / "resources" / "data" / "settings.json"
+        try:
+            return json.loads(settings_path.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
 
-        if os.getenv("OPENROUTER_API_KEY"):
-            return "openrouter"
-
-        if os.getenv("ANTHROPIC_API_KEY"):
-            return "anthropic"
-
-        if os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY"):
-            return "gemini"
-
-        provider = os.getenv("CHARAIFACE_CLOUD_AI_PROVIDER", "").strip().lower()
-
-        if provider:
-            return provider
-
-        return None
-
-    def _check_openai(self) -> dict[str, Any]:
-        api_key = os.getenv("OPENAI_API_KEY", "")
+    def _check_openai(self, api_key: str, base_url: str = "") -> dict[str, Any]:
+        url = (base_url or "https://api.openai.com/v1").rstrip("/")
         response = httpx.get(
-            "https://api.openai.com/v1/models",
+            f"{url}/models",
             headers={"Authorization": f"Bearer {api_key}"},
             timeout=CLOUD_AI_TIMEOUT_SECONDS,
         )
@@ -211,10 +247,10 @@ class HealthService:
             "error_code": None,
         }
 
-    def _check_openrouter(self) -> dict[str, Any]:
-        api_key = os.getenv("OPENROUTER_API_KEY", "")
+    def _check_openrouter(self, api_key: str, base_url: str = "") -> dict[str, Any]:
+        url = (base_url or "https://openrouter.ai/api/v1").rstrip("/")
         response = httpx.get(
-            "https://openrouter.ai/api/v1/models",
+            f"{url}/models",
             headers={"Authorization": f"Bearer {api_key}"},
             timeout=CLOUD_AI_TIMEOUT_SECONDS,
         )
@@ -228,10 +264,10 @@ class HealthService:
             "error_code": None,
         }
 
-    def _check_anthropic(self) -> dict[str, Any]:
-        api_key = os.getenv("ANTHROPIC_API_KEY", "")
+    def _check_anthropic(self, api_key: str, base_url: str = "") -> dict[str, Any]:
+        url = (base_url or "https://api.anthropic.com/v1").rstrip("/")
         response = httpx.get(
-            "https://api.anthropic.com/v1/models",
+            f"{url}/models",
             headers={
                 "x-api-key": api_key,
                 "anthropic-version": "2023-06-01",
@@ -248,10 +284,10 @@ class HealthService:
             "error_code": None,
         }
 
-    def _check_gemini(self) -> dict[str, Any]:
-        api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or ""
+    def _check_gemini(self, api_key: str, base_url: str = "") -> dict[str, Any]:
+        url = (base_url or "https://generativelanguage.googleapis.com/v1beta").rstrip("/")
         response = httpx.get(
-            "https://generativelanguage.googleapis.com/v1beta/models",
+            f"{url}/models",
             params={"key": api_key},
             timeout=CLOUD_AI_TIMEOUT_SECONDS,
         )

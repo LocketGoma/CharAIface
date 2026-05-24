@@ -87,20 +87,26 @@ class SettingsRepository:
                 str(migrated.get("cloud_model", default_settings.cloud_model))
             )
 
+        provider = str(migrated.get("cloud_ai_provider", "openai")).strip().lower()
+
         if "cloud_ai_base_url" not in migrated:
-            migrated["cloud_ai_base_url"] = ""
+            migrated["cloud_ai_base_url"] = self._default_cloud_base_url(provider)
+
+        if "cloud_ai_auth_mode" not in migrated:
+            migrated["cloud_ai_auth_mode"] = "secure_store"
+
+        if "cloud_ai_credential_id" not in migrated:
+            migrated["cloud_ai_credential_id"] = self._default_cloud_credential_id(provider)
 
         if "cloud_ai_api_key_env" not in migrated:
-            migrated["cloud_ai_api_key_env"] = self._default_cloud_api_key_env(
-                str(migrated.get("cloud_ai_provider", "openai"))
-            )
+            migrated["cloud_ai_api_key_env"] = self._default_cloud_api_key_env(provider)
 
         if "cloud_model" not in migrated:
-            migrated["cloud_model"] = default_settings.cloud_model
+            migrated["cloud_model"] = ""
 
         cloud_models = migrated.get("cloud_ai_models")
         if cloud_models is None:
-            cloud_models = [migrated["cloud_model"]]
+            cloud_models = self._default_cloud_models(provider)
         elif isinstance(cloud_models, str):
             cloud_models = cloud_models.replace(",", "\n").splitlines()
         elif not isinstance(cloud_models, list):
@@ -126,9 +132,9 @@ class SettingsRepository:
 
         if normalized.startswith("openrouter/"):
             return "openrouter"
-        if normalized.startswith("anthropic/"):
+        if normalized.startswith("anthropic/") or normalized.startswith("claude-"):
             return "anthropic"
-        if normalized.startswith("gemini/") or normalized.startswith("google/"):
+        if normalized.startswith("gemini") or normalized.startswith("google/"):
             return "gemini"
         if normalized.startswith("custom/"):
             return "custom"
@@ -142,5 +148,55 @@ class SettingsRepository:
             return "ANTHROPIC_API_KEY"
         if provider == "gemini":
             return "GEMINI_API_KEY"
+        if provider == "none":
+            return ""
 
         return "OPENAI_API_KEY"
+
+    def _default_cloud_credential_id(self, provider: str) -> str:
+        normalized = (provider or "custom").strip().lower().replace(" ", "_")
+        if not normalized or normalized == "none":
+            normalized = "openai"
+        return f"CharAIface/{normalized}/api_key"
+
+    def _default_cloud_base_url(self, provider: str) -> str:
+        if provider == "openrouter":
+            return "https://openrouter.ai/api/v1"
+        return ""
+
+    def _default_cloud_model(self, provider: str) -> str:
+        models = self._default_cloud_models(provider)
+        if models:
+            return models[0]
+        return ""
+
+    def _default_cloud_models(self, provider: str) -> list[str]:
+        if provider == "openrouter":
+            return [
+                "openai/gpt-4.1-mini",
+                "openai/gpt-4.1",
+                "anthropic/claude-3-5-sonnet-latest",
+                "google/gemini-2.0-flash",
+            ]
+        if provider == "anthropic":
+            return [
+                "claude-3-5-sonnet-latest",
+                "claude-3-5-haiku-latest",
+                "claude-3-opus-latest",
+            ]
+        if provider == "gemini":
+            return [
+                "gemini-2.0-flash",
+                "gemini-1.5-pro",
+                "gemini-1.5-flash",
+            ]
+        if provider == "custom":
+            return ["custom/model-id"]
+        if provider == "none":
+            return []
+        return [
+            "gpt-4.1-mini",
+            "gpt-4.1",
+            "gpt-5.1-mini",
+            "gpt-5.1",
+        ]

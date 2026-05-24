@@ -251,12 +251,23 @@ class MainWindow(QMainWindow):
         if not dialog.exec():
             return
 
+        character_registry_reloaded = bool(
+            getattr(dialog, "character_registry_reloaded", False)
+        )
+
         dialog.apply_to_settings()
         new_settings = dialog.settings
 
-        self._apply_settings(new_settings)
+        self._apply_settings(
+            new_settings,
+            force_character_reload=character_registry_reloaded,
+        )
 
-    def _apply_settings(self, new_settings: AppSettings) -> None:
+    def _apply_settings(
+        self,
+        new_settings: AppSettings,
+        force_character_reload: bool = False,
+    ) -> None:
         old_language = self.settings.language
         old_theme_id = self.settings.theme_id
         old_character_id = self.settings.selected_character_id
@@ -276,22 +287,26 @@ class MainWindow(QMainWindow):
         if (
             self.settings.theme_id != old_theme_id
             or self.settings.selected_character_id != old_character_id
+            or force_character_reload
         ):
             self.apply_theme_from_settings()
 
-        if (
-            self.character_registry is not None
-            and self.settings.selected_character_id != old_character_id
+        if self.character_registry is not None and (
+            self.settings.selected_character_id != old_character_id
+            or force_character_reload
         ):
             character_pack = self.character_registry.get_pack(
                 self.settings.selected_character_id
             )
 
+            if character_pack is None:
+                character_pack = self.character_registry.get_default_pack()
+
             if character_pack is not None:
                 self._apply_character_pack(character_pack)
             else:
                 print(
-                    "[Settings] Unknown character id: "
+                    "[Settings] Unknown character id and no fallback character found: "
                     f"{self.settings.selected_character_id}"
                 )
                 self.settings.selected_character_id = old_character_id
@@ -407,9 +422,9 @@ class MainWindow(QMainWindow):
     def on_send_requested(self, text: str) -> None:
         normalized_text = text.strip().lower()
 
-        if normalized_text == "/clear":
-            self._clear_chat_display_only()
-            return
+        if normalized_text.startswith("/"):
+            if self._handle_command(normalized_text):
+                return
 
         self.bottom_area.raise_()
         self.character_state.on_message_sent()
@@ -418,6 +433,72 @@ class MainWindow(QMainWindow):
 
         QTimer.singleShot(300, self._show_fake_assistant_typing)
         QTimer.singleShot(700, self._request_backend_chat_response)
+
+    def _handle_command(self, command: str) -> bool:
+        if command == "/clear":
+            self._clear_chat_display_only()
+            return True
+
+        if command == "/help":
+            self._add_assistant_message(self._command_help_text())
+            return True
+
+        if command == "/status":
+            self._add_assistant_message(self._command_status_text())
+            return True
+
+        if command == "/health":
+            self._add_assistant_message(self._command_health_text())
+            return True
+
+        return False
+
+    def _command_help_text(self) -> str:
+        return (
+            "Available commands:\n"
+            "- /help: Show this command list.\n"
+            "- /clear: Clear displayed chat messages only. The internal session remains.\n"
+            "- /status: Show current desktop/session settings.\n"
+            "- /health: Show backend health payload."
+        )
+
+    def _command_status_text(self) -> str:
+        return (
+            "Status:\n"
+            f"- user_name: {self.settings.user_name}\n"
+            f"- character_id: {self.settings.selected_character_id}\n"
+            f"- character_name: {self._character_display_name()}\n"
+            f"- developer_mode: {self.settings.developer_mode}\n"
+            f"- local_model: {self.settings.local_model}\n"
+            f"- cloud_ai_enabled: {self.settings.cloud_ai_enabled}\n"
+            f"- cloud_ai_provider: {self.settings.cloud_ai_provider}\n"
+            f"- cloud_model: {self.settings.cloud_model}"
+        )
+
+    def _command_health_text(self) -> str:
+        result = self.backend_client.health()
+        if result is None:
+            return "Backend health: unavailable"
+
+        status = result.get("status", "unknown")
+        errors = result.get("errors", [])
+        local_ai = result.get("local_ai", {})
+        cloud_ai = result.get("cloud_ai", {})
+
+        lines = [
+            f"Backend health: {status}",
+            f"- local_ai: {local_ai.get('state', 'unknown')}",
+            f"- cloud_ai: {cloud_ai.get('state', 'unknown')}",
+        ]
+
+        if errors:
+            lines.append("- errors:")
+            for error in errors:
+                code = error.get("code", "unknown")
+                message = error.get("message", "")
+                lines.append(f"  - {code}: {message}")
+
+        return "\n".join(lines)
 
     def _clear_chat_display_only(self) -> None:
         self.chat_view.clear_messages()
@@ -544,6 +625,11 @@ class MainWindow(QMainWindow):
 
         if result is None:
             print("[Backend] unavailable")
+            return
+
+        status = result.get("status", "unknown")
+        if status != "ok":
+            print(f"[Backend] health error: {result}")
             return
 
         print(f"[Backend] health ok: {result}")

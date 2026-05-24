@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 LocalAIProvider = Literal["ollama"]
 RuntimeInstallPolicy = Literal["never", "ask"]
 ModelInstallPolicy = Literal["never", "ask", "auto"]
+CloudAIAuthMode = Literal["secure_store", "env_var"]
 CloudAIProvider = Literal[
     "none",
     "openai",
@@ -47,11 +48,19 @@ class AppSettings(BaseModel):
     # Cloud AI routing / API settings
     cloud_ai_enabled: bool = False
     cloud_ai_provider: CloudAIProvider = "openai"
+    # Usually hidden in UI. Used only for custom or explicit advanced provider routing.
     cloud_ai_base_url: str = ""
+    cloud_ai_auth_mode: CloudAIAuthMode = "secure_store"
+    cloud_ai_credential_id: str = "CharAIface/openai/api_key"
     cloud_ai_api_key_env: str = "OPENAI_API_KEY"
-    cloud_model: str = "openai/gpt-5.1"
+    cloud_model: str = ""
     cloud_ai_models: list[str] = Field(
-        default_factory=lambda: ["openai/gpt-5.1"]
+        default_factory=lambda: [
+            "gpt-4.1-mini",
+            "gpt-4.1",
+            "gpt-5.1-mini",
+            "gpt-5.1",
+        ]
     )
 
     # never: 모델 다운로드 안 함
