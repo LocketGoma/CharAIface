@@ -42,7 +42,7 @@ class AvatarWidget(QLabel):
 
         self._current_static_pixmap: QPixmap | None = None
 
-        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom)
         self.setMinimumSize(size, size)
         self.setSizePolicy(
             QSizePolicy.Policy.Expanding,
@@ -197,27 +197,34 @@ class AvatarWidget(QLabel):
 
     def _set_scaled_pixmap(self, pixmap: QPixmap) -> None:
         target_width = max(1, self.width())
+        target_height = max(1, self.height())
 
-        scaled = pixmap.scaledToWidth(
+        scaled = pixmap.scaled(
             target_width,
+            target_height,
+            Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation,
         )
 
-        self.setMinimumHeight(scaled.height())
+        self.setMinimumHeight(self.avatar_size)
         self.setPixmap(scaled)
 
     def _calculate_width_based_size(self, original_size: QSize) -> QSize:
         target_width = max(1, self.width())
+        target_height = max(1, self.height())
 
         if original_size.width() <= 0 or original_size.height() <= 0:
-            return QSize(target_width, target_width)
+            return QSize(target_width, target_height)
 
-        ratio = original_size.height() / original_size.width()
-        target_height = int(target_width * ratio)
+        scaled_size = original_size.scaled(
+            QSize(target_width, target_height),
+            Qt.AspectRatioMode.KeepAspectRatio,
+        )
 
-        self.setMinimumHeight(target_height)
+        self.setMinimumHeight(self.avatar_size)
 
-        return QSize(target_width, target_height)
+        return scaled_size
+
 
     def _set_placeholder_text(self, text: str) -> None:
         self._stop_all_animation()
