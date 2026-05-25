@@ -141,7 +141,7 @@ class ChatView(QScrollArea):
                 if label.objectName() in {"UserMessageBubble", "AssistantMessageBubble"}:
                     label.setMaximumWidth(max_width)
 
-    def add_chat_message(self, message: ChatMessage, *, show_actions: bool = True) -> QWidget:
+    def add_chat_message(self, message: ChatMessage) -> None:
         message_index = len(self._message_widgets)
 
         row = QWidget()
@@ -168,49 +168,24 @@ class ChatView(QScrollArea):
         )
         label.setMaximumWidth(self._message_max_width())
 
-        actions = self._create_message_actions(message, message_index, row) if show_actions else None
+        actions = self._create_message_actions(message, message_index, row)
 
         if message.role == "user":
             label.setObjectName("UserMessageBubble")
             bubble_layout.addWidget(label)
-            if actions is not None:
-                bubble_layout.addWidget(actions, alignment=Qt.AlignmentFlag.AlignRight)
+            bubble_layout.addWidget(actions, alignment=Qt.AlignmentFlag.AlignRight)
             row_layout.addStretch()
             row_layout.addWidget(bubble_stack)
         else:
             label.setObjectName("AssistantMessageBubble")
             bubble_layout.addWidget(label)
-            if actions is not None:
-                bubble_layout.addWidget(actions, alignment=Qt.AlignmentFlag.AlignLeft)
+            bubble_layout.addWidget(actions, alignment=Qt.AlignmentFlag.AlignLeft)
             row_layout.addWidget(bubble_stack)
             row_layout.addStretch()
 
         self.layout.addWidget(row)
         self._message_widgets.append(row)
         self._scroll_to_bottom_later()
-        return row
-
-    def add_pending_assistant_message(self, text: str) -> QWidget:
-        message = ChatMessage(
-            role="assistant",
-            content=text,
-            metadata={"render_markdown": False, "pending": True},
-        )
-        row = self.add_chat_message(message, show_actions=False)
-        row.setProperty("pendingResponse", True)
-        return row
-
-    def remove_message_widget(self, widget: QWidget | None) -> None:
-        if not self._is_alive_widget(widget):
-            return
-        try:
-            if widget in self._message_widgets:
-                self._message_widgets.remove(widget)
-            self.layout.removeWidget(widget)
-            widget.deleteLater()
-            self._scroll_to_bottom_later()
-        except RuntimeError:
-            return
 
     def _create_message_actions(self, message: ChatMessage, message_index: int, row: QWidget | None = None) -> QWidget:
         actions = QWidget()
@@ -243,6 +218,33 @@ class ChatView(QScrollArea):
 
         layout.addStretch()
         return actions
+
+    def handle_global_action_mouse_press(self, global_pos) -> bool:  # noqa: ANN001
+        """Click a visible chat action button by global position.
+
+        The bottom character/composer overlay can visually sit above the lower
+        chat area. When that overlay receives the mouse event, MainWindow asks
+        ChatView to resolve whether the click was actually over a chat action
+        button. This keeps Copy/Regenerate usable without re-dispatching Qt
+        events or reintroducing the old eventFilter recursion problem.
+        """
+        for row in reversed(self._message_widgets):
+            if not self._is_alive_widget(row) or not row.isVisible():
+                continue
+            for button in row.findChildren(QPushButton):
+                if button.objectName() != "ChatMessageActionButton":
+                    continue
+                if not self._is_alive_widget(button):
+                    continue
+                if not button.isVisible() or not button.isEnabled():
+                    continue
+                button_rect = button.rect().translated(
+                    button.mapToGlobal(button.rect().topLeft())
+                )
+                if button_rect.contains(global_pos):
+                    button.click()
+                    return True
+        return False
 
     def _copy_text(self, text: str, button: QPushButton | None = None) -> None:
         clipboard = QGuiApplication.clipboard()
@@ -306,6 +308,42 @@ class ChatView(QScrollArea):
             widget.update()
         except RuntimeError:
             return
+
+    def add_pending_assistant_message(self, text: str) -> QWidget:
+        message = ChatMessage(
+            role="assistant",
+            content=text,
+            metadata={
+                "render_markdown": False,
+                "pending": True,
+            },
+        )
+        before_count = len(self._message_widgets)
+        self.add_chat_message(message)
+        if len(self._message_widgets) > before_count:
+            return self._message_widgets[-1]
+        return self.container
+
+    def remove_message_widget(self, widget: QWidget | None) -> None:
+        if widget is None:
+            return
+        if not self._is_alive_widget(widget):
+            try:
+                self._message_widgets.remove(widget)
+            except ValueError:
+                pass
+            return
+        try:
+            self.layout.removeWidget(widget)
+            if widget in self._message_widgets:
+                self._message_widgets.remove(widget)
+            widget.deleteLater()
+            self._scroll_to_bottom_later()
+        except RuntimeError:
+            try:
+                self._message_widgets.remove(widget)
+            except ValueError:
+                pass
 
     def clear_messages(self) -> None:
         for widget in self._message_widgets:

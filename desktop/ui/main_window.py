@@ -1906,6 +1906,9 @@ class MainWindow(QMainWindow):
                 self._show_about_dialog()
                 return True
 
+            if self._try_route_overlay_mouse_press_to_chat_actions(watched, event):
+                return True
+
             if self._try_route_overlay_mouse_press_to_session_sidebar(watched, event):
                 return True
 
@@ -1964,6 +1967,37 @@ class MainWindow(QMainWindow):
                     Qt.WidgetAttribute.WA_TransparentForMouseEvents,
                     transparent,
                 )
+
+    def _try_route_overlay_mouse_press_to_chat_actions(self, watched, event) -> bool:  # noqa: ANN001
+        if getattr(self, "_character_mouse_events_enabled", False):
+            return False
+
+        if event.button() != Qt.MouseButton.LeftButton:
+            return False
+
+        if not hasattr(self, "bottom_area") or not hasattr(self, "chat_view"):
+            return False
+
+        widget = watched if isinstance(watched, QWidget) else None
+        if widget is None:
+            return False
+
+        # Composer and send button must keep their own input. Other bottom overlay
+        # areas may be visually above lower chat action buttons, so route those
+        # clicks by global position instead of trying to resend Qt events.
+        current = widget
+        while current is not None:
+            if current in {self.bottom_area.composer, self.bottom_area.send_button}:
+                return False
+            if current is self.bottom_area:
+                break
+            current = current.parentWidget()
+        else:
+            return False
+
+        return self.chat_view.handle_global_action_mouse_press(
+            self._event_global_pos(event)
+        )
 
     def _try_route_overlay_mouse_press_to_session_sidebar(self, watched, event) -> bool:  # noqa: ANN001
         if getattr(self, "_character_mouse_events_enabled", False):
