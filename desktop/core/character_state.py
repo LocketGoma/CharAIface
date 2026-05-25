@@ -57,4 +57,3 @@ class CharacterStateController(QObject):
 
     def on_panic(self) -> None:
         self.set_state("panic")
-        

@@ -33,6 +33,9 @@ class AvatarWidget(QLabel):
         self.state_images: dict[str, Path] = {}
 
         self._movie: QMovie | None = None
+        self._current_image_path: Path | None = None
+        self._static_pixmap_cache: dict[Path, QPixmap] = {}
+        self._apng_frame_cache: dict[Path, list[tuple[QPixmap, int]]] = {}
 
         self._apng_timer = QTimer(self)
         self._apng_timer.setSingleShot(True)
@@ -52,6 +55,15 @@ class AvatarWidget(QLabel):
         self.setText("Avatar")
 
     def set_state_images(self, state_images: dict[str, str | Path]) -> None:
+        # A character pack reload may point the same state names to different
+        # files. Reset playback and image caches so stale/static frames are not
+        # reused across character changes or manual character reloads.
+        self._stop_all_animation()
+        self._current_image_path = None
+        self._current_static_pixmap = None
+        self._static_pixmap_cache.clear()
+        self._apng_frame_cache.clear()
+
         self.state_images = {
             state: Path(path)
             for state, path in state_images.items()
@@ -67,6 +79,12 @@ class AvatarWidget(QLabel):
 
         if image_path is None:
             self._set_placeholder_text(state)
+            return
+
+        # Do not reload/re-decode the same avatar asset while it is already
+        # playing. Repeated state updates during chat generation should not
+        # restart APNG/GIF playback or block the UI thread.
+        if image_path == self._current_image_path and (self._movie is not None or self._apng_frames or self._current_static_pixmap is not None):
             return
 
         self._set_image(image_path)
@@ -86,6 +104,7 @@ class AvatarWidget(QLabel):
         suffix = path.suffix.lower()
 
         self._stop_all_animation()
+        self._current_image_path = path
 
         if suffix in APNG_EXTENSIONS:
             self._set_apng(path)
@@ -106,7 +125,11 @@ class AvatarWidget(QLabel):
         self._set_placeholder_text(f"Unsupported\n{suffix}")
 
     def _set_static_image(self, path: Path) -> None:
-        pixmap = QPixmap(str(path))
+        pixmap = self._static_pixmap_cache.get(path)
+        if pixmap is None:
+            pixmap = QPixmap(str(path))
+            if not pixmap.isNull():
+                self._static_pixmap_cache[path] = pixmap
 
         if pixmap.isNull():
             self._set_placeholder_text("Image\nError")
@@ -135,23 +158,31 @@ class AvatarWidget(QLabel):
 
     def _set_apng(self, path: Path) -> None:
         try:
-            frames: list[tuple[QPixmap, int]] = []
+            frames = self._apng_frame_cache.get(path)
+            if frames is None:
+                frames = []
 
-            with Image.open(path) as image:
-                for frame in ImageSequence.Iterator(image):
-                    duration_ms = int(frame.info.get("duration", 100))
+                with Image.open(path) as image:
+                    for frame in ImageSequence.Iterator(image):
+                        duration_ms = int(frame.info.get("duration", 100))
 
-                    if duration_ms <= 0:
-                        duration_ms = 100
+                        if duration_ms <= 0:
+                            duration_ms = 100
 
-                    pixmap = self._pil_frame_to_pixmap(frame)
-                    frames.append((pixmap, duration_ms))
+                        pixmap = self._pil_frame_to_pixmap(frame)
+                        frames.append((pixmap, duration_ms))
+
+                if frames:
+                    self._apng_frame_cache[path] = frames
 
             if not frames:
                 self._set_placeholder_text("APNG\nError")
                 return
 
-            self._apng_frames = frames
+            # Keep the cached frame list immutable from the playback state.
+            # _stop_apng() resets the active playback list, and it must not
+            # clear the cached frames by reference.
+            self._apng_frames = list(frames)
             self._apng_frame_index = 0
             self._show_current_apng_frame()
 
@@ -228,6 +259,7 @@ class AvatarWidget(QLabel):
 
     def _set_placeholder_text(self, text: str) -> None:
         self._stop_all_animation()
+        self._current_image_path = None
         self._current_static_pixmap = None
         self.clear()
         self.setText(text)
@@ -245,7 +277,10 @@ class AvatarWidget(QLabel):
 
     def _stop_apng(self) -> None:
         self._apng_timer.stop()
-        self._apng_frames.clear()
+        # Do not call clear() here. _apng_frames can reference cached APNG
+        # frames; clearing it would mutate the cache and make the next playback
+        # fail with an empty cached frame list.
+        self._apng_frames = []
         self._apng_frame_index = 0
 
     def _is_apng(self, path: Path) -> bool:

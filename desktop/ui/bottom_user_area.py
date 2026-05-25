@@ -1,4 +1,4 @@
-from PySide6.QtCore import QTimer, Signal, Qt
+from PySide6.QtCore import QPoint, QTimer, Signal, Qt
 from PySide6.QtWidgets import (
     QFrame,
     QGraphicsOpacityEffect,
@@ -39,9 +39,11 @@ class BottomUserArea(QWidget):
 
         self.character_area = self._create_character_area()
 
-        self.character_opacity_effect = QGraphicsOpacityEffect(self.character_area)
+        # Only the avatar image fades when it visually overlaps chat/session UI.
+        # Name/state/user labels stay fully opaque so they remain readable.
+        self.character_opacity_effect = QGraphicsOpacityEffect(self.avatar_widget)
         self.character_opacity_effect.setOpacity(1.0)
-        self.character_area.setGraphicsEffect(self.character_opacity_effect)
+        self.avatar_widget.setGraphicsEffect(self.character_opacity_effect)
 
         self.composer = ComposerTextEdit()
 
@@ -114,11 +116,11 @@ class BottomUserArea(QWidget):
         character_layout.addWidget(self.character_info_box)
         character_layout.addStretch()
 
-        user_name_box = QFrame()
-        user_name_box.setObjectName("UserNameBox")
-        user_name_box.setFixedHeight(44)
+        self.user_name_box = QFrame()
+        self.user_name_box.setObjectName("UserNameBox")
+        self.user_name_box.setFixedHeight(44)
 
-        user_name_layout = QHBoxLayout(user_name_box)
+        user_name_layout = QHBoxLayout(self.user_name_box)
         user_name_layout.setContentsMargins(12, 4, 12, 4)
         user_name_layout.setSpacing(8)
 
@@ -139,7 +141,7 @@ class BottomUserArea(QWidget):
         user_name_layout.addWidget(self.user_name_label)
 
         layout.addWidget(character_box, stretch=1)
-        layout.addWidget(user_name_box)
+        layout.addWidget(self.user_name_box)
 
         return wrapper
 
@@ -148,6 +150,19 @@ class BottomUserArea(QWidget):
         self.composer.set_fixed_height(target_height)
 
     def _left_name_stack_height(self) -> int:
+        # The composer is bottom-aligned next to the left character/user block.
+        # Match its top edge to CharacterInfoBox top by using the actual runtime
+        # geometry instead of only size hints. This keeps the input field aligned
+        # even when fonts, localization, or theme spacing change.
+        info_top = self.character_info_box.mapTo(self.character_area, QPoint(0, 0)).y()
+        user_bottom = self.user_name_box.mapTo(
+            self.character_area,
+            QPoint(0, self.user_name_box.height()),
+        ).y()
+
+        if user_bottom > info_top:
+            return max(44, user_bottom - info_top)
+
         spacing = 8
         if self.character_area.layout() is not None:
             spacing = max(spacing, self.character_area.layout().spacing())
@@ -157,8 +172,8 @@ class BottomUserArea(QWidget):
             self.character_info_box.minimumSizeHint().height(),
         )
         user_name_height = max(
-            self.user_name_label.parentWidget().height(),
-            self.user_name_label.parentWidget().sizeHint().height(),
+            self.user_name_box.height(),
+            self.user_name_box.sizeHint().height(),
             44,
         )
 
@@ -177,9 +192,11 @@ class BottomUserArea(QWidget):
 
     def set_user_name(self, name: str) -> None:
         self.user_name_label.setText(name)
+        QTimer.singleShot(0, self.sync_composer_height_to_left_name_area)
 
     def set_character_name(self, name: str) -> None:
         self.character_name_label.setText(name)
+        QTimer.singleShot(0, self.sync_composer_height_to_left_name_area)
 
     def character_global_rect(self):
         top_left = self.character_area.mapToGlobal(self.character_area.rect().topLeft())

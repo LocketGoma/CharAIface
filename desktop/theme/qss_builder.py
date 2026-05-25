@@ -18,6 +18,154 @@ def build_qss(theme: ThemeDefinition) -> str:
         background-color: {p.chat_bg};
     }}
 
+
+    QWidget#BodyArea {{
+        background-color: {p.chat_bg};
+    }}
+
+    QFrame#SessionSidebar {{
+        background-color: transparent;
+        border: none;
+        border-radius: 10px;
+    }}
+
+    QLabel#SessionSidebarTitle {{
+        color: {p.text_primary};
+        font-size: 15px;
+        font-weight: bold;
+        padding: 4px 2px;
+    }}
+
+    QListWidget#SessionList {{
+        background-color: transparent;
+        color: {p.text_primary};
+        border: none;
+        outline: none;
+    }}
+
+    QListWidget#SessionList::item {{
+        padding: 4px;
+        margin: 3px 0px;
+        min-height: 52px;
+        border-radius: 8px;
+        color: {p.text_primary};
+    }}
+
+    QListWidget#SessionList::item:selected {{
+        background-color: transparent;
+        color: {p.text_primary};
+    }}
+
+    QListWidget#SessionList::item:hover {{
+        background-color: {p.input_bg};
+    }}
+
+    QFrame#SessionListItemWidget {{
+        background-color: transparent;
+        border-radius: 10px;
+    }}
+
+    QFrame#SessionListItemWidget[currentSession="true"] {{
+        background-color: {p.panel_bg};
+        border-radius: 10px;
+    }}
+
+    QLabel#SessionListItemMarker {{
+        color: {p.text_primary};
+        background-color: transparent;
+        padding-top: 2px;
+        padding-bottom: 2px;
+        font-weight: bold;
+    }}
+
+    QLabel#SessionListItemLabel {{
+        color: {p.text_primary};
+        background-color: transparent;
+        padding-top: 2px;
+        padding-bottom: 2px;
+    }}
+
+    QToolButton#SessionSidebarToggleButton,
+    QToolButton#SessionSidebarRefreshButton {{
+        background-color: {p.input_bg};
+        color: {p.text_primary};
+        border: 1px solid {p.border};
+        border-radius: 7px;
+        padding: 3px 6px;
+        font-weight: bold;
+    }}
+
+    QToolButton#SessionSidebarToggleButton:hover,
+    QToolButton#SessionSidebarRefreshButton:hover {{
+        border: 1px solid {p.accent};
+    }}
+
+    QToolButton#SessionItemMenuButton {{
+        background-color: transparent;
+        color: {p.text_secondary};
+        border: none;
+        border-radius: 6px;
+        padding: 2px 5px;
+        font-weight: bold;
+    }}
+
+    QToolButton#SessionItemMenuButton:hover {{
+        background-color: {p.panel_bg};
+        color: {p.text_primary};
+        border: 1px solid {p.border};
+    }}
+
+    QMenu {{
+        background-color: {p.panel_bg};
+        color: {p.text_primary};
+        border: 1px solid {p.border};
+        border-radius: 8px;
+        padding: 4px;
+    }}
+
+    QMenu::item {{
+        padding: 6px 18px;
+        border-radius: 6px;
+    }}
+
+    QMenu::item:selected {{
+        background-color: {p.input_bg};
+    }}
+
+    QPushButton#SessionSidebarPrimaryButton {{
+        background-color: {p.accent};
+        color: {p.accent_text};
+        border: none;
+        border-radius: 8px;
+        padding: 8px 10px;
+        font-weight: bold;
+        text-align: left;
+    }}
+
+    QPushButton#SessionSidebarButton {{
+        background-color: {p.input_bg};
+        color: {p.text_primary};
+        border: 1px solid {p.border};
+        border-radius: 8px;
+        padding: 7px 8px;
+        font-weight: bold;
+    }}
+
+    QPushButton#SessionSidebarButton:hover,
+    QPushButton#SessionSidebarPrimaryButton:hover,
+    QPushButton#SessionSidebarDangerButton:hover {{
+        border: 1px solid {p.accent};
+    }}
+
+    QPushButton#SessionSidebarDangerButton {{
+        background-color: {p.input_bg};
+        color: {p.text_primary};
+        border: 1px solid {p.border};
+        border-radius: 8px;
+        padding: 7px 8px;
+        font-weight: bold;
+    }}
+
     QDialog {{
         background-color: {p.window_bg};
     }}
@@ -127,6 +275,32 @@ def build_qss(theme: ThemeDefinition) -> str:
         background-color: {p.assistant_bubble_bg};
         color: {p.text_primary};
         font-size: 14px;
+    }}
+
+    QWidget#ChatBubbleStack {{
+        background-color: transparent;
+    }}
+
+    QWidget#ChatMessageActions {{
+        background-color: transparent;
+    }}
+
+    QPushButton#ChatMessageActionButton {{
+        background-color: transparent;
+        color: {p.text_secondary};
+        border: none;
+        border-radius: 6px;
+        padding: 2px 6px;
+        font-size: 12px;
+    }}
+
+    QPushButton#ChatMessageActionButton[actionFlash="true"] {{
+        color: {p.text_primary};
+    }}
+
+    QPushButton#ChatMessageActionButton:hover {{
+        background-color: {p.input_bg};
+        color: {p.text_primary};
     }}
 
     QWidget#BottomOverlayArea {{

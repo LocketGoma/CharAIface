@@ -1,16 +1,18 @@
 from pathlib import Path
-from shared.schema.chat import ChatRequest
+from shared.schema.chat import ChatMessage, ChatRequest
 from desktop.chat.chat_session import ChatSession
+from desktop.chat.session_store import ChatSessionStore
 from desktop.client.backend_http_client import BackendHttpClient
 from desktop.workers.local_model_prepare_worker import LocalModelPrepareWorker
 from desktop.workers.chat_response_worker import ChatResponseWorker
-from PySide6.QtCore import QEvent, QThread, QTimer
+from PySide6.QtCore import QEvent, QPoint, Qt, QThread, QTimer
 from PySide6.QtWidgets import (
     QApplication,
     QFrame,
     QHBoxLayout,
     QLabel,
     QMainWindow,
+    QInputDialog,
     QMessageBox,
     QPushButton,
     QVBoxLayout,
@@ -20,7 +22,7 @@ from PySide6.QtWidgets import (
 from desktop.characters.character_pack import CharacterPack
 from desktop.characters.character_registry import CharacterRegistry
 from desktop.core.character_state import CharacterStateController
-from desktop.core.system_status import get_process_status
+from desktop.core.system_status import get_process_status, get_system_overview
 from desktop.localization.localization_manager import LocalizationManager
 from desktop.settings.app_settings import AppSettings
 from desktop.settings.settings_repository import SettingsRepository
@@ -30,6 +32,7 @@ from desktop.theme.theme_model import ThemeDefinition
 from desktop.ui.bottom_user_area import BottomUserArea
 from desktop.ui.chat_view import ChatView
 from desktop.ui.settings_dialog import SettingsDialog
+from desktop.ui.session_sidebar import SessionSidebar
 
 
 class MainWindow(QMainWindow):
@@ -59,9 +62,19 @@ class MainWindow(QMainWindow):
         self.local_model_prepare_worker: LocalModelPrepareWorker | None = None
         self.chat_response_thread: QThread | None = None
         self.chat_response_worker: ChatResponseWorker | None = None
+        self.active_chat_response_session_id: str | None = None
+        self.pending_response_session_id: str | None = None
+        self.pending_response_widget = None
         self.initial_notice_added = False
+        project_root = Path(__file__).resolve().parents[2]
+        self.session_store = ChatSessionStore(
+            project_root / "resources" / "data" / "chat_sessions"
+        )
         self.chat_session = ChatSession()
+        self.current_session_id: str | None = None
+        self.current_session_title: str = ""
         self.backend_client = BackendHttpClient()
+        self._restore_last_chat_session()
 
         self.setMinimumSize(self.MIN_WINDOW_WIDTH, self.MIN_WINDOW_HEIGHT)
         self.resize(self.settings.window_width, self.settings.window_height)
@@ -72,10 +85,10 @@ class MainWindow(QMainWindow):
         root_layout.setSpacing(0)
 
         header = self._create_header()
-        content_area = self._create_content_area()
+        body = self._create_body_area()
 
         root_layout.addWidget(header)
-        root_layout.addWidget(content_area, stretch=1)
+        root_layout.addWidget(body, stretch=1)
 
         self.setCentralWidget(root)
 
@@ -85,16 +98,63 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(100, self._check_backend_health)
         QTimer.singleShot(500, self._check_local_ai_model)
 
+    def _create_body_area(self) -> QWidget:
+        self.body_area = QWidget()
+        self.body_area.setObjectName("BodyArea")
+
+        layout = QHBoxLayout(self.body_area)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        content_area = self._create_content_area()
+        layout.addWidget(content_area, stretch=1)
+
+        QTimer.singleShot(0, self._refresh_session_sidebar)
+        return self.body_area
+
     def _create_content_area(self) -> QWidget:
         self.content_area = QWidget()
         self.content_area.setObjectName("ContentArea")
 
         self.chat_view = ChatView()
+        self.chat_view.set_markdown_enabled(self.settings.conversation_markdown_enabled)
         self.chat_view.setParent(self.content_area)
+
+        self.session_sidebar = SessionSidebar(parent=self.content_area)
+        self.session_sidebar.new_session_requested.connect(
+            self._on_sidebar_new_session_requested
+        )
+        self.session_sidebar.refresh_requested.connect(
+            self._refresh_session_sidebar
+        )
+        self.session_sidebar.session_selected.connect(
+            self._on_sidebar_session_selected
+        )
+        self.session_sidebar.session_rename_requested.connect(
+            self._on_sidebar_session_rename_requested
+        )
+        self.session_sidebar.session_delete_requested.connect(
+            self._on_sidebar_session_delete_requested
+        )
+        self.session_sidebar.collapsed_changed.connect(
+            lambda _collapsed: self._update_content_geometry()
+        )
 
         self.bottom_area = BottomUserArea(localization=self.localization)
         self.bottom_area.setParent(self.content_area)
         self.bottom_area.set_user_name(self.settings.user_name)
+
+        # The character overlay is visual-first. Normal mouse input over the
+        # character is ignored/pass-through. Holding Alt (Option on macOS) turns
+        # the character layer into an interactive mouse target.
+        self._character_click_text = "(캐릭터를 쓰다듬는다)"
+        self._character_mouse_events_enabled = False
+        app = QApplication.instance()
+        if app is not None:
+            # App-level filtering is used only to track modifier key state.
+            # Mouse presses are handled only for widgets that actually belong to
+            # the character area, avoiding recursive re-dispatch loops.
+            app.installEventFilter(self)
 
         self._load_character_registry()
         self._apply_selected_or_default_character_pack()
@@ -103,12 +163,14 @@ class MainWindow(QMainWindow):
         self.bottom_area.send_requested.connect(self.on_send_requested)
         self.bottom_area.text_changed.connect(self.character_state.on_user_text_changed)
         self.character_state.state_changed.connect(self.bottom_area.set_state)
+        self.chat_view.regenerate_requested.connect(self._on_regenerate_requested)
 
         self.chat_view.verticalScrollBar().valueChanged.connect(
             self._update_avatar_occlusion_later
         )
 
         self.chat_view.show()
+        self.session_sidebar.show()
         self.bottom_area.show()
 
         self.bottom_area.installEventFilter(self)
@@ -116,10 +178,16 @@ class MainWindow(QMainWindow):
         self.bottom_area.character_info_box.installEventFilter(self)
         self.bottom_area.user_label.installEventFilter(self)
         self.bottom_area.user_name_label.installEventFilter(self)
+        self.bottom_area.avatar_widget.installEventFilter(self)
 
+        self._set_character_mouse_events_enabled(False)
+
+        self.session_sidebar.raise_()
         self.bottom_area.raise_()
 
         QTimer.singleShot(0, self._update_content_geometry)
+        if self.chat_session.messages:
+            QTimer.singleShot(0, self._render_current_chat_session)
 
         return self.content_area
 
@@ -133,6 +201,8 @@ class MainWindow(QMainWindow):
 
         self.title_label = QLabel()
         self.title_label.setObjectName("HeaderTitle")
+        self.title_label.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.title_label.installEventFilter(self)
 
         self.settings_button = QPushButton()
         self.settings_button.setObjectName("HeaderButton")
@@ -267,8 +337,14 @@ class MainWindow(QMainWindow):
         dialog.local_model_list_requested.connect(
             self._on_settings_local_model_list_requested
         )
+        previous_avatar_occluded_opacity = self.settings.avatar_occluded_opacity
+        dialog.avatar_opacity_preview_changed.connect(
+            self._preview_avatar_occluded_opacity
+        )
 
         if not dialog.exec():
+            self.settings.avatar_occluded_opacity = previous_avatar_occluded_opacity
+            self._update_avatar_occlusion_later()
             return
 
         character_registry_reloaded = bool(
@@ -293,6 +369,9 @@ class MainWindow(QMainWindow):
         old_character_id = self.settings.selected_character_id
 
         self.settings = new_settings
+        if hasattr(self, "chat_view"):
+            self.chat_view.set_markdown_enabled(self.settings.conversation_markdown_enabled)
+            self._render_current_chat_session()
 
         if self.settings.language != old_language:
             try:
@@ -337,6 +416,11 @@ class MainWindow(QMainWindow):
         self.retranslate_ui()
 
         self.settings_repository.save(self.settings)
+        self._update_avatar_occlusion_later()
+
+    def _preview_avatar_occluded_opacity(self, opacity: float) -> None:
+        self.settings.avatar_occluded_opacity = min(1.0, max(0.1, float(opacity)))
+        self._update_avatar_occlusion_later()
 
     def apply_theme(self, theme: ThemeDefinition) -> None:
         self.theme = theme
@@ -382,9 +466,22 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(self.localization.t("app.title"))
         self.title_label.setText(self.localization.t("app.title"))
         self.settings_button.setText(self.localization.t("settings.title"))
+        if hasattr(self, "session_sidebar"):
+            self.session_sidebar.retranslate_ui()
         self.bottom_area.retranslate_ui()
         self.bottom_area.set_user_name(self.settings.user_name)
         self._update_chat_view_display_names()
+
+    def _show_about_dialog(self) -> None:
+        QMessageBox.information(
+            self,
+            self.localization.t("about.title"),
+            self.localization.t(
+                "about.message",
+                app_name=self._application_display_name(),
+                character_name=self._character_display_name(),
+            ),
+        )
 
     def _update_chat_view_display_names(self) -> None:
         if not hasattr(self, "chat_view"):
@@ -416,6 +513,10 @@ class MainWindow(QMainWindow):
         if self.initial_notice_added:
             return
 
+        if self.chat_session.messages:
+            self.initial_notice_added = True
+            return
+
         key = (
             "chat.initial_notice.new_session"
             if local_model_installed
@@ -432,18 +533,113 @@ class MainWindow(QMainWindow):
         self.initial_notice_added = True
 
     def _add_user_message(self, content: str) -> None:
-        message = self.chat_session.add_user_message(content)
+        render_markdown = self._should_use_markdown_for_request(content)
+        message = self.chat_session.add_user_message(
+            content,
+            metadata={"render_markdown": render_markdown},
+        )
         self.chat_view.add_chat_message(message)
+        self._save_current_chat_session()
 
-    def _add_assistant_message(self, content: str) -> None:
-        message = self.chat_session.add_assistant_message(content)
+    def _add_assistant_message(
+        self,
+        content: str,
+        *,
+        render_markdown: bool | None = None,
+    ) -> None:
+        if render_markdown is None:
+            render_markdown = bool(self.settings.conversation_markdown_enabled)
+        metadata = {"render_markdown": bool(render_markdown)}
+        message = self.chat_session.add_assistant_message(content, metadata=metadata)
         self.chat_view.add_chat_message(message)
+        self._save_current_chat_session()
+
+    def _should_use_markdown_for_request(self, text: str) -> bool:
+        if not self.settings.conversation_markdown_enabled:
+            return False
+
+        stripped = (text or "").strip()
+        if stripped.startswith("/"):
+            return False
+
+        return True
+
+    def _finish_local_command(self) -> None:
+        # Local slash commands do not enter the normal ChatResponseWorker finish path.
+        # Always restore the character state unless a command explicitly left it in
+        # panic/error state. This prevents /status, /health, /systemstatus, etc.
+        # from being stuck in user_typing after the composer was cleared.
+        if self.character_state.current_state not in {"panic", "error"}:
+            self.character_state.on_assistant_done()
+        self.bottom_area.raise_()
+        self._update_avatar_occlusion_later()
+
+    def _on_regenerate_requested(self, message_ref) -> None:
+        if self.chat_response_thread is not None:
+            print("[Chat] Cannot regenerate while a response request is already running.")
+            return
+
+        messages = self.chat_session.messages
+        if not messages:
+            print("[Chat] Regenerate request ignored because the session is empty.")
+            return
+
+        assistant_index = -1
+
+        # Newer ChatView builds emit the stable ChatMessage.id. Older builds may
+        # still emit a row index, so keep both paths for compatibility.
+        if isinstance(message_ref, str):
+            for index, message in enumerate(messages):
+                if getattr(message, "id", "") == message_ref:
+                    assistant_index = index
+                    break
+
+            if assistant_index < 0 and message_ref.isdigit():
+                assistant_index = int(message_ref)
+        elif isinstance(message_ref, int):
+            assistant_index = message_ref
+
+        if assistant_index < 0 or assistant_index >= len(messages):
+            print(f"[Chat] Regenerate request index out of range: {message_ref}")
+            return
+
+        # Regenerate is primarily shown on assistant messages. If an older UI build
+        # sends a nearby index, walk backward to the assistant message that should be
+        # replaced instead of crashing or doing nothing.
+        while assistant_index >= 0 and messages[assistant_index].role != "assistant":
+            assistant_index -= 1
+
+        if assistant_index < 0:
+            print(f"[Chat] Regenerate request has no assistant message: {message_ref}")
+            return
+
+        user_index = assistant_index - 1
+        while user_index >= 0 and messages[user_index].role != "user":
+            user_index -= 1
+
+        if user_index < 0:
+            print(f"[Chat] Regenerate request has no preceding user message: {message_ref}")
+            return
+
+        # Keep conversation history through the source user message, then remove the
+        # target assistant reply and any later messages. The next worker call will
+        # generate a fresh assistant response for that user turn.
+        retained_messages = messages[: user_index + 1]
+        self.chat_session.replace_messages(retained_messages)
+        self._render_current_chat_session()
+        self._save_current_chat_session(force=True)
+
+        self.bottom_area.raise_()
+        self.character_state.on_message_sent()
+        self._update_avatar_occlusion_later()
+        self._start_chat_response_worker()
 
     def on_send_requested(self, text: str) -> None:
-        normalized_text = text.strip().lower()
+        command_text = text.strip()
+        normalized_text = command_text.lower()
 
         if normalized_text.startswith("/"):
-            if self._handle_command(normalized_text):
+            if self._handle_command(command_text):
                 return
 
         if self.chat_response_thread is not None:
@@ -458,33 +654,70 @@ class MainWindow(QMainWindow):
         self._start_chat_response_worker()
 
     def _handle_command(self, command: str) -> bool:
-        if command == "/clear":
-            self._clear_chat_display_only()
-            return True
+        command_text = command.strip()
+        normalized = command_text.lower()
 
-        if command == "/help":
-            self._add_assistant_message(self._command_help_text())
-            return True
+        handled = False
+        try:
+            if normalized == "/clear":
+                self._clear_chat_display_only()
+                handled = True
 
-        if command == "/status":
-            self._add_assistant_message(self._command_status_text())
-            return True
+            elif normalized == "/newsession":
+                self._create_new_chat_session()
+                handled = True
 
-        if command == "/health":
-            self._add_assistant_message(self._command_health_text())
-            return True
+            elif normalized == "/savesession":
+                self._save_current_chat_session(force=True)
+                self._add_assistant_message(self._command_session_saved_text(), render_markdown=False)
+                handled = True
 
-        if command == "/systemstatus":
-            self._add_assistant_message(self._command_system_status_text())
-            return True
+            elif normalized == "/sessions":
+                self._add_assistant_message(self._command_sessions_text(), render_markdown=False)
+                handled = True
 
-        return False
+            elif normalized.startswith("/loadsession"):
+                selector = command_text[len("/loadsession"):].strip()
+                self._load_chat_session_by_selector(selector)
+                handled = True
+
+            elif normalized.startswith("/deletesession"):
+                selector = command_text[len("/deletesession"):].strip()
+                self._delete_chat_session_by_selector(selector)
+                handled = True
+
+            elif normalized == "/help":
+                self._add_assistant_message(self._command_help_text(), render_markdown=False)
+                handled = True
+
+            elif normalized == "/status":
+                self._add_assistant_message(self._command_status_text(), render_markdown=False)
+                handled = True
+
+            elif normalized == "/health":
+                self._add_assistant_message(self._command_health_text(), render_markdown=False)
+                handled = True
+
+            elif normalized == "/systemstatus":
+                self._add_assistant_message(self._command_system_status_text(), render_markdown=False)
+                handled = True
+
+        finally:
+            if handled:
+                self._finish_local_command()
+
+        return handled
 
     def _command_help_text(self) -> str:
         return (
             "Available commands:\n"
             "- /help: Show this command list.\n"
             "- /clear: Clear displayed chat messages only. The internal session remains.\n"
+            "- /newsession: Create a new local chat session.\n"
+            "- /savesession: Save the current local chat session.\n"
+            "- /sessions: Show saved local chat sessions.\n"
+            "- /loadsession <number|id>: Load a saved local chat session.\n"
+            "- /deletesession <number|id>: Delete a saved local chat session.\n"
             "- /status: Show current desktop/session settings and a brief memory summary.\n"
             "- /health: Show backend health payload.\n"
             "- /systemstatus: Show desktop/backend CPU and memory usage."
@@ -493,46 +726,77 @@ class MainWindow(QMainWindow):
     def _command_status_text(self) -> str:
         desktop_status = get_process_status(sample_seconds=0.0)
         desktop_memory = self._format_mb(desktop_status.get("memory_rss_mb"))
+        health = self.backend_client.health() or {}
+        backend_process = (self.backend_client.system_status() or {}).get("process", {})
+        backend_memory = self._format_mb(backend_process.get("memory_rss_mb"))
+        local_ai = health.get("local_ai") if isinstance(health.get("local_ai"), dict) else {}
+        cloud_ai = health.get("cloud_ai") if isinstance(health.get("cloud_ai"), dict) else {}
+        cloud_available = bool(cloud_ai.get("available"))
 
-        return (
-            "Status:\n"
-            f"- user_name: {self.settings.user_name}\n"
-            f"- character_id: {self.settings.selected_character_id}\n"
-            f"- character_name: {self._character_display_name()}\n"
-            f"- developer_mode: {self.settings.developer_mode}\n"
-            f"- local_model: {self.settings.local_model}\n"
-            f"- ai_route_policy: {getattr(self.settings, 'ai_route_policy', 'auto')}\n"
-            f"- cloud_ai_enabled: {self.settings.cloud_ai_enabled}\n"
-            f"- cloud_ai_provider: {self.settings.cloud_ai_provider}\n"
-            f"- cloud_model: {self.settings.cloud_model}\n"
-            f"- desktop_memory: {desktop_memory}"
-        )
+        return "\n".join([
+            "Status:",
+            "",
+            "App",
+            f"- language: {self.settings.language}",
+            f"- theme: {self.settings.theme_id}",
+            f"- character: {self._character_display_name()} ({self.settings.selected_character_id})",
+            f"- developer_mode: {self.settings.developer_mode}",
+            "",
+            "AI",
+            f"- route_policy: {getattr(self.settings, 'ai_route_policy', 'auto')}",
+            f"- local_model: {self.settings.local_model}",
+            f"- local_ai: {local_ai.get('state', 'unknown')}",
+            f"- cloud_provider: {self.settings.cloud_ai_provider}",
+            f"- cloud_model: {self.settings.cloud_model or 'not selected'}",
+            f"- cloud_available: {cloud_available}",
+            "",
+            "Session",
+            f"- current_session: {self.current_session_title or self.current_session_id or 'unsaved'}",
+            f"- session_id: {self.current_session_id or 'unsaved'}",
+            f"- message_count: {len(self.chat_session.messages)}",
+            "",
+            "System",
+            f"- desktop_memory: {desktop_memory}",
+            f"- backend_memory: {backend_memory}",
+        ])
 
 
     def _command_system_status_text(self) -> str:
         desktop_status = get_process_status(sample_seconds=0.2)
+        desktop_system = get_system_overview(sample_seconds=0.0)
         backend_status = self.backend_client.system_status()
 
         lines = [
             "System Status:",
             "",
-            "Desktop process:",
+            "System",
+            *self._format_system_overview_lines(desktop_system),
+            "",
+            "Desktop process",
             *self._format_process_status_lines(desktop_status),
         ]
 
         if backend_status is None:
             lines.extend([
                 "",
-                "Backend process:",
+                "Backend process",
                 "- status: unavailable",
             ])
         else:
             backend_process = backend_status.get("process", {})
             lines.extend([
                 "",
-                "Backend process:",
+                "Backend process",
                 *self._format_process_status_lines(backend_process),
             ])
+
+            backend_system = backend_status.get("system")
+            if isinstance(backend_system, dict) and not desktop_system.get("ram_total_bytes"):
+                lines.extend([
+                    "",
+                    "Backend system snapshot",
+                    *self._format_system_overview_lines(backend_system),
+                ])
 
         total_memory = self._sum_numeric_values(
             desktop_status.get("memory_rss_mb"),
@@ -545,6 +809,23 @@ class MainWindow(QMainWindow):
             ])
 
         return "\n".join(lines)
+
+    def _format_system_overview_lines(self, status: dict) -> list[str]:
+        disk = status.get("disk") if isinstance(status.get("disk"), dict) else {}
+        return [
+            f"- platform: {status.get('platform', 'unknown')}",
+            f"- cpu_usage: {self._format_percent(status.get('cpu_percent'))}",
+            f"- cpu_count: {status.get('cpu_count', 'unknown')}",
+            f"- ram_total: {self._format_bytes(status.get('ram_total_bytes'))}",
+            f"- ram_used: {self._format_bytes(status.get('ram_used_bytes'))}",
+            f"- ram_available: {self._format_bytes(status.get('ram_available_bytes'))}",
+            f"- ram_usage: {self._format_percent(status.get('ram_percent'))}",
+            f"- disk_path: {disk.get('path', 'unknown')}",
+            f"- disk_total: {self._format_bytes(disk.get('total_bytes'))}",
+            f"- disk_used: {self._format_bytes(disk.get('used_bytes'))}",
+            f"- disk_free: {self._format_bytes(disk.get('free_bytes'))}",
+            f"- disk_usage: {self._format_percent(disk.get('percent'))}",
+        ]
 
     def _format_process_status_lines(self, status: dict) -> list[str]:
         return [
@@ -609,25 +890,40 @@ class MainWindow(QMainWindow):
     def _command_health_text(self) -> str:
         result = self.backend_client.health()
         if result is None:
-            return "Backend health: unavailable"
+            return "Health:\n- backend_process_alive: false\n- overall_ai_ready: false"
 
         status = result.get("status", "unknown")
+        checks = result.get("checks") if isinstance(result.get("checks"), dict) else {}
         errors = result.get("errors", [])
-        local_ai = result.get("local_ai", {})
-        cloud_ai = result.get("cloud_ai", {})
+        local_ai = result.get("local_ai") if isinstance(result.get("local_ai"), dict) else {}
+        cloud_ai = result.get("cloud_ai") if isinstance(result.get("cloud_ai"), dict) else {}
+
+        local_available = bool(local_ai.get("available") or checks.get("local_ai_available"))
+        cloud_configured = bool(cloud_ai.get("configured"))
+        cloud_available = bool(cloud_ai.get("available") or checks.get("cloud_ai_available"))
+        selected_model_available = local_available or cloud_available
+        overall_ai_ready = bool(checks.get("ai_available") or selected_model_available)
 
         lines = [
-            f"Backend health: {status}",
-            f"- local_ai: {local_ai.get('state', 'unknown')}",
-            f"- cloud_ai: {cloud_ai.get('state', 'unknown')}",
+            "Health:",
+            f"- backend_process_alive: true",
+            f"- backend_status: {status}",
+            f"- local_ai_available: {local_available} ({local_ai.get('state', 'unknown')})",
+            f"- cloud_ai_configured: {cloud_configured}",
+            f"- cloud_ai_available: {cloud_available} ({cloud_ai.get('state', 'unknown')})",
+            f"- selected_model_available: {selected_model_available}",
+            f"- overall_ai_ready: {overall_ai_ready}",
         ]
 
         if errors:
             lines.append("- errors:")
             for error in errors:
-                code = error.get("code", "unknown")
-                message = error.get("message", "")
-                lines.append(f"  - {code}: {message}")
+                if isinstance(error, dict):
+                    code = error.get("code", "unknown")
+                    message = error.get("message", "")
+                    lines.append(f"  - {code}: {message}")
+                else:
+                    lines.append(f"  - {error}")
 
         return "\n".join(lines)
 
@@ -635,6 +931,272 @@ class MainWindow(QMainWindow):
         self.chat_view.clear_messages()
         self.bottom_area.raise_()
         self._update_avatar_occlusion_later()
+
+    def _restore_last_chat_session(self) -> None:
+        payload = self.session_store.load_last_session()
+        if payload is None:
+            return
+
+        messages = payload.get("messages") or []
+        self.chat_session.replace_messages(messages)
+        self.current_session_id = str(payload.get("session_id") or "") or None
+        self.current_session_title = str(payload.get("title") or "")
+        self.initial_notice_added = bool(messages)
+        print(
+            "[Session] Restored last session: "
+            f"{self.current_session_title or self.current_session_id}"
+        )
+
+    def _render_current_chat_session(self) -> None:
+        self.pending_response_widget = None
+        if self.current_session_id != self.active_chat_response_session_id:
+            self.pending_response_session_id = None
+        self.chat_view.clear_messages()
+        for message in self.chat_session.messages:
+            self.chat_view.add_chat_message(message)
+        self.bottom_area.raise_()
+        self._update_avatar_occlusion_later()
+
+    def _save_current_chat_session(
+        self,
+        force: bool = False,
+        *,
+        make_current: bool = True,
+        touch_updated_at: bool = True,
+    ) -> None:
+        messages = self.chat_session.messages
+        if not messages and not force:
+            return
+
+        self.current_session_id = self.session_store.save_session(
+            self.current_session_id,
+            messages,
+            title=self.current_session_title or None,
+            character_id=self.settings.selected_character_id,
+            character_name=self._character_display_name(),
+            user_name=self.settings.user_name,
+            route_policy=getattr(self.settings, "ai_route_policy", "auto"),
+            make_current=make_current,
+            touch_updated_at=touch_updated_at,
+        )
+
+        if not self.current_session_title:
+            sessions = self.session_store.list_sessions()
+            for session in sessions:
+                if session.get("session_id") == self.current_session_id:
+                    self.current_session_title = str(session.get("title") or "")
+                    break
+
+        self._refresh_session_sidebar()
+
+    def _refresh_session_sidebar(self) -> None:
+        if not hasattr(self, "session_sidebar"):
+            return
+        self.session_sidebar.set_sessions(
+            self.session_store.list_sessions(),
+            self.current_session_id,
+        )
+
+    def _on_sidebar_new_session_requested(self) -> None:
+        self._create_new_chat_session(show_message=bool(self.settings.developer_mode))
+        self.character_state.on_assistant_done()
+
+    def _on_sidebar_session_selected(self, session_id: str) -> None:
+        self._load_chat_session_by_selector(
+            session_id,
+            show_message=bool(self.settings.developer_mode),
+        )
+        self.character_state.on_assistant_done()
+
+    def _on_sidebar_session_rename_requested(self, session_id: str) -> None:
+        sessions = self.session_store.list_sessions()
+        current_title = "Untitled Session"
+        for session in sessions:
+            if session.get("session_id") == session_id:
+                current_title = str(session.get("title") or current_title)
+                break
+
+        new_title, accepted = QInputDialog.getText(
+            self,
+            self.localization.t("app.title"),
+            "세션 명칭 변경",
+            text=current_title,
+        )
+        if not accepted:
+            return
+
+        normalized_title = " ".join(new_title.strip().split())
+        if len(normalized_title.encode("utf-8")) < 2:
+            QMessageBox.warning(
+                self,
+                self.localization.t("app.title"),
+                "세션 명칭은 공백을 제외하고 최소 2바이트 이상이어야 합니다.",
+            )
+            return
+
+        if self.session_store.rename_session(session_id, normalized_title):
+            if session_id == self.current_session_id:
+                self.current_session_title = normalized_title
+            self._refresh_session_sidebar()
+            if self.settings.developer_mode:
+                self._add_assistant_message(
+                    "Renamed local chat session.\n"
+                    f"- title: {normalized_title}\n"
+                    f"- session_id: {session_id}",
+                    render_markdown=False,
+                )
+        elif self.settings.developer_mode:
+            self._add_assistant_message(f"Rename failed. Session not found: {session_id}", render_markdown=False)
+
+        self.character_state.on_assistant_done()
+
+    def _on_sidebar_session_delete_requested(self, session_id: str) -> None:
+        sessions = self.session_store.list_sessions()
+        title = "Untitled Session"
+        for session in sessions:
+            if session.get("session_id") == session_id:
+                title = str(session.get("title") or title)
+                break
+
+        result = QMessageBox.question(
+            self,
+            self.localization.t("app.title"),
+            f'Delete local chat session?\n\n{title}\n{session_id}',
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if result != QMessageBox.StandardButton.Yes:
+            return
+
+        self._delete_chat_session_by_selector(
+            session_id,
+            show_message=bool(self.settings.developer_mode),
+        )
+        self.character_state.on_assistant_done()
+
+    def _create_new_chat_session(self, *, show_message: bool = True) -> None:
+        self._save_current_chat_session(touch_updated_at=False)
+        self.chat_session.clear()
+        self.current_session_id = None
+        self.current_session_title = "New Chat Session"
+        self.initial_notice_added = True
+        self.chat_view.clear_messages()
+
+        if show_message:
+            self._add_assistant_message("New local chat session created.", render_markdown=False)
+        else:
+            self._add_assistant_message("새 세션입니다.", render_markdown=False)
+
+        # Ensure a newly created session is saved and rendered in the sidebar immediately.
+        self._save_current_chat_session(force=True)
+        self._refresh_session_sidebar()
+        self.bottom_area.raise_()
+        self._update_avatar_occlusion_later()
+
+    def _command_session_saved_text(self) -> str:
+        return (
+            "Local chat session saved.\n"
+            f"- session_id: {self.current_session_id or 'unsaved'}\n"
+            f"- title: {self.current_session_title or 'Untitled Session'}"
+        )
+
+    def _command_sessions_text(self) -> str:
+        sessions = self.session_store.list_sessions()
+        if not sessions:
+            return "No saved local chat sessions."
+
+        lines = ["Saved local chat sessions:"]
+        for index, session in enumerate(sessions, start=1):
+            session_id = str(session.get("session_id") or "")
+            title = str(session.get("title") or "Untitled Session")
+            updated_at = str(session.get("updated_at") or "unknown")
+            message_count = session.get("message_count", 0)
+            current_marker = " *current*" if session_id == self.current_session_id else ""
+            lines.append(
+                f"{index}. {title}{current_marker}\n"
+                f"   id: {session_id}\n"
+                f"   updated: {updated_at} / messages: {message_count}"
+            )
+        return "\n".join(lines)
+
+    def _load_chat_session_by_selector(self, selector: str, *, show_message: bool = True) -> None:
+        session_id = self.session_store.resolve_session_selector(selector)
+        if not session_id:
+            self._add_assistant_message(
+                "Load failed. Use /sessions first, then /loadsession <number|id>.",
+                render_markdown=False,
+            )
+            return
+
+        payload = self.session_store.load_session(session_id)
+        if payload is None:
+            self._add_assistant_message(f"Load failed. Session not found: {selector}", render_markdown=False)
+            return
+
+        self._save_current_chat_session(touch_updated_at=False)
+        self.chat_session.replace_messages(payload.get("messages") or [])
+        self.current_session_id = str(payload.get("session_id") or session_id)
+        self.current_session_title = str(payload.get("title") or "")
+        self.session_store.mark_current(self.current_session_id)
+        self.initial_notice_added = bool(self.chat_session.messages)
+        self._render_current_chat_session()
+        if show_message:
+            self._add_assistant_message(
+                "Loaded local chat session.\n"
+                f"- title: {self.current_session_title or 'Untitled Session'}\n"
+                f"- session_id: {self.current_session_id}",
+                render_markdown=False,
+            )
+        self._refresh_session_sidebar()
+
+    def _delete_chat_session_by_selector(self, selector: str, show_message: bool = True) -> None:
+        session_id = self.session_store.resolve_session_selector(selector)
+        if not session_id:
+            self._add_assistant_message(
+                "Delete failed. Use /sessions first, then /deletesession <number|id>.",
+                render_markdown=False,
+            )
+            return
+
+        deleted = self.session_store.delete_session(session_id)
+        if session_id == self.current_session_id:
+            self.chat_session.clear()
+            self.current_session_id = None
+            self.current_session_title = ""
+            self.initial_notice_added = False
+            self.chat_view.clear_messages()
+
+        if show_message:
+            if deleted:
+                self._add_assistant_message(f"Deleted local chat session: {session_id}", render_markdown=False)
+            else:
+                self._add_assistant_message(f"Session index cleaned, but file was missing: {session_id}", render_markdown=False)
+
+        self._refresh_session_sidebar()
+
+    def _pending_response_text(self) -> str:
+        if self.settings.language == "ko":
+            return "응답 생성 중..."
+        return "Generating response..."
+
+    def _show_pending_assistant_response(self, session_id: str | None) -> None:
+        if not session_id or session_id != self.current_session_id:
+            return
+        if self.pending_response_widget is not None:
+            self.chat_view.remove_message_widget(self.pending_response_widget)
+        self.pending_response_session_id = session_id
+        self.pending_response_widget = self.chat_view.add_pending_assistant_message(
+            self._pending_response_text()
+        )
+        self._update_avatar_occlusion_later()
+
+    def _clear_pending_assistant_response(self, session_id: str | None = None) -> None:
+        if session_id is not None and self.pending_response_session_id not in {None, session_id}:
+            return
+        if self.pending_response_widget is not None:
+            self.chat_view.remove_message_widget(self.pending_response_widget)
+        self.pending_response_widget = None
+        if session_id is None or self.pending_response_session_id == session_id:
+            self.pending_response_session_id = None
 
     def _show_fake_assistant_typing(self) -> None:
         if self.chat_response_thread is not None:
@@ -645,6 +1207,15 @@ class MainWindow(QMainWindow):
             print("[Chat] Chat response request is already running.")
             return
 
+        if self.current_session_id is None:
+            self._save_current_chat_session(force=True)
+
+        request_session_id = self.current_session_id
+        if not request_session_id:
+            print("[Chat] Cannot start chat response without a session id.")
+            self._add_backend_fallback_response()
+            return
+
         request = ChatRequest(
             messages=self.chat_session.messages,
             character_id=self.settings.selected_character_id,
@@ -653,26 +1224,31 @@ class MainWindow(QMainWindow):
             language=self.settings.language,
         )
 
+        self.active_chat_response_session_id = request_session_id
         self.chat_response_thread = QThread(self)
         self.chat_response_worker = ChatResponseWorker(
             backend_client=self.backend_client,
             request=request,
+            session_id=request_session_id,
         )
         self.chat_response_worker.moveToThread(self.chat_response_thread)
 
         self.chat_response_thread.started.connect(self.chat_response_worker.run)
         self.chat_response_worker.finished.connect(self._on_chat_response_finished)
         self.chat_response_worker.failed.connect(self._on_chat_response_failed)
-        self.chat_response_worker.finished.connect(self.chat_response_thread.quit)
-        self.chat_response_worker.failed.connect(self.chat_response_thread.quit)
+        self.chat_response_worker.finished.connect(self._quit_chat_response_thread)
+        self.chat_response_worker.failed.connect(self._quit_chat_response_thread)
         self.chat_response_thread.finished.connect(self._cleanup_chat_response_worker)
 
+        self._show_pending_assistant_response(request_session_id)
         QTimer.singleShot(300, self._show_fake_assistant_typing)
         self.chat_response_thread.start()
 
-    def _on_chat_response_finished(self, response) -> None:
-        self.chat_session.append_message(response.message)
-        self.chat_view.add_chat_message(response.message)
+    def _on_chat_response_finished(self, session_id: str, response) -> None:
+        self._clear_pending_assistant_response(session_id)
+        message_added = self._append_message_to_session(session_id, response.message)
+        if not message_added:
+            print(f"[Chat] Response target session was not found: {session_id}")
 
         metadata = getattr(response.message, "metadata", {}) or {}
         if metadata.get("paid_model_unavailable"):
@@ -684,9 +1260,14 @@ class MainWindow(QMainWindow):
 
         self._update_avatar_occlusion_later()
 
-    def _on_chat_response_failed(self, error: str) -> None:
-        print(f"[Chat] Backend chat response failed: {error}")
-        self._add_backend_fallback_response()
+    def _on_chat_response_failed(self, session_id: str, error: str) -> None:
+        self._clear_pending_assistant_response(session_id)
+        print(f"[Chat] Backend chat response failed for session {session_id}: {error}")
+        self._add_backend_fallback_response(session_id=session_id)
+
+    def _quit_chat_response_thread(self, *args) -> None:  # noqa: ANN002
+        if self.chat_response_thread is not None:
+            self.chat_response_thread.quit()
 
     def _cleanup_chat_response_worker(self) -> None:
         if self.chat_response_worker is not None:
@@ -697,8 +1278,50 @@ class MainWindow(QMainWindow):
             self.chat_response_thread.deleteLater()
             self.chat_response_thread = None
 
-    def _add_backend_fallback_response(self) -> None:
-        self._add_assistant_message(self.localization.t("chat.backend_fallback"))
+        self.active_chat_response_session_id = None
+
+    def _append_message_to_session(self, session_id: str, message) -> bool:
+        if not session_id:
+            return False
+
+        if session_id == self.current_session_id:
+            self.chat_session.append_message(message)
+            self.chat_view.add_chat_message(message)
+            self._save_current_chat_session()
+            return True
+
+        payload = self.session_store.load_session(session_id)
+        if payload is None:
+            return False
+
+        messages = list(payload.get("messages") or [])
+        messages.append(message)
+        self.session_store.save_session(
+            session_id,
+            messages,
+            title=str(payload.get("title") or "") or None,
+            character_id=str(payload.get("character_id") or self.settings.selected_character_id),
+            character_name=str(payload.get("character_name") or self._character_display_name()),
+            user_name=str(payload.get("user_name") or self.settings.user_name),
+            route_policy=str(payload.get("route_policy") or getattr(self.settings, "ai_route_policy", "auto")),
+            make_current=False,
+        )
+        self._refresh_session_sidebar()
+        return True
+
+    def _add_backend_fallback_response(self, session_id: str | None = None) -> None:
+        target_session_id = session_id or self.current_session_id
+        fallback_message = ChatMessage(
+            role="assistant",
+            content=self.localization.t("chat.backend_fallback"),
+        )
+
+        if target_session_id and self._append_message_to_session(target_session_id, fallback_message):
+            pass
+        else:
+            self.chat_session.append_message(fallback_message)
+            self.chat_view.add_chat_message(fallback_message)
+            self._save_current_chat_session()
 
         self.character_state.on_error()
         QTimer.singleShot(3000, self.character_state.on_assistant_done)
@@ -711,9 +1334,11 @@ class MainWindow(QMainWindow):
         area_width = self.content_area.width()
         area_height = self.content_area.height()
 
+        self.bottom_area.sync_composer_height_to_left_name_area()
+
         # 하단 입력 UI가 차지하는 실제 높이.
         # composer height is synchronized with the left character/name label stack.
-        input_area_height = max(150, self.bottom_area.recommended_input_area_height())
+        input_area_height = max(132, self.bottom_area.recommended_input_area_height())
 
         # 캐릭터가 포함된 overlay 전체 높이.
         # 캐릭터가 잘리지 않도록 충분히 크게 잡는다.
@@ -729,12 +1354,14 @@ class MainWindow(QMainWindow):
             chat_view_height,
         )
 
+        bottom_overlay_top = max(0, area_height - overlay_height)
         self.bottom_area.setGeometry(
             0,
-            max(0, area_height - overlay_height),
+            bottom_overlay_top,
             area_width,
             overlay_height,
         )
+        self.bottom_area.sync_composer_height_to_left_name_area()
 
         # 메시지 영역은 입력창 좌우 폭과 맞춘다.
         character_reserved_width = 238
@@ -745,10 +1372,36 @@ class MainWindow(QMainWindow):
             right_width=send_reserved_width,
         )
 
+        # 세션 패널은 좌측 캐릭터 컬럼 전체 높이를 사용하되, 좌우 폭은
+        # 캐릭터/사용자 이름 박스와 맞춘다. 배경과 테두리는 QSS에서 투명 처리한다.
+        if hasattr(self, "session_sidebar"):
+            character_area = self.bottom_area.character_area
+            character_top_left = self.content_area.mapFromGlobal(
+                character_area.mapToGlobal(character_area.rect().topLeft())
+            )
+            session_x = character_top_left.x()
+            session_y = 0
+            session_width = character_area.width()
+            available_session_height = max(1, area_height)
+            session_height = self.session_sidebar.preferred_height(
+                available_session_height
+            )
+            self.session_sidebar.setGeometry(
+                session_x,
+                session_y,
+                session_width,
+                session_height,
+            )
+
         # ChatView 자체가 이미 입력창 위까지만 있으므로 bottom viewport margin은 필요 없다.
         self.chat_view.set_bottom_reserved_height(0)
 
         self.chat_view.raise_()
+        if hasattr(self, "session_sidebar"):
+            self.session_sidebar.raise_()
+        # The character/composer overlay stays visually above the session panel.
+        # Mouse events over the character are handled in eventFilter so the
+        # character does not block the session list by default.
         self.bottom_area.raise_()
         self._update_avatar_occlusion_later()
 
@@ -778,6 +1431,12 @@ class MainWindow(QMainWindow):
             if character_rect.intersects(message_rect):
                 is_occluded = True
                 break
+
+        if not is_occluded and hasattr(self, "session_sidebar"):
+            for session_item_rect in self.session_sidebar.session_item_global_rects():
+                if character_rect.intersects(session_item_rect):
+                    is_occluded = True
+                    break
 
         self.bottom_area.set_character_occluded(
             is_occluded=is_occluded,
@@ -1232,12 +1891,146 @@ class MainWindow(QMainWindow):
         return text
 
     def eventFilter(self, watched, event) -> bool:
-        if event.type() == QEvent.Type.Wheel:
+        event_type = event.type()
+
+        if event_type in (QEvent.Type.KeyPress, QEvent.Type.KeyRelease):
+            self._update_character_mouse_event_mode_from_keyboard(event)
+            return False
+
+        if event_type == QEvent.Type.WindowDeactivate:
+            self._set_character_mouse_events_enabled(False)
+            return False
+
+        if event_type == QEvent.Type.MouseButtonPress:
+            if watched is getattr(self, "title_label", None) and event.button() == Qt.MouseButton.LeftButton:
+                self._show_about_dialog()
+                return True
+
+            if self._try_route_overlay_mouse_press_to_session_sidebar(watched, event):
+                return True
+
+            if self._is_character_mouse_event_target(watched):
+                if self._handle_character_mouse_press(event):
+                    return True
+
+        if event_type == QEvent.Type.Wheel:
             if self._should_forward_wheel_to_chat_view(watched):
                 self._scroll_chat_view_by_wheel(event)
                 return True
 
         return super().eventFilter(watched, event)
+
+    def _update_character_mouse_event_mode_from_keyboard(self, event) -> None:  # noqa: ANN001
+        # Qt maps macOS Option to AltModifier. Command/Meta is intentionally not
+        # accepted. The character layer becomes a mouse target only while Alt /
+        # Option is actively held.
+        try:
+            is_alt_event = event.key() == Qt.Key.Key_Alt
+        except AttributeError:
+            is_alt_event = False
+
+        alt_pressed = bool(QApplication.keyboardModifiers() & Qt.KeyboardModifier.AltModifier)
+
+        if event.type() == QEvent.Type.KeyPress and is_alt_event:
+            alt_pressed = True
+        elif event.type() == QEvent.Type.KeyRelease and is_alt_event:
+            alt_pressed = False
+
+        self._set_character_mouse_events_enabled(alt_pressed)
+
+    def _set_character_mouse_events_enabled(self, enabled: bool) -> None:
+        if not hasattr(self, "bottom_area"):
+            return
+
+        enabled = bool(enabled)
+        if getattr(self, "_character_mouse_events_enabled", None) == enabled:
+            return
+
+        self._character_mouse_events_enabled = enabled
+
+        transparent = not enabled
+        for widget in (
+            getattr(self.bottom_area, "character_area", None),
+            getattr(self.bottom_area, "avatar_widget", None),
+            getattr(self.bottom_area, "character_info_box", None),
+            getattr(self.bottom_area, "character_name_label", None),
+            getattr(self.bottom_area, "state_label", None),
+            getattr(self.bottom_area, "user_name_box", None),
+            getattr(self.bottom_area, "user_label", None),
+            getattr(self.bottom_area, "user_name_label", None),
+        ):
+            if widget is not None:
+                widget.setAttribute(
+                    Qt.WidgetAttribute.WA_TransparentForMouseEvents,
+                    transparent,
+                )
+
+    def _try_route_overlay_mouse_press_to_session_sidebar(self, watched, event) -> bool:  # noqa: ANN001
+        if getattr(self, "_character_mouse_events_enabled", False):
+            return False
+
+        if event.button() != Qt.MouseButton.LeftButton:
+            return False
+
+        if not hasattr(self, "bottom_area") or not hasattr(self, "session_sidebar"):
+            return False
+
+        widget = watched if isinstance(watched, QWidget) else None
+        if widget is None:
+            return False
+
+        # Composer and send button must keep their own mouse input. Everything
+        # else in the left/bottom overlay can pass through to the session list
+        # when the cursor is visually over a session row.
+        current = widget
+        while current is not None:
+            if current in {self.bottom_area.composer, self.bottom_area.send_button}:
+                return False
+            if current is self.bottom_area:
+                break
+            current = current.parentWidget()
+        else:
+            return False
+
+        global_pos = self._event_global_pos(event)
+        sidebar_global_rect = self.session_sidebar.rect().translated(
+            self.session_sidebar.mapToGlobal(self.session_sidebar.rect().topLeft())
+        )
+        if not sidebar_global_rect.contains(global_pos):
+            return False
+
+        return self.session_sidebar.handle_global_mouse_press(global_pos)
+
+    def _is_character_mouse_event_target(self, watched) -> bool:  # noqa: ANN001
+        if not hasattr(self, "bottom_area"):
+            return False
+
+        widget = watched if isinstance(watched, QWidget) else None
+        while widget is not None:
+            if widget is self.bottom_area.character_area:
+                return True
+            widget = widget.parentWidget()
+
+        return False
+
+    def _handle_character_mouse_press(self, event) -> bool:  # noqa: ANN001
+        if not getattr(self, "_character_mouse_events_enabled", False):
+            return False
+
+        if event.button() != Qt.MouseButton.LeftButton:
+            return False
+
+        # Test hook for later character interaction handling. Holding Alt/Option
+        # enables the character layer to consume mouse input; the click then
+        # behaves as if the user sent this action message.
+        self.on_send_requested(self._character_click_text)
+        return True
+
+    def _event_global_pos(self, event) -> QPoint:  # noqa: ANN001
+        try:
+            return event.globalPosition().toPoint()
+        except AttributeError:
+            return event.globalPos()
 
     def _should_forward_wheel_to_chat_view(self, watched) -> bool:
         if not hasattr(self, "bottom_area"):
@@ -1249,7 +2042,17 @@ class MainWindow(QMainWindow):
         if watched is self.bottom_area.send_button:
             return False
 
-        return True
+        widget = watched if isinstance(watched, QWidget) else None
+        if widget is None:
+            return False
+
+        current = widget
+        while current is not None:
+            if current is self.bottom_area:
+                return True
+            current = current.parentWidget()
+
+        return False
 
     def _scroll_chat_view_by_wheel(self, event) -> None:
         if not hasattr(self, "chat_view"):
@@ -1274,6 +2077,7 @@ class MainWindow(QMainWindow):
         self._update_content_geometry()
 
     def closeEvent(self, event) -> None:
+        self._save_current_chat_session()
         self.settings.window_width = self.width()
         self.settings.window_height = self.height()
         self.settings_repository.save(self.settings)

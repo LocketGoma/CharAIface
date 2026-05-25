@@ -29,8 +29,12 @@ class AppSettings(BaseModel):
 
     developer_mode: bool = False
 
+    conversation_markdown_enabled: bool = True
+    enforce_response_language: bool = True
+    emphasize_character_style: bool = True
+
     expand_chat_over_character_area: bool = True
-    avatar_occluded_opacity: float = 0.7
+    avatar_occluded_opacity: float = 0.3
     enable_avatar_embarrassed_when_occluded: bool = True
 
     # Local AI runtime

@@ -6,7 +6,7 @@
   "user_name": "익명의 선생님",
   "developer_mode": false,
   "expand_chat_over_character_area": true,
-  "avatar_occluded_opacity": 0.7,
+  "avatar_occluded_opacity": 0.3,
   "enable_avatar_embarrassed_when_occluded": true,
   "local_ai_provider": "ollama",
   "local_ai_base_url": "http://127.0.0.1:11434",
@@ -34,5 +34,8 @@
   "model_download_timeout_seconds": 600,
   "window_width": 800,
   "window_height": 600,
-  "extra": {}
+  "extra": {},
+  "conversation_markdown_enabled": true,
+  "enforce_response_language": true,
+  "emphasize_character_style": true
 }

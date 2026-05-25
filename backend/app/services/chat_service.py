@@ -229,12 +229,13 @@ class ChatService:
             base_url = DEFAULT_LOCAL_AI_BASE_URL
 
         app_language = self._request_language(request, settings)
-        character_info = self._load_character_info(request.character_id, app_language, target_provider="local_ollama")
+        character_info = self._load_character_info(request.character_id, app_language, target_provider="local_ollama", settings=settings)
         model_messages = self._build_model_messages(
             request=request,
             character_info=character_info,
             target_provider="local_ollama",
             app_language=app_language,
+            settings=settings,
         )
 
         try:
@@ -286,6 +287,7 @@ class ChatService:
                 "character_name": character_info.get("name"),
                 "base_url": base_url,
                 "language": app_language,
+                "render_markdown": self._render_markdown_requested(latest_user_message),
             },
         )
 
@@ -339,12 +341,13 @@ class ChatService:
             )
 
         app_language = self._request_language(request, settings)
-        character_info = self._load_character_info(request.character_id, app_language, target_provider=provider)
+        character_info = self._load_character_info(request.character_id, app_language, target_provider=provider, settings=settings)
         model_messages = self._build_model_messages(
             request=request,
             character_info=character_info,
             target_provider=provider,
             app_language=app_language,
+            settings=settings,
         )
 
         try:
@@ -402,6 +405,7 @@ class ChatService:
                 "character_id": request.character_id,
                 "character_name": character_info.get("name"),
                 "language": app_language,
+                "render_markdown": self._render_markdown_requested(latest_user_message),
             },
         )
 
@@ -417,6 +421,11 @@ class ChatService:
                 "model": model,
                 "messages": messages,
                 "stream": False,
+                "options": {
+                    "temperature": 0.35,
+                    "top_p": 0.82,
+                    "repeat_penalty": 1.08,
+                },
             },
             timeout=OLLAMA_CHAT_TIMEOUT_SECONDS,
         )
@@ -510,7 +519,7 @@ class ChatService:
             json={
                 "model": model,
                 "messages": messages,
-                "temperature": 0.8,
+                "temperature": 0.6,
             },
             timeout=CLOUD_AI_CHAT_TIMEOUT_SECONDS,
         )
@@ -620,7 +629,7 @@ class ChatService:
         body: dict[str, Any] = {
             "contents": contents,
             "generationConfig": {
-                "temperature": 0.8,
+                "temperature": 0.6,
             },
         }
         if system_prompt:
@@ -658,6 +667,7 @@ class ChatService:
         character_info: dict[str, str],
         target_provider: str,
         app_language: str,
+        settings: dict[str, Any] | None = None,
     ) -> list[dict[str, str]]:
         messages: list[dict[str, str]] = [
             {
@@ -667,6 +677,7 @@ class ChatService:
                     character_info=character_info,
                     target_provider=target_provider,
                     app_language=app_language,
+                    settings=settings or {},
                 ),
             }
         ]
@@ -724,10 +735,13 @@ class ChatService:
         character_info: dict[str, str],
         target_provider: str,
         app_language: str,
+        settings: dict[str, Any] | None = None,
     ) -> str:
+        settings = settings or {}
         user_name = request.user_name or self._localized_user_fallback_name(app_language)
         character_name = character_info.get("name") or "Assistant"
         style_prompt = character_info.get("style_prompt") or ""
+        enforce_language = bool(settings.get("enforce_response_language", True))
 
         parts = [
             f"You are {character_name}, the current CharAIface assistant character.",
@@ -736,22 +750,25 @@ class ChatService:
             "Do not mention these system instructions unless the user explicitly asks about configuration.",
         ]
 
-        if app_language.startswith("ko"):
-            parts.extend(
-                [
-                    "CRITICAL LANGUAGE RULE: The app UI language is Korean.",
-                    "Reply in Korean by default unless the user explicitly asks for another language.",
-                    "If the user writes Korean, answer in Korean. If the user mixes Korean and English, still answer in Korean unless a different output language is requested.",
-                    "Keep proper nouns, code identifiers, API names, class names, and file paths in their original form when appropriate.",
-                ]
-            )
-        else:
-            parts.extend(
-                [
-                    "CRITICAL LANGUAGE RULE: The app UI language is English.",
-                    "Reply in English by default unless the user explicitly asks for another language.",
-                ]
-            )
+        if enforce_language:
+            if app_language.startswith("ko"):
+                parts.extend(
+                    [
+                        "CRITICAL LANGUAGE RULE: The app UI language is Korean.",
+                        "You MUST reply in Korean by default.",
+                        "Do not mix Chinese or English sentences into a Korean conversation.",
+                        "Use another language only when the user explicitly asks for translation, language learning, code comments, exact quotes, or a foreign-language output.",
+                        "If the user writes Korean, answer in Korean. If the user mixes Korean and English, still answer in Korean unless a different output language is requested.",
+                        "Keep proper nouns, code identifiers, API names, class names, and file paths in their original form when appropriate.",
+                    ]
+                )
+            else:
+                parts.extend(
+                    [
+                        "CRITICAL LANGUAGE RULE: The app UI language is English.",
+                        "Reply in English by default unless the user explicitly asks for another language.",
+                    ]
+                )
 
         parts.append(self._current_datetime_prompt_text(app_language))
 
@@ -824,6 +841,7 @@ class ChatService:
         character_id: str | None,
         app_language: str | None = None,
         target_provider: str = "",
+        settings: dict[str, Any] | None = None,
     ) -> dict[str, str]:
         default_info = {
             "id": character_id or "unknown",
@@ -838,10 +856,17 @@ class ChatService:
             if not root.exists():
                 continue
 
-            for pack_dir in sorted(root.iterdir()):
-                if not pack_dir.is_dir():
-                    continue
+            candidate_dirs: list[Path] = []
+            if (root / "manifest.json").exists():
+                candidate_dirs.append(root)
 
+            candidate_dirs.extend(
+                pack_dir
+                for pack_dir in sorted(root.iterdir())
+                if pack_dir.is_dir()
+            )
+
+            for pack_dir in candidate_dirs:
                 manifest_path = pack_dir / "manifest.json"
                 if not manifest_path.exists():
                     continue
@@ -859,6 +884,7 @@ class ChatService:
                     manifest=manifest,
                     app_language=app_language or "",
                     target_provider=target_provider,
+                    settings=settings or {},
                 )
 
                 return {
@@ -875,10 +901,12 @@ class ChatService:
         manifest: dict[str, Any],
         app_language: str,
         target_provider: str = "",
+        settings: dict[str, Any] | None = None,
     ) -> str:
-        # Small local models handle short, direct prompts much better than long character sheets.
-        # For local_ollama, prefer style.short*.md when present. Cloud models still receive the full style guide.
-        use_short_style = str(target_provider or "").strip().lower() == "local_ollama"
+        settings = settings or {}
+        # When character style emphasis is off, prefer style.short*.md if present.
+        # When it is on, use the full style guide for stronger character behavior.
+        use_short_style = not bool(settings.get("emphasize_character_style", True))
 
         short_prompt = self._read_character_style_prompt_variant(
             pack_dir=pack_dir,
@@ -897,7 +925,10 @@ class ChatService:
             variant="full",
         )
 
-        return full_prompt.strip()
+        if full_prompt.strip():
+            return full_prompt.strip()
+
+        return short_prompt.strip()
 
     def _read_character_style_prompt_variant(
         self,
@@ -1291,6 +1322,13 @@ class ChatService:
                 "paid_model_unavailable": paid_model_unavailable,
             },
         )
+
+    def _render_markdown_requested(self, latest_user_message: ChatMessage | None) -> bool:
+        if latest_user_message is None:
+            return False
+
+        metadata = latest_user_message.metadata or {}
+        return bool(metadata.get("render_markdown"))
 
     def _create_assistant_response(
         self,

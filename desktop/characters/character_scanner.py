@@ -35,10 +35,7 @@ class CharacterPackScanner:
 
         self.characters_dir.mkdir(parents=True, exist_ok=True)
 
-        for pack_dir in sorted(self.characters_dir.iterdir()):
-            if not pack_dir.is_dir():
-                continue
-
+        for pack_dir in self._iter_candidate_pack_dirs():
             try:
                 pack = self._load_pack(pack_dir)
 
@@ -72,6 +69,31 @@ class CharacterPackScanner:
             valid_packs=valid_packs,
             invalid_packs=invalid_packs,
         )
+
+    def _iter_candidate_pack_dirs(self) -> list[Path]:
+        """Return character pack folders under the configured scan root.
+
+        The normal layout is one folder per pack, for example:
+        resources/character/my_character/manifest.json
+
+        For convenience during manual testing, the scan root itself is also
+        accepted as a character pack when it directly contains manifest.json.
+        This keeps resources/character usable both as a pack collection folder
+        and as a temporary single-pack drop target.
+        """
+        candidate_dirs: list[Path] = []
+
+        if (self.characters_dir / "manifest.json").is_file():
+            candidate_dirs.append(self.characters_dir)
+
+        for pack_dir in sorted(self.characters_dir.iterdir()):
+            if not pack_dir.is_dir():
+                continue
+            if not (pack_dir / "manifest.json").is_file():
+                continue
+            candidate_dirs.append(pack_dir)
+
+        return candidate_dirs
 
     def _load_pack(self, pack_dir: Path) -> CharacterPack:
         manifest_path = pack_dir / "manifest.json"

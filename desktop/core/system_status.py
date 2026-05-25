@@ -276,6 +276,187 @@ def _powershell_cpu_percent(pid: int, sample_seconds: float) -> float | None:
     return round(max(0.0, (end_cpu - start_cpu) / elapsed / cpu_count * 100.0), 1)
 
 
+
+def _disk_usage_payload(path: str | None = None) -> dict[str, Any]:
+    import shutil
+
+    disk_path = path or os.path.abspath(os.sep)
+    try:
+        usage = shutil.disk_usage(disk_path)
+    except Exception:
+        return {
+            "path": disk_path,
+            "total_bytes": None,
+            "used_bytes": None,
+            "free_bytes": None,
+            "percent": None,
+        }
+
+    total = int(usage.total)
+    used = int(usage.used)
+    free = int(usage.free)
+    percent = round((used / total * 100.0), 1) if total else None
+    return {
+        "path": disk_path,
+        "total_bytes": total,
+        "used_bytes": used,
+        "free_bytes": free,
+        "percent": percent,
+    }
+
+
+def _try_psutil_system_overview(sample_seconds: float) -> dict[str, Any] | None:
+    try:
+        import psutil  # type: ignore
+    except Exception:
+        return None
+
+    try:
+        cpu_percent = float(psutil.cpu_percent(interval=max(0.0, sample_seconds)))
+    except Exception:
+        cpu_percent = None
+
+    try:
+        memory = psutil.virtual_memory()
+        ram_total = int(memory.total)
+        ram_available = int(memory.available)
+        ram_used = int(memory.used)
+        ram_percent = float(memory.percent)
+    except Exception:
+        ram_total = ram_available = ram_used = None
+        ram_percent = None
+
+    return {
+        "platform": f"{platform.system()} {platform.release()}".strip(),
+        "cpu_percent": round(cpu_percent, 1) if cpu_percent is not None else None,
+        "cpu_count": os.cpu_count(),
+        "ram_total_bytes": ram_total,
+        "ram_used_bytes": ram_used,
+        "ram_available_bytes": ram_available,
+        "ram_percent": round(ram_percent, 1) if ram_percent is not None else None,
+        "disk": _disk_usage_payload(),
+        "measured_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def _windows_system_memory() -> tuple[int | None, int | None, int | None, float | None]:
+    if platform.system().lower() != "windows":
+        return None, None, None, None
+
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class MEMORYSTATUSEX(ctypes.Structure):
+            _fields_ = [
+                ("dwLength", wintypes.DWORD),
+                ("dwMemoryLoad", wintypes.DWORD),
+                ("ullTotalPhys", ctypes.c_ulonglong),
+                ("ullAvailPhys", ctypes.c_ulonglong),
+                ("ullTotalPageFile", ctypes.c_ulonglong),
+                ("ullAvailPageFile", ctypes.c_ulonglong),
+                ("ullTotalVirtual", ctypes.c_ulonglong),
+                ("ullAvailVirtual", ctypes.c_ulonglong),
+                ("sullAvailExtendedVirtual", ctypes.c_ulonglong),
+            ]
+
+        status = MEMORYSTATUSEX()
+        status.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
+        if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+            return None, None, None, None
+
+        total = int(status.ullTotalPhys)
+        available = int(status.ullAvailPhys)
+        used = max(0, total - available)
+        percent = float(status.dwMemoryLoad)
+        return total, used, available, percent
+    except Exception:
+        return None, None, None, None
+
+
+def _macos_system_memory() -> tuple[int | None, int | None, int | None, float | None]:
+    if platform.system().lower() != "darwin":
+        return None, None, None, None
+
+    try:
+        total = int(subprocess.check_output(["sysctl", "-n", "hw.memsize"], text=True).strip())
+    except Exception:
+        total = None
+
+    try:
+        page_size = int(subprocess.check_output(["sysctl", "-n", "hw.pagesize"], text=True).strip())
+        vm_stat = subprocess.check_output(["vm_stat"], text=True)
+        values: dict[str, int] = {}
+        for line in vm_stat.splitlines():
+            if ":" not in line:
+                continue
+            key, value = line.split(":", 1)
+            digits = "".join(ch for ch in value if ch.isdigit())
+            if digits:
+                values[key.strip()] = int(digits)
+        free_pages = values.get("Pages free", 0) + values.get("Pages speculative", 0)
+        inactive_pages = values.get("Pages inactive", 0)
+        available = (free_pages + inactive_pages) * page_size
+        if total is None:
+            return None, None, available, None
+        used = max(0, total - available)
+        percent = round(used / total * 100.0, 1) if total else None
+        return total, used, available, percent
+    except Exception:
+        return total, None, None, None
+
+
+def _fallback_system_cpu_percent(sample_seconds: float) -> float | None:
+    if sample_seconds <= 0:
+        return None
+
+    system_name = platform.system().lower()
+    if system_name == "windows":
+        command = (
+            "(Get-Counter '\\Processor(_Total)\\% Processor Time' "
+            "-SampleInterval 1 -MaxSamples 1).CounterSamples.CookedValue"
+        )
+        try:
+            creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            completed = subprocess.run(
+                ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command],
+                capture_output=True,
+                text=True,
+                timeout=4,
+                creationflags=creation_flags,
+            )
+            if completed.returncode == 0 and completed.stdout.strip():
+                return round(float(completed.stdout.strip()), 1)
+        except Exception:
+            return None
+
+    return None
+
+
+def get_system_overview(sample_seconds: float = 0.0) -> dict[str, Any]:
+    sample_seconds = max(0.0, float(sample_seconds))
+    psutil_payload = _try_psutil_system_overview(sample_seconds)
+    if psutil_payload is not None:
+        return psutil_payload
+
+    total, used, available, percent = _windows_system_memory()
+    if total is None:
+        total, used, available, percent = _macos_system_memory()
+
+    cpu_percent = _fallback_system_cpu_percent(sample_seconds)
+    return {
+        "platform": f"{platform.system()} {platform.release()}".strip(),
+        "cpu_percent": cpu_percent,
+        "cpu_count": os.cpu_count(),
+        "ram_total_bytes": total,
+        "ram_used_bytes": used,
+        "ram_available_bytes": available,
+        "ram_percent": percent,
+        "disk": _disk_usage_payload(),
+        "measured_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 def get_process_status(sample_seconds: float = 0.2) -> dict[str, Any]:
     sample_seconds = max(0.0, float(sample_seconds))
     rss, peak_rss, cpu_percent, thread_count = _try_psutil_metrics(sample_seconds)

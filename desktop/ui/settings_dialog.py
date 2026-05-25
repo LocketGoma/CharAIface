@@ -37,6 +37,7 @@ class SettingsDialog(QDialog):
     local_model_prepare_requested = Signal(str, bool, bool, bool, float)
     local_model_delete_requested = Signal(str, bool)
     local_model_list_requested = Signal(bool)
+    avatar_opacity_preview_changed = Signal(float)
 
     def __init__(
         self,
@@ -123,7 +124,29 @@ class SettingsDialog(QDialog):
         form_layout.addRow(self.localization.t("settings.user_name"), self.user_name_edit)
         form_layout.addRow(self.localization.t("settings.language"), self.language_combo)
 
+        output_label = QLabel(self.localization.t("settings.conversation_output"))
+        output_label.setObjectName("SettingsSectionLabel")
+
+        self.conversation_markdown_checkbox = QCheckBox(
+            self.localization.t("settings.conversation_markdown_enabled")
+        )
+        self.conversation_markdown_checkbox.setChecked(self.settings.conversation_markdown_enabled)
+
+        self.enforce_response_language_checkbox = QCheckBox(
+            self.localization.t("settings.enforce_response_language")
+        )
+        self.enforce_response_language_checkbox.setChecked(self.settings.enforce_response_language)
+
+        self.emphasize_character_style_checkbox = QCheckBox(
+            self.localization.t("settings.emphasize_character_style")
+        )
+        self.emphasize_character_style_checkbox.setChecked(self.settings.emphasize_character_style)
+
         layout.addLayout(form_layout)
+        layout.addWidget(output_label)
+        layout.addWidget(self.conversation_markdown_checkbox)
+        layout.addWidget(self.enforce_response_language_checkbox)
+        layout.addWidget(self.emphasize_character_style_checkbox)
         layout.addStretch()
 
         return tab
@@ -145,7 +168,7 @@ class SettingsDialog(QDialog):
         self._setup_character_combo()
 
         self.character_reload_button = QPushButton(
-            self.localization.t("settings.character.reload")
+            self.localization.t("settings.character.reload_all")
         )
         self.character_reload_button.clicked.connect(self._reload_character_packs)
 
@@ -202,8 +225,9 @@ class SettingsDialog(QDialog):
         self.theme_palette_view = QTextEdit()
         self.theme_palette_view.setReadOnly(True)
         self.theme_palette_view.setAcceptRichText(True)
-        self.theme_palette_view.setMinimumHeight(220)
+        self.theme_palette_view.setMinimumHeight(420)
         self.theme_palette_view.setObjectName("ThemePaletteView")
+        self.theme_palette_view.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
         self.theme_palette_view.setVisible(False)
         layout.addWidget(self.theme_palette_view)
 
@@ -736,6 +760,7 @@ class SettingsDialog(QDialog):
             self.avatar_opacity_slider.blockSignals(False)
 
         self.avatar_opacity_label.setText(f"{snapped_value}%")
+        self.avatar_opacity_preview_changed.emit(snapped_value / 100.0)
 
     def _on_cloud_ai_provider_changed(self) -> None:
         if not hasattr(self, "cloud_ai_provider_combo"):
@@ -1458,6 +1483,9 @@ class SettingsDialog(QDialog):
     def apply_to_settings(self) -> None:
         self.settings.user_name = self.user_name_edit.text().strip() or AppSettings().user_name
         self.settings.language = self.language_combo.currentData()
+        self.settings.conversation_markdown_enabled = self.conversation_markdown_checkbox.isChecked()
+        self.settings.enforce_response_language = self.enforce_response_language_checkbox.isChecked()
+        self.settings.emphasize_character_style = self.emphasize_character_style_checkbox.isChecked()
 
         self.settings.theme_id = self.theme_combo.currentData()
         self.settings.selected_character_id = self.character_combo.currentData()

@@ -232,3 +232,5 @@ resources/builtin/
 .env
 .idea
 resources/data/settings.json
+resources/data/chat_sessions/sessions
+resources/data/chat_sessions/session_index.json
