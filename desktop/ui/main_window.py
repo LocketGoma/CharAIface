@@ -1174,9 +1174,7 @@ class MainWindow(QMainWindow):
         self._refresh_session_sidebar()
 
     def _pending_response_text(self) -> str:
-        if self.settings.language == "ko":
-            return "응답 생성 중..."
-        return "Generating response..."
+        return self.localization.t("chat.pending_response")
 
     def _show_pending_assistant_response(self, session_id: str | None) -> None:
         if not session_id or session_id != self.current_session_id:
@@ -1906,11 +1904,9 @@ class MainWindow(QMainWindow):
                 self._show_about_dialog()
                 return True
 
-            if self._try_route_overlay_mouse_press_to_chat_actions(watched, event):
-                return True
-
-            if self._try_route_overlay_mouse_press_to_session_sidebar(watched, event):
-                return True
+            if self._is_bottom_overlay_mouse_event_target(watched):
+                if self._handle_bottom_overlay_mouse_press(watched, event):
+                    return True
 
             if self._is_character_mouse_event_target(watched):
                 if self._handle_character_mouse_press(event):
@@ -1950,90 +1946,10 @@ class MainWindow(QMainWindow):
             return
 
         self._character_mouse_events_enabled = enabled
-
-        transparent = not enabled
-        for widget in (
-            getattr(self.bottom_area, "character_area", None),
-            getattr(self.bottom_area, "avatar_widget", None),
-            getattr(self.bottom_area, "character_info_box", None),
-            getattr(self.bottom_area, "character_name_label", None),
-            getattr(self.bottom_area, "state_label", None),
-            getattr(self.bottom_area, "user_name_box", None),
-            getattr(self.bottom_area, "user_label", None),
-            getattr(self.bottom_area, "user_name_label", None),
-        ):
-            if widget is not None:
-                widget.setAttribute(
-                    Qt.WidgetAttribute.WA_TransparentForMouseEvents,
-                    transparent,
-                )
-
-    def _try_route_overlay_mouse_press_to_chat_actions(self, watched, event) -> bool:  # noqa: ANN001
-        if getattr(self, "_character_mouse_events_enabled", False):
-            return False
-
-        if event.button() != Qt.MouseButton.LeftButton:
-            return False
-
-        if not hasattr(self, "bottom_area") or not hasattr(self, "chat_view"):
-            return False
-
-        widget = watched if isinstance(watched, QWidget) else None
-        if widget is None:
-            return False
-
-        # Composer and send button must keep their own input. Other bottom overlay
-        # areas may be visually above lower chat action buttons, so route those
-        # clicks by global position instead of trying to resend Qt events.
-        current = widget
-        while current is not None:
-            if current in {self.bottom_area.composer, self.bottom_area.send_button}:
-                return False
-            if current is self.bottom_area:
-                break
-            current = current.parentWidget()
-        else:
-            return False
-
-        return self.chat_view.handle_global_action_mouse_press(
-            self._event_global_pos(event)
+        self.bottom_area.character_area.setAttribute(
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents,
+            not enabled,
         )
-
-    def _try_route_overlay_mouse_press_to_session_sidebar(self, watched, event) -> bool:  # noqa: ANN001
-        if getattr(self, "_character_mouse_events_enabled", False):
-            return False
-
-        if event.button() != Qt.MouseButton.LeftButton:
-            return False
-
-        if not hasattr(self, "bottom_area") or not hasattr(self, "session_sidebar"):
-            return False
-
-        widget = watched if isinstance(watched, QWidget) else None
-        if widget is None:
-            return False
-
-        # Composer and send button must keep their own mouse input. Everything
-        # else in the left/bottom overlay can pass through to the session list
-        # when the cursor is visually over a session row.
-        current = widget
-        while current is not None:
-            if current in {self.bottom_area.composer, self.bottom_area.send_button}:
-                return False
-            if current is self.bottom_area:
-                break
-            current = current.parentWidget()
-        else:
-            return False
-
-        global_pos = self._event_global_pos(event)
-        sidebar_global_rect = self.session_sidebar.rect().translated(
-            self.session_sidebar.mapToGlobal(self.session_sidebar.rect().topLeft())
-        )
-        if not sidebar_global_rect.contains(global_pos):
-            return False
-
-        return self.session_sidebar.handle_global_mouse_press(global_pos)
 
     def _is_character_mouse_event_target(self, watched) -> bool:  # noqa: ANN001
         if not hasattr(self, "bottom_area"):
@@ -2044,6 +1960,65 @@ class MainWindow(QMainWindow):
             if widget is self.bottom_area.character_area:
                 return True
             widget = widget.parentWidget()
+
+        return False
+
+    def _is_bottom_overlay_mouse_event_target(self, watched) -> bool:  # noqa: ANN001
+        if not hasattr(self, "bottom_area"):
+            return False
+
+        widget = watched if isinstance(watched, QWidget) else None
+        while widget is not None:
+            if widget is self.bottom_area:
+                return True
+            widget = widget.parentWidget()
+
+        return False
+
+    def _is_overlay_control_widget(self, watched) -> bool:  # noqa: ANN001
+        if not hasattr(self, "bottom_area"):
+            return False
+
+        widget = watched if isinstance(watched, QWidget) else None
+        while widget is not None:
+            if widget is self.bottom_area.composer or widget is self.bottom_area.send_button:
+                return True
+            if widget is self.bottom_area:
+                return False
+            widget = widget.parentWidget()
+
+        return False
+
+    def _handle_bottom_overlay_mouse_press(self, watched, event) -> bool:  # noqa: ANN001
+        if event.button() != Qt.MouseButton.LeftButton:
+            return False
+
+        # Composer and send button are real controls and must keep their own
+        # mouse handling. Only the visual overlay area is pass-through/routed.
+        if self._is_overlay_control_widget(watched):
+            return False
+
+        # Alt/Option deliberately activates the character click target. In that
+        # mode the character may consume the event instead of passing it through.
+        if (
+            self._is_character_mouse_event_target(watched)
+            and getattr(self, "_character_mouse_events_enabled", False)
+        ):
+            return self._handle_character_mouse_press(event)
+
+        global_pos = self._event_global_pos(event)
+
+        # Session list gets priority because it is visually placed over the
+        # character column. This keeps row selection working when the avatar
+        # overlaps it.
+        if hasattr(self, "session_sidebar") and self.session_sidebar.handle_global_mouse_press(global_pos):
+            return True
+
+        # Copy/regenerate buttons may be visually under the transparent bottom
+        # overlay. Route by global coordinates only from overlay handling so a
+        # normal button click cannot be fired twice.
+        if hasattr(self, "chat_view") and self.chat_view.handle_global_action_mouse_press(global_pos):
+            return True
 
         return False
 

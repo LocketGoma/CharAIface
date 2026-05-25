@@ -1,0 +1,14 @@
+# CharAIface runtime dependencies
+# Install on Windows:
+#   py -3.12 -m venv .venv
+#   .venv\Scripts\activate
+#   python -m pip install --upgrade pip
+#   pip install -r requirements.txt
+
+fastapi>=0.115
+uvicorn[standard]>=0.30
+pydantic>=2.7
+httpx>=0.27
+PySide6>=6.7
+Pillow>=10.0
+keyring>=25.0

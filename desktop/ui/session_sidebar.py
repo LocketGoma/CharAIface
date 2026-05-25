@@ -214,37 +214,6 @@ class SessionSidebar(QFrame):
 
         return rects
 
-    def handle_global_mouse_press(self, global_pos) -> bool:  # noqa: ANN001
-        if self._collapsed or not self.isVisible():
-            return False
-
-        # Allow the session list to be clicked even when the visual character
-        # overlay is stacked above it. This avoids re-dispatching Qt mouse
-        # events and therefore does not re-enter MainWindow.eventFilter.
-        for index in range(self.session_list.count()):
-            item = self.session_list.item(index)
-            widget = self.session_list.itemWidget(item)
-            if not isinstance(widget, SessionListItemWidget):
-                continue
-
-            widget_global_rect = widget.rect().translated(
-                widget.mapToGlobal(widget.rect().topLeft())
-            )
-            if not widget_global_rect.contains(global_pos):
-                continue
-
-            menu_button = widget.menu_button
-            menu_global_rect = menu_button.rect().translated(
-                menu_button.mapToGlobal(menu_button.rect().topLeft())
-            )
-            if menu_global_rect.contains(global_pos):
-                widget._show_menu()
-            else:
-                widget.selected.emit(widget.session_id)
-            return True
-
-        return False
-
     def set_sessions(
         self,
         sessions: list[dict[str, Any]],
@@ -297,6 +266,46 @@ class SessionSidebar(QFrame):
         if not session_id:
             return None
         return str(session_id)
+
+    def handle_global_mouse_press(self, global_pos) -> bool:  # noqa: ANN001
+        """Select a session row even when the character overlay receives the click.
+
+        The avatar/bottom overlay can visually overlap the session list. When it
+        receives a mouse press, MainWindow can call this coordinate-based fallback
+        instead of redispatching the Qt event, which avoids recursive eventFilter
+        loops.
+        """
+        if self._collapsed or not self.isVisible() or global_pos is None:
+            return False
+
+        for index in range(self.session_list.count()):
+            item = self.session_list.item(index)
+            widget = self.session_list.itemWidget(item)
+            if widget is None or not widget.isVisible():
+                continue
+
+            top_left = widget.mapToGlobal(widget.rect().topLeft())
+            item_rect = widget.rect().translated(top_left)
+            if not item_rect.contains(global_pos):
+                continue
+
+            if isinstance(widget, SessionListItemWidget):
+                menu_top_left = widget.menu_button.mapToGlobal(widget.menu_button.rect().topLeft())
+                menu_rect = widget.menu_button.rect().translated(menu_top_left)
+                if menu_rect.contains(global_pos):
+                    widget._show_menu()
+                else:
+                    self.session_list.setCurrentItem(item)
+                    widget.selected.emit(widget.session_id)
+                return True
+
+            session_id = item.data(Qt.ItemDataRole.UserRole)
+            if session_id:
+                self.session_list.setCurrentItem(item)
+                self._emit_session_selected(str(session_id))
+                return True
+
+        return False
 
     def _on_item_clicked(self, item: QListWidgetItem) -> None:
         if self._is_refreshing:

@@ -2,6 +2,7 @@ key,ko,en
 app.title,CharAIface,CharAIface
 chat.placeholder,메시지를 입력하세요...,Type a message...
 chat.send,전송,Send
+chat.pending_response,응답 생성 중...,Generating response...
 settings.title,설정,Settings
 settings.tab.general,일반,General
 settings.tab.character,캐릭터,Character

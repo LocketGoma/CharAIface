@@ -1,13 +1,13 @@
 from html import escape
 import re
 
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import QPoint, Qt, QTimer, Signal
 from PySide6.QtGui import QGuiApplication
-try:
-    from shiboken6 import isValid as shiboken_is_valid
-except Exception:  # pragma: no cover - defensive fallback for unusual PySide builds.
-    shiboken_is_valid = None
 
+try:
+    import shiboken6
+except ImportError:  # pragma: no cover - PySide6 normally provides this.
+    shiboken6 = None
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -219,31 +219,29 @@ class ChatView(QScrollArea):
         layout.addStretch()
         return actions
 
-    def handle_global_action_mouse_press(self, global_pos) -> bool:  # noqa: ANN001
-        """Click a visible chat action button by global position.
+    def handle_global_action_mouse_press(self, global_pos: QPoint) -> bool:
+        """Trigger chat action buttons hidden under the bottom overlay.
 
-        The bottom character/composer overlay can visually sit above the lower
-        chat area. When that overlay receives the mouse event, MainWindow asks
-        ChatView to resolve whether the click was actually over a chat action
-        button. This keeps Copy/Regenerate usable without re-dispatching Qt
-        events or reintroducing the old eventFilter recursion problem.
+        The bottom character/composer overlay visually overlaps the lower chat
+        area. When a copy/regenerate button is behind that overlay, Qt delivers
+        the mouse press to the overlay instead of the button. This method uses
+        global coordinates as a fallback and clicks the action button directly.
+        It should only be called from overlay mouse handling, never for normal
+        ChatView button events, so it cannot double-fire a normal click.
         """
-        for row in reversed(self._message_widgets):
-            if not self._is_alive_widget(row) or not row.isVisible():
+        if global_pos is None:
+            return False
+
+        for button in self.findChildren(QPushButton, "ChatMessageActionButton"):
+            if not self._is_alive_widget(button) or not button.isVisible() or not button.isEnabled():
                 continue
-            for button in row.findChildren(QPushButton):
-                if button.objectName() != "ChatMessageActionButton":
-                    continue
-                if not self._is_alive_widget(button):
-                    continue
-                if not button.isVisible() or not button.isEnabled():
-                    continue
-                button_rect = button.rect().translated(
-                    button.mapToGlobal(button.rect().topLeft())
-                )
-                if button_rect.contains(global_pos):
-                    button.click()
-                    return True
+
+            top_left = button.mapToGlobal(button.rect().topLeft())
+            button_rect = button.rect().translated(top_left)
+            if button_rect.contains(global_pos):
+                button.click()
+                return True
+
         return False
 
     def _copy_text(self, text: str, button: QPushButton | None = None) -> None:
@@ -262,88 +260,36 @@ class ChatView(QScrollArea):
         self._flash_action_button(button)
         self.regenerate_requested.emit(message_id or fallback_index)
 
-    def _is_alive_widget(self, widget: QWidget | None) -> bool:
-        if widget is None:
-            return False
-        if shiboken_is_valid is not None:
-            try:
-                return bool(shiboken_is_valid(widget))
-            except RuntimeError:
-                return False
-        try:
-            widget.objectName()
-            return True
-        except RuntimeError:
-            return False
-
     def _flash_action_button(self, button: QPushButton | None) -> None:
         if not self._is_alive_widget(button):
             return
 
-        try:
-            button.setProperty("actionFlash", True)
-            self._repolish_widget(button)
-        except RuntimeError:
-            return
-
+        button.setProperty("actionFlash", True)
+        self._repolish_widget(button)
         QTimer.singleShot(1600, lambda btn=button: self._clear_action_button_flash(btn))
 
     def _clear_action_button_flash(self, button: QPushButton | None) -> None:
         if not self._is_alive_widget(button):
             return
 
-        try:
-            button.setProperty("actionFlash", False)
-            self._repolish_widget(button)
-        except RuntimeError:
-            return
+        button.setProperty("actionFlash", False)
+        self._repolish_widget(button)
 
     def _repolish_widget(self, widget: QWidget | None) -> None:
         if not self._is_alive_widget(widget):
             return
-        try:
-            style = widget.style()
-            style.unpolish(widget)
-            style.polish(widget)
-            widget.update()
-        except RuntimeError:
-            return
 
-    def add_pending_assistant_message(self, text: str) -> QWidget:
-        message = ChatMessage(
-            role="assistant",
-            content=text,
-            metadata={
-                "render_markdown": False,
-                "pending": True,
-            },
-        )
-        before_count = len(self._message_widgets)
-        self.add_chat_message(message)
-        if len(self._message_widgets) > before_count:
-            return self._message_widgets[-1]
-        return self.container
+        style = widget.style()
+        style.unpolish(widget)
+        style.polish(widget)
+        widget.update()
 
-    def remove_message_widget(self, widget: QWidget | None) -> None:
+    def _is_alive_widget(self, widget: QWidget | None) -> bool:
         if widget is None:
-            return
-        if not self._is_alive_widget(widget):
-            try:
-                self._message_widgets.remove(widget)
-            except ValueError:
-                pass
-            return
-        try:
-            self.layout.removeWidget(widget)
-            if widget in self._message_widgets:
-                self._message_widgets.remove(widget)
-            widget.deleteLater()
-            self._scroll_to_bottom_later()
-        except RuntimeError:
-            try:
-                self._message_widgets.remove(widget)
-            except ValueError:
-                pass
+            return False
+        if shiboken6 is not None and not shiboken6.isValid(widget):
+            return False
+        return True
 
     def clear_messages(self) -> None:
         for widget in self._message_widgets:
@@ -368,6 +314,21 @@ class ChatView(QScrollArea):
 
         return f"<b>{display_role}</b><br>{content}"
 
+    def add_pending_assistant_message(self, text: str) -> QWidget:
+        message = ChatMessage(
+            role="assistant",
+            content=text,
+            metadata={
+                "render_markdown": False,
+                "pending": True,
+            },
+        )
+        before_count = len(self._message_widgets)
+        self.add_chat_message(message)
+        if len(self._message_widgets) > before_count:
+            return self._message_widgets[-1]
+        return self.container
+
     def _should_render_markdown(self, message: ChatMessage) -> bool:
         metadata = message.metadata or {}
 
@@ -377,12 +338,33 @@ class ChatView(QScrollArea):
         if not self._markdown_enabled:
             return False
 
-        if metadata.get("render_markdown") is True:
+        if metadata.get("render_markdown"):
             return True
 
         # Default conversation output is markdown-enabled. Local slash-command
         # responses explicitly set render_markdown=False before reaching here.
         return True
+
+    def remove_message_widget(self, widget: QWidget | None) -> None:
+        if widget is None:
+            return
+        if not self._is_alive_widget(widget):
+            try:
+                self._message_widgets.remove(widget)
+            except ValueError:
+                pass
+            return
+        try:
+            self.layout.removeWidget(widget)
+            if widget in self._message_widgets:
+                self._message_widgets.remove(widget)
+            widget.deleteLater()
+            self._scroll_to_bottom_later()
+        except RuntimeError:
+            try:
+                self._message_widgets.remove(widget)
+            except ValueError:
+                pass
 
     def _content_to_html(self, content: str, render_markdown: bool) -> str:
         if not content:
