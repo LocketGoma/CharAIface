@@ -336,6 +336,20 @@ class SettingsDialog(QDialog):
         self.model_download_timeout_edit.setText(
             str(self.settings.model_download_timeout_seconds)
         )
+
+        # Local model update configuration
+        # Checkbox to enable or disable periodic update checks
+        self.local_model_update_check_checkbox = QCheckBox()
+        self.local_model_update_check_checkbox.setChecked(
+            bool(self.settings.local_model_update_check_enabled)
+        )
+        # Input for the update check interval (in days). Use a line edit to
+        # allow entry of numbers between 1 and 60. The actual value is
+        # validated when saving the settings.
+        self.local_model_update_interval_edit = QLineEdit()
+        self.local_model_update_interval_edit.setText(
+            str(self.settings.local_model_update_check_interval_days)
+        )
         # Ensure the style model stays synchronized with the local model whenever the user edits or selects a model.
         # Using the currentTextChanged signal avoids issues where lineEdit() might be None on some platforms.
         self.local_model_combo.currentTextChanged.connect(self.style_model_edit.setText)
@@ -345,6 +359,17 @@ class SettingsDialog(QDialog):
         )
         self.local_model_download_button.clicked.connect(
             self._request_local_model_prepare
+        )
+
+        # Button to manually trigger a model update check. This will use the
+        # current local model selection and attempt to download the latest
+        # version if one exists. The signal emitted is identical to the
+        # download behaviour, but separated here for clarity in the UI.
+        self.local_model_update_check_button = QPushButton(
+            self.localization.t("local_ai.model.update.check.button")
+        )
+        self.local_model_update_check_button.clicked.connect(
+            self._request_local_model_update
         )
 
         self.local_model_delete_button = QPushButton(
@@ -368,6 +393,7 @@ class SettingsDialog(QDialog):
         local_model_action_layout.addWidget(self.local_model_download_button)
         local_model_action_layout.addWidget(self.local_model_delete_button)
         local_model_action_layout.addWidget(self.local_model_list_button)
+        local_model_action_layout.addWidget(self.local_model_update_check_button)
         local_model_action_layout.addStretch()
 
         form_layout.addRow(self.localization.t("settings.local_ai.provider"), self.local_ai_provider_combo)
@@ -382,6 +408,15 @@ class SettingsDialog(QDialog):
         form_layout.addRow(self.localization.t("settings.auto_start_local_ai_server"), self.auto_start_local_ai_server_checkbox)
         form_layout.addRow(self.localization.t("settings.warn_large_local_model"), self.warn_large_local_model_checkbox)
         form_layout.addRow(self.localization.t("settings.model_download_timeout_seconds"), self.model_download_timeout_edit)
+        # Local model update settings: enable/disable and interval
+        form_layout.addRow(
+            self.localization.t("settings.local_model_update_check_enabled"),
+            self.local_model_update_check_checkbox,
+        )
+        form_layout.addRow(
+            self.localization.t("settings.local_model_update_interval_days"),
+            self.local_model_update_interval_edit,
+        )
         form_layout.addRow("", local_model_action_widget)
 
         layout.addLayout(form_layout)
@@ -450,6 +485,41 @@ class SettingsDialog(QDialog):
             timeout_seconds = float(AppSettings().model_download_timeout_seconds)
         timeout_seconds = max(30.0, timeout_seconds)
         auto_start_server = self.auto_start_local_ai_server_checkbox.isChecked()
+        self.local_model_prepare_requested.emit(
+            model_name,
+            True,
+            False,
+            auto_start_server,
+            timeout_seconds,
+        )
+
+    def _request_local_model_update(self) -> None:
+        """
+        Slot invoked when the user clicks the model update check button. This
+        function retrieves the currently selected local model name and emits
+        a request to prepare (download/update) the model. Unlike the normal
+        download flow, this does not prompt the user to choose a different
+        model; it simply uses the model selected in the main combo box. If
+        the model name is empty, a warning is displayed. The timeout and
+        auto-start server options mirror those used for the download button.
+        """
+        model_name = self.local_model_combo.currentText().strip()
+        if not model_name:
+            QMessageBox.warning(
+                self,
+                self.localization.t("settings.title"),
+                self.localization.t("local_ai.model.empty"),
+            )
+            return
+        try:
+            timeout_seconds = float(self.model_download_timeout_edit.text().strip())
+        except ValueError:
+            timeout_seconds = float(AppSettings().model_download_timeout_seconds)
+        timeout_seconds = max(30.0, timeout_seconds)
+        auto_start_server = self.auto_start_local_ai_server_checkbox.isChecked()
+        # Always use auto_pull=True for update checks so that the latest
+        # revision of the model is retrieved if available. Auto-install
+        # runtime is disabled to avoid reinstalling Ollama during update.
         self.local_model_prepare_requested.emit(
             model_name,
             True,
@@ -1595,6 +1665,20 @@ class SettingsDialog(QDialog):
             timeout_seconds = AppSettings().model_download_timeout_seconds
 
         self.settings.model_download_timeout_seconds = max(30, timeout_seconds)
+
+        # Save local model update settings. If the checkbox is checked, enable
+        # periodic update checks; otherwise disable them. The interval is
+        # clamped between 1 and 60 days. If invalid input is provided, fall
+        # back to the default from a fresh AppSettings instance.
+        self.settings.local_model_update_check_enabled = (
+            self.local_model_update_check_checkbox.isChecked()
+        )
+        try:
+            interval_days = int(self.local_model_update_interval_edit.text().strip())
+        except ValueError:
+            interval_days = AppSettings().local_model_update_check_interval_days
+        interval_days = max(1, min(60, interval_days))
+        self.settings.local_model_update_check_interval_days = interval_days
 
         self.settings.cloud_ai_enabled = self.cloud_ai_enabled_checkbox.isChecked()
         self.settings.cloud_ai_provider = (
