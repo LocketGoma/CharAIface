@@ -321,11 +321,30 @@ class MainWindow(QMainWindow):
             print("[Settings] CharacterRegistry is not initialized.")
             return
 
+        # Retrieve the list of installed local models so that the settings dialog
+        # can populate its model selection combo box and download dialog. If the
+        # query fails or returns no models, an empty list will be used.
+        installed_models: list[str] = []
+        try:
+            result = self.backend_client.list_ollama_models(
+                auto_start_server=self.settings.auto_start_local_ai_server,
+                timeout_seconds=15.0,
+            )
+            if result and result.get("success"):
+                for model in result.get("models") or []:
+                    if isinstance(model, dict):
+                        name = model.get("name") or model.get("model")
+                        if name:
+                            installed_models.append(str(name))
+        except Exception as exc:
+            print(f"[Settings] Failed to list installed models: {exc}")
+
         dialog = SettingsDialog(
             settings=self.settings.model_copy(deep=True),
             localization=self.localization,
             theme_manager=self.theme_manager,
             character_registry=self.character_registry,
+            installed_models=installed_models,
             parent=self,
         )
         dialog.local_model_prepare_requested.connect(

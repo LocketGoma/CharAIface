@@ -45,6 +45,7 @@ class SettingsDialog(QDialog):
         localization: LocalizationManager,
         theme_manager: ThemeManager,
         character_registry: CharacterRegistry,
+        installed_models: list[str] | None = None,
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -53,6 +54,10 @@ class SettingsDialog(QDialog):
         self.localization = localization
         self.theme_manager = theme_manager
         self.character_registry = character_registry
+        # A list of installed local AI model names. When provided, this allows the
+        # model combo box and download dialog to present available models for
+        # selection. If not provided or empty, only the current model is available.
+        self.installed_models: list[str] = installed_models or []
         self.character_registry_reloaded = False
         self._updating_cloud_model_combo = False
 
@@ -266,11 +271,37 @@ class SettingsDialog(QDialog):
         self.local_ai_base_url_edit = QLineEdit()
         self.local_ai_base_url_edit.setText(self.settings.local_ai_base_url)
 
-        self.local_model_edit = QLineEdit()
-        self.local_model_edit.setText(self.settings.local_model)
+        # Use a combo box for selecting the local model so that the user can both
+        # choose from existing models and type in a custom model name. The combo
+        # box is set to be editable. The current text is initialised from the
+        # saved settings. We call _finalize_combo_box to apply consistent
+        # styling.
+        self.local_model_combo = QComboBox()
+        self.local_model_combo.setEditable(True)
+        # Initialise with the current local model. When editable, setEditText
+        # updates the line edit portion without adding a duplicate item.
+        try:
+            self.local_model_combo.setEditText(self.settings.local_model)
+        except AttributeError:
+            # Fallback for older Qt versions: add the item and set the index.
+            self.local_model_combo.addItem(self.settings.local_model)
+            self.local_model_combo.setCurrentIndex(0)
+        self._finalize_combo_box(self.local_model_combo)
+
+        # Populate the combo box with any known installed models (excluding the current one).
+        for model_name in self.installed_models:
+            text = str(model_name or '').strip()
+            if text and text != self.settings.local_model:
+                # Avoid adding duplicates
+                if self.local_model_combo.findText(text) < 0:
+                    self.local_model_combo.addItem(text)
 
         self.style_model_edit = QLineEdit()
+        # Disable manual editing of the style model. It should always match the local model.
+        self.style_model_edit.setEnabled(False)
         self.style_model_edit.setText(self.settings.style_model)
+        # Mirror local model text into the style model field to keep them in sync.
+        # Note: the connection to the editable combo box's line edit is set up after both widgets are created.
 
         self.runtime_install_policy_combo = QComboBox()
         self._setup_policy_combo(
@@ -305,6 +336,9 @@ class SettingsDialog(QDialog):
         self.model_download_timeout_edit.setText(
             str(self.settings.model_download_timeout_seconds)
         )
+        # Ensure the style model stays synchronized with the local model whenever the user edits or selects a model.
+        # Using the currentTextChanged signal avoids issues where lineEdit() might be None on some platforms.
+        self.local_model_combo.currentTextChanged.connect(self.style_model_edit.setText)
 
         self.local_model_download_button = QPushButton(
             self.localization.t("local_ai.model.download.button")
@@ -338,8 +372,11 @@ class SettingsDialog(QDialog):
 
         form_layout.addRow(self.localization.t("settings.local_ai.provider"), self.local_ai_provider_combo)
         form_layout.addRow(self.localization.t("settings.local_ai.base_url"), self.local_ai_base_url_edit)
-        form_layout.addRow(self.localization.t("settings.model.local_ai"), self.local_model_edit)
-        form_layout.addRow(self.localization.t("settings.model.style_ai"), self.style_model_edit)
+        # Show only a single input for the local model. The style model is derived
+        # automatically from the local model and does not need a separate field.
+        form_layout.addRow(self.localization.t("settings.model.local_ai"), self.local_model_combo)
+        # Do not display the style model row. The style model field exists only
+        # for internal synchronisation and is disabled.
         form_layout.addRow(self.localization.t("settings.runtime_install_policy"), self.runtime_install_policy_combo)
         form_layout.addRow(self.localization.t("settings.model_install_policy"), self.model_install_policy_combo)
         form_layout.addRow(self.localization.t("settings.auto_start_local_ai_server"), self.auto_start_local_ai_server_checkbox)
@@ -360,8 +397,45 @@ class SettingsDialog(QDialog):
 
 
     def _request_local_model_prepare(self) -> None:
-        model_name = self.local_model_edit.text().strip()
-
+        # Open a modal dialog allowing the user to choose or enter a local model
+        # to download or update. The dialog presents a combo box populated with
+        # known installed models and allows free text entry. The current model
+        # selection is used as the default value.
+        dlg = QDialog(self)
+        # Use translated strings when available; fall back to a sensible default.
+        dlg.setWindowTitle(
+            self.localization.t("local_ai.model.download.title")
+            or "Download Local Model"
+        )
+        vbox = QVBoxLayout(dlg)
+        prompt_label = QLabel(
+            self.localization.t("local_ai.model.download.prompt")
+            or "Select or enter a model to download or update:"
+        )
+        prompt_label.setWordWrap(True)
+        vbox.addWidget(prompt_label)
+        combo = QComboBox(dlg)
+        combo.setEditable(True)
+        # Populate with installed models
+        for name in self.installed_models:
+            text = str(name or "").strip()
+            if text:
+                combo.addItem(text)
+        # Use current local model as the default text
+        try:
+            combo.setEditText(self.local_model_combo.currentText())
+        except AttributeError:
+            if combo.count() == 0:
+                combo.addItem(self.local_model_combo.currentText())
+            combo.setCurrentIndex(0)
+        vbox.addWidget(combo)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        vbox.addWidget(buttons)
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        model_name = combo.currentText().strip()
         if not model_name:
             QMessageBox.warning(
                 self,
@@ -369,15 +443,13 @@ class SettingsDialog(QDialog):
                 self.localization.t("local_ai.model.empty"),
             )
             return
-
+        # Use the existing timeout configuration
         try:
             timeout_seconds = float(self.model_download_timeout_edit.text().strip())
         except ValueError:
             timeout_seconds = float(AppSettings().model_download_timeout_seconds)
-
         timeout_seconds = max(30.0, timeout_seconds)
         auto_start_server = self.auto_start_local_ai_server_checkbox.isChecked()
-
         self.local_model_prepare_requested.emit(
             model_name,
             True,
@@ -387,7 +459,7 @@ class SettingsDialog(QDialog):
         )
 
     def _request_local_model_delete(self) -> None:
-        model_name = self.local_model_edit.text().strip()
+        model_name = self.local_model_combo.currentText().strip()
 
         if not model_name:
             QMessageBox.warning(
@@ -1497,8 +1569,13 @@ class SettingsDialog(QDialog):
             self.local_ai_base_url_edit.text().strip() or AppSettings().local_ai_base_url
         )
 
-        self.settings.local_model = self.local_model_edit.text().strip() or AppSettings().local_model
-        self.settings.style_model = self.style_model_edit.text().strip() or self.settings.local_model
+        # Retrieve the model from the editable combo box rather than the line edit.
+        local_model = self.local_model_combo.currentText().strip() or AppSettings().local_model
+        self.settings.local_model = local_model
+        # Keep the style model identical to the selected local model. This ensures
+        # the tone conversion model always matches the primary local AI model and
+        # avoids divergence when editing settings.
+        self.settings.style_model = local_model
 
         self.settings.runtime_install_policy = (
             self.runtime_install_policy_combo.currentData()

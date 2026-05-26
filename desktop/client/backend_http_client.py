@@ -102,6 +102,7 @@ class BackendHttpClient:
         auto_install_runtime: bool,
         auto_start_server: bool,
         timeout_seconds: float,
+        force_pull: bool = False,
     ) -> dict | None:
         url = f"{self.base_url}/local-ai/ollama/prepare-model"
 
@@ -113,6 +114,7 @@ class BackendHttpClient:
                     "auto_pull": auto_pull,
                     "auto_install_runtime": auto_install_runtime,
                     "auto_start_server": auto_start_server,
+                    "force_pull": force_pull,
                 },
                 timeout=timeout_seconds,
             )
@@ -130,6 +132,7 @@ class BackendHttpClient:
         auto_install_runtime: bool,
         auto_start_server: bool,
         timeout_seconds: float,
+        force_pull: bool = False,
     ):
         url = f"{self.base_url}/local-ai/ollama/prepare-model-stream"
 
@@ -142,6 +145,7 @@ class BackendHttpClient:
                     "auto_pull": auto_pull,
                     "auto_install_runtime": auto_install_runtime,
                     "auto_start_server": auto_start_server,
+                    "force_pull": force_pull,
                 },
                 timeout=timeout_seconds,
             ) as response:

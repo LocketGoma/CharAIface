@@ -37,5 +37,9 @@
   "extra": {},
   "conversation_markdown_enabled": true,
   "enforce_response_language": true,
-  "emphasize_character_style": true
+  "emphasize_character_style": true,
+  "local_model_update_check_enabled": false,
+  "local_model_update_check_interval_days": 7,
+  "local_model_update_last_checked_at": "",
+  "local_model_update_last_known_digest": ""
 }

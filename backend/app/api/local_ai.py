@@ -18,6 +18,7 @@ class PrepareLocalModelRequest(BaseModel):
     auto_pull: bool = True
     auto_install_runtime: bool = False
     auto_start_server: bool = True
+    force_pull: bool = False
 
 
 class DeleteLocalModelRequest(BaseModel):
@@ -56,6 +57,7 @@ def prepare_ollama_model_stream(request: PrepareLocalModelRequest):
             auto_pull=request.auto_pull,
             auto_start_server=request.auto_start_server,
             auto_install_runtime=request.auto_install_runtime,
+            force_pull=request.force_pull,
         ):
             yield json.dumps(payload, ensure_ascii=False) + "\n"
 
@@ -121,6 +123,7 @@ def prepare_ollama_model(request: PrepareLocalModelRequest) -> dict:
         model_name=request.model,
         auto_pull=request.auto_pull,
         auto_start_server=request.auto_start_server,
+        force_pull=request.force_pull,
     )
 
     return {

@@ -171,7 +171,6 @@ local_ai.model.list.result,"설치된 로컬 AI 모델: {count}개
 {models}","Installed local AI models: {count}
 {models}"
 local_ai.error.ollama_model_list_failed,Ollama 모델 목록 조회에 실패했습니다.,Failed to list Ollama models.
-
 about.title,정보,About
 about.message,"{app_name}
 
@@ -190,3 +189,17 @@ settings.conversation_output,대화 출력 설정,Conversation Output
 settings.conversation_markdown_enabled,대화 마크다운 활성화,Enable conversation Markdown
 settings.enforce_response_language,선택된 언어 사용 강조,Emphasize selected language
 settings.emphasize_character_style,캐릭터 스타일 강조,Emphasize character style
+local_ai.model.download.dialog.title,로컬 모델 다운로드/업데이트,Download/Update Local Model
+local_ai.model.download.dialog.description,"다운로드 또는 업데이트할 Ollama 모델명을 입력하세요. 현재 설치된 모델은 드롭다운에서 선택할 수 있고, 새 모델명도 직접 입력할 수 있습니다.","Enter the Ollama model to download or update. Installed models are available in the dropdown, and you can type a new model name."
+local_ai.model.download.dialog.ok,다운로드 및 업데이트,Download and Update
+local_ai.model.update.check.button,업데이트 확인,Check Update
+local_ai.model.update.check.confirm,"로컬 AI 모델 ""{model}""의 업데이트를 확인합니다. Ollama 특성상 확인 과정에서 모델 pull이 실행되며, 업데이트가 있으면 다운로드가 진행될 수 있습니다. 진행할까요?","Check updates for local AI model ""{model}"". Ollama may run model pull during this check and download files if an update exists. Continue?"
+local_ai.model.update.periodic.confirm,"로컬 AI 모델 ""{model}"" 업데이트 확인 주기가 되었습니다. Ollama 특성상 확인 과정에서 모델 pull이 실행되며, 업데이트가 있으면 다운로드가 진행될 수 있습니다. 진행할까요?","It is time to check updates for local AI model ""{model}"". Ollama may run model pull during this check and download files if an update exists. Continue?"
+local_ai.model.update.completed,"로컬 AI 모델 ""{model}"" 업데이트가 완료되었습니다.","Local AI model ""{model}"" has been updated."
+local_ai.model.update.latest,"로컬 AI 모델 ""{model}""은 이미 최신 상태입니다.","Local AI model ""{model}"" is already up to date."
+local_ai.model.update.last_checked.never,아직 확인하지 않음,Never checked
+settings.local_model_update_check_enabled,자동 업데이트 확인,Auto Check for Updates
+settings.local_model_update_check_interval_days,업데이트 확인 주기(일),Update check interval (days)
+settings.local_model_update_last_checked_at,마지막 업데이트 확인,Last update check
+local_ai.model.update.action,다운로드 및 업데이트,Download and Update
+local_ai.model.update.skip,이번에는 하지 않음,Skip This Time

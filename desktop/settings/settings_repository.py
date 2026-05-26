@@ -80,6 +80,17 @@ class SettingsRepository:
         if "model_download_timeout_seconds" not in migrated:
             migrated["model_download_timeout_seconds"] = 600
 
+        # Local model update settings were introduced in a later version. Set default
+        # values when they are missing to avoid KeyError during application startup.
+        if "local_model_update_check_enabled" not in migrated:
+            migrated["local_model_update_check_enabled"] = False
+        if "local_model_update_check_interval_days" not in migrated:
+            migrated["local_model_update_check_interval_days"] = 7
+        if "local_model_update_last_checked_at" not in migrated:
+            migrated["local_model_update_last_checked_at"] = ""
+        if "local_model_update_last_known_digest" not in migrated:
+            migrated["local_model_update_last_known_digest"] = ""
+
         if "ai_route_policy" not in migrated:
             migrated["ai_route_policy"] = "auto"
 

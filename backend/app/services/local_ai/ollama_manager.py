@@ -137,6 +137,27 @@ class OllamaManager:
         result.sort(key=lambda item: str(item.get("name") or "").lower())
         return result
 
+    def get_model_detail(self, model_name: str) -> dict[str, Any] | None:
+        normalized_target = self._normalize_model_name(model_name)
+
+        for model in self.list_model_details():
+            name = str(model.get("name") or model.get("model") or "")
+            if self._normalize_model_name(name) == normalized_target:
+                return model
+
+        return None
+
+    def get_model_digest(self, model_name: str) -> str:
+        try:
+            detail = self.get_model_detail(model_name)
+        except httpx.HTTPError:
+            return ""
+
+        if not detail:
+            return ""
+
+        return str(detail.get("digest") or "").strip()
+
     def list_models(self) -> list[str]:
         return [
             str(model["name"])
@@ -200,6 +221,7 @@ class OllamaManager:
         auto_pull: bool,
         auto_start_server: bool,
         auto_install_runtime: bool = False,
+        force_pull: bool = False,
     ) -> Iterator[dict[str, Any]]:
         runtime = self.runtime_status()
 
@@ -281,13 +303,20 @@ class OllamaManager:
             return
 
         current_model_status = self.model_status(model_name)
-        if current_model_status.installed:
+        before_digest = self.get_model_digest(model_name) if current_model_status.installed else ""
+
+        if current_model_status.installed and not force_pull:
             yield {
                 "event": "finished",
                 "provider": "ollama",
                 "success": True,
                 "runtime": runtime.to_dict(),
-                "model": current_model_status.to_dict(),
+                "model": {
+                    **current_model_status.to_dict(),
+                    "digest": before_digest,
+                    "updated": False,
+                    "update_checked": False,
+                },
             }
             return
 
@@ -307,6 +336,8 @@ class OllamaManager:
             "model": model_name,
             "progress": 0,
             "status": "starting",
+            "force_pull": force_pull,
+            "previous_digest": before_digest,
         }
 
         last_progress = 0
@@ -375,23 +406,33 @@ class OllamaManager:
             return
 
         installed = False
+        after_digest = ""
         try:
             installed = self.has_model(model_name)
+            after_digest = self.get_model_digest(model_name) if installed else ""
         except httpx.HTTPError:
             installed = False
+
+        updated = bool(force_pull and before_digest and after_digest and before_digest != after_digest)
 
         yield {
             "event": "finished",
             "provider": "ollama",
             "success": installed,
             "runtime": self.runtime_status().to_dict(),
-            "model": OllamaModelStatus(
-                model=model_name,
-                installed=installed,
-                pulled=installed,
-                state="ready" if installed else "pull_failed",
-                error_code=None if installed else "model_pull_failed",
-            ).to_dict(),
+            "model": {
+                **OllamaModelStatus(
+                    model=model_name,
+                    installed=installed,
+                    pulled=installed,
+                    state="ready" if installed else "pull_failed",
+                    error_code=None if installed else "model_pull_failed",
+                ).to_dict(),
+                "digest": after_digest,
+                "previous_digest": before_digest,
+                "updated": updated,
+                "update_checked": bool(force_pull),
+            },
         }
 
 
@@ -495,6 +536,7 @@ class OllamaManager:
         model_name: str,
         auto_pull: bool,
         auto_start_server: bool,
+        force_pull: bool = False,
     ) -> OllamaModelStatus:
         runtime = self.runtime_status()
 
@@ -523,7 +565,7 @@ class OllamaManager:
 
         current_model_status = self.model_status(model_name)
 
-        if current_model_status.installed:
+        if current_model_status.installed and not force_pull:
             return current_model_status
 
         if not auto_pull:
@@ -667,6 +709,17 @@ class OllamaManager:
             "count": len(models),
         }
 
+    def _normalize_model_name(self, model_name: str) -> str:
+        normalized = model_name.strip().lower()
+
+        if not normalized:
+            return normalized
+
+        if ":" not in normalized:
+            return f"{normalized}:latest"
+
+        return normalized
+
     def _wait_for_server(self, timeout_seconds: float) -> bool:
         started_at = time.monotonic()
 
@@ -697,11 +750,3 @@ class OllamaManager:
 
         except (OSError, subprocess.SubprocessError):
             return None
-
-    def _normalize_model_name(self, model_name: str) -> str:
-        stripped = model_name.strip().lower()
-
-        if ":" not in stripped:
-            return f"{stripped}:latest"
-
-        return stripped

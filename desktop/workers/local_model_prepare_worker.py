@@ -16,6 +16,7 @@ class LocalModelPrepareWorker(QObject):
         auto_install_runtime: bool,
         auto_start_server: bool,
         timeout_seconds: float,
+        force_pull: bool = False,
     ) -> None:
         super().__init__()
 
@@ -25,23 +26,33 @@ class LocalModelPrepareWorker(QObject):
         self.auto_install_runtime = auto_install_runtime
         self.auto_start_server = auto_start_server
         self.timeout_seconds = timeout_seconds
+        self.force_pull = force_pull
 
     @Slot()
     def run(self) -> None:
         final_result: dict | None = None
 
-        for payload in self.backend_client.stream_prepare_ollama_model(
-            model=self.model,
-            auto_pull=self.auto_pull,
-            auto_install_runtime=self.auto_install_runtime,
-            auto_start_server=self.auto_start_server,
-            timeout_seconds=self.timeout_seconds,
-        ):
-            if payload.get("event") == "finished":
-                final_result = payload
-                break
+        try:
+            stream = self.backend_client.stream_prepare_ollama_model(
+                model=self.model,
+                auto_pull=self.auto_pull,
+                auto_install_runtime=self.auto_install_runtime,
+                auto_start_server=self.auto_start_server,
+                timeout_seconds=self.timeout_seconds,
+                force_pull=self.force_pull,
+            )
 
-            self.progress.emit(payload)
+            for payload in stream:
+                if payload.get("event") == "finished":
+                    final_result = payload
+                    break
+
+                self.progress.emit(payload)
+
+        except Exception as error:
+            print(f"[LocalAI] Local model prepare worker failed: {error}")
+            self.failed.emit("request_failed")
+            return
 
         if final_result is None:
             self.failed.emit("request_failed")

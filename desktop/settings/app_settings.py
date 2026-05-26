@@ -79,6 +79,17 @@ class AppSettings(BaseModel):
     warn_large_local_model: bool = True
     model_download_timeout_seconds: int = 600
 
+    # Local model update settings
+    # If true, the application will periodically check for updates to the installed
+    # local AI model. The interval is specified in days and must be between 1
+    # and 60. When an update is detected, the user will be prompted before
+    # downloading and applying the new model. The last known digest and last
+    # checked timestamp are persisted to avoid repeated prompts.
+    local_model_update_check_enabled: bool = False
+    local_model_update_check_interval_days: int = 7
+    local_model_update_last_checked_at: str = ""
+    local_model_update_last_known_digest: str = ""
+
     window_width: int = 980
     window_height: int = 720
 
