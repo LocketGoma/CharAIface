@@ -76,15 +76,6 @@ class MainWindow(QMainWindow):
         self.backend_client = BackendHttpClient()
         self._restore_last_chat_session()
 
-        # Maintain a cached list of installed local AI models. This list is
-        # refreshed whenever models are downloaded, deleted, or the settings
-        # dialog is opened. Each entry is the variant-specific model name as
-        # returned by the backend (typically the "name" field from the
-        # Ollama API). Using a cached list avoids stale drop-down contents
-        # after model installations and keeps the selection consistent across
-        # multiple dialogs.
-        self._installed_models: list[str] = []
-
         # Timer for periodic local model update checks. It is initialised in
         # _schedule_local_model_update_timer when settings indicate that
         # update checks are enabled. The timer is restarted whenever the
@@ -339,11 +330,38 @@ class MainWindow(QMainWindow):
             print("[Settings] CharacterRegistry is not initialized.")
             return
 
-        # Refresh the cached list of installed models so that the settings
-        # dialog reflects any recent downloads or deletions. If the request
-        # fails, the previous cached list is retained.
-        self._refresh_installed_model_list(auto_start_server=True, timeout_seconds=15.0)
-        installed_models: list[str] = list(self._installed_models)
+        # Retrieve the list of installed local models so that the settings dialog
+        # can populate its model selection combo box and download dialog. If the
+        # query fails or returns no models, an empty list will be used.
+        installed_models: list[str] = []
+        try:
+            # For the purposes of populating the model selection UI, always
+            # auto-start the local AI server so that installed models can be enumerated.
+            result = self.backend_client.list_ollama_models(
+                auto_start_server=True,
+                timeout_seconds=15.0,
+            )
+            if result and result.get("success"):
+                # Collect all available model identifiers, preferring the full
+                # identifier ("model") when present. Duplicate entries are
+                # removed while preserving the original order. This prevents
+                # models from being "hidden" when multiple variants share the
+                # same base name but differ in version or quantization.
+                all_models: list[str] = []
+                for model in result.get("models") or []:
+                    if not isinstance(model, dict):
+                        continue
+                    full_name = model.get("model") or model.get("name") or ""
+                    if full_name:
+                        all_models.append(str(full_name))
+                # De-duplicate while preserving order
+                seen: set[str] = set()
+                for m in all_models:
+                    if m not in seen:
+                        installed_models.append(m)
+                        seen.add(m)
+        except Exception as exc:
+            print(f"[Settings] Failed to list installed models: {exc}")
 
         dialog = SettingsDialog(
             settings=self.settings.model_copy(deep=True),
@@ -1696,51 +1714,52 @@ class MainWindow(QMainWindow):
         self,
         auto_start_server: bool,
     ) -> None:
-        # Refresh the installed model list before displaying it so that the
-        # information reflects any changes (downloads/deletions). When
-        # auto_start_server is false, the refresh will not attempt to start the
-        # server if it is offline; listing models will still work if the
-        # server is already running.
-        self._refresh_installed_model_list(auto_start_server=auto_start_server, timeout_seconds=15.0)
-
-        # Retrieve the latest model details from the backend to include
-        # sizes and modification times. If the request fails, fall back to
-        # the cached names without additional metadata.
         result = self.backend_client.list_ollama_models(
             auto_start_server=auto_start_server,
             timeout_seconds=15.0,
         )
 
-        if not result or not result.get("success"):
-            # Fallback: show the cached list without size/modification info
-            if not self._installed_models:
-                message = self.localization.t("local_ai.model.list.empty")
-            else:
-                lines = [f"- {name}" for name in self._installed_models]
-                message = self.localization.t(
-                    "local_ai.model.list.result",
-                    count=len(lines),
-                    models="\n".join(lines),
-                )
+        if result is None:
+            QMessageBox.warning(
+                self,
+                self.localization.t("app.title"),
+                self.localization.t(
+                    "local_ai.model.list.failed",
+                    error=self._local_ai_error_message("request_failed"),
+                ),
+            )
+            return
+
+        if not result.get("success"):
+            error_code = str(result.get("error_code") or "unknown")
+            QMessageBox.warning(
+                self,
+                self.localization.t("app.title"),
+                self.localization.t(
+                    "local_ai.model.list.failed",
+                    error=self._local_ai_error_message(error_code),
+                ),
+            )
+            return
+
+        models = result.get("models") or []
+        if not models:
+            message = self.localization.t("local_ai.model.list.empty")
         else:
-            models = result.get("models") or []
-            if not models:
-                message = self.localization.t("local_ai.model.list.empty")
-            else:
-                lines = []
-                for model in models:
-                    if not isinstance(model, dict):
-                        continue
-                    # Use the variant-specific name when available
-                    name = str(model.get("name") or model.get("model") or "unknown")
-                    size = self._format_bytes(model.get("size"))
-                    modified_at = str(model.get("modified_at") or "unknown")
-                    lines.append(f"- {name} / {size} / {modified_at}")
-                message = self.localization.t(
-                    "local_ai.model.list.result",
-                    count=len(lines),
-                    models="\n".join(lines),
-                )
+            lines = []
+            for model in models:
+                if not isinstance(model, dict):
+                    continue
+                name = str(model.get("name") or model.get("model") or "unknown")
+                size = self._format_bytes(model.get("size"))
+                modified_at = str(model.get("modified_at") or "unknown")
+                lines.append(f"- {name} / {size} / {modified_at}")
+
+            message = self.localization.t(
+                "local_ai.model.list.result",
+                count=len(lines),
+                models="\n".join(lines),
+            )
 
         QMessageBox.information(
             self,
@@ -1887,17 +1906,6 @@ class MainWindow(QMainWindow):
 
         self.character_state.on_assistant_done()
 
-        # Refresh the installed model list after a successful (or already
-        # available) model prepare. This ensures that any newly downloaded
-        # model appears in subsequent settings dialogs and lists. Refreshing
-        # here avoids stale drop-down contents without requiring the user to
-        # restart the application. Errors are logged but do not interrupt
-        # normal execution.
-        try:
-            self._refresh_installed_model_list(auto_start_server=False, timeout_seconds=10.0)
-        except Exception as exc:
-            print(f"[LocalAI] Failed to refresh models after prepare: {exc}")
-
     def _on_local_model_prepare_failed(self, error_code: str) -> None:
         QMessageBox.warning(
             self,
@@ -1925,10 +1933,9 @@ class MainWindow(QMainWindow):
         installed local AI model. The timer interval is derived from the
         settings and clamped between 1 and 60 days. If update checks are
         disabled, any existing timer is stopped and removed. When enabled,
-        the timer does not trigger an immediate check by default; instead
-        an initial check is scheduled only if the last-checked timestamp is
-        missing or the configured interval has elapsed. This function should
-        be called whenever the settings change.
+        the timer will immediately trigger a check and then repeat at the
+        configured interval. This function should be called whenever the
+        settings change.
         """
         # Stop and clean up any existing timer
         if hasattr(self, "_local_model_update_timer") and self._local_model_update_timer:
@@ -1952,80 +1959,16 @@ class MainWindow(QMainWindow):
         interval_days = max(1, min(60, interval_days))
         interval_ms = int(interval_days * 24 * 60 * 60 * 1000)
 
-        # Create a repeating timer; connect to the update handler. The timer
-        # itself does not trigger an immediate check; an initial check may be
-        # scheduled below depending on the last-checked timestamp.
+        # Create a repeating timer; connect to the update handler
         timer = QTimer(self)
         timer.setInterval(interval_ms)
         timer.setSingleShot(False)
         timer.timeout.connect(self._on_local_model_update_timer)
         self._local_model_update_timer = timer
         timer.start()
-        
-        # Determine whether an immediate update check is due. If the last
-        # check timestamp is missing or indicates that the configured interval
-        # has already elapsed, schedule an immediate check. Otherwise,
-        # allow the timer to fire at its next interval without prompting.
-        last_checked_str = getattr(self.settings, "local_model_update_last_checked_at", "")
-        due = False
-        if not last_checked_str:
-            due = True
-        else:
-            try:
-                from datetime import datetime, timedelta
-                last_checked_dt = datetime.fromisoformat(last_checked_str)
-                now = datetime.now()
-                interval_td = timedelta(days=interval_days)
-                if now - last_checked_dt >= interval_td:
-                    due = True
-            except Exception:
-                due = True
-        if due:
-            QTimer.singleShot(0, self._on_local_model_update_timer)
-
-    def _refresh_installed_model_list(
-        self,
-        auto_start_server: bool = True,
-        timeout_seconds: float = 15.0,
-    ) -> None:
-        """
-        Refresh the cached list of installed local AI models. This method
-        queries the backend for the full list of installed models and
-        updates the internal `_installed_models` list. The names are
-        derived from the variant-specific `name` field returned by
-        `list_ollama_models`, with a fallback to `model` if `name` is
-        missing. Duplicate names are removed while preserving order.
-
-        Parameters
-        ----------
-        auto_start_server : bool, optional
-            Whether to start the local AI server if it is not running.
-        timeout_seconds : float, optional
-            How long to wait for the backend request before giving up.
-        """
-        try:
-            result = self.backend_client.list_ollama_models(
-                auto_start_server=auto_start_server,
-                timeout_seconds=timeout_seconds,
-            )
-            if result and result.get("success"):
-                all_models: list[str] = []
-                for model in result.get("models") or []:
-                    if not isinstance(model, dict):
-                        continue
-                    full_name = model.get("name") or model.get("model") or ""
-                    if full_name:
-                        all_models.append(str(full_name))
-                # De-duplicate while preserving order
-                seen: set[str] = set()
-                updated: list[str] = []
-                for m in all_models:
-                    if m not in seen:
-                        updated.append(m)
-                        seen.add(m)
-                self._installed_models = updated
-        except Exception as exc:
-            print(f"[LocalAI] Failed to refresh installed models: {exc}")
+        # Trigger an immediate check on scheduling to catch updates when the
+        # application first starts or settings are changed.
+        QTimer.singleShot(0, self._on_local_model_update_timer)
 
     def _on_local_model_update_timer(self) -> None:
         """
