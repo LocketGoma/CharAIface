@@ -34,7 +34,7 @@ from desktop.theme.theme_model import ThemePalette
 
 
 class SettingsDialog(QDialog):
-    local_model_prepare_requested = Signal(str, bool, bool, bool, float)
+    local_model_prepare_requested = Signal(str, bool, bool, bool, float, bool)
     local_model_delete_requested = Signal(str, bool)
     local_model_list_requested = Signal(bool)
     avatar_opacity_preview_changed = Signal(float)
@@ -57,7 +57,7 @@ class SettingsDialog(QDialog):
         # A list of installed local AI model names. When provided, this allows the
         # model combo box and download dialog to present available models for
         # selection. If not provided or empty, only the current model is available.
-        self.installed_models: list[str] = installed_models or []
+        self.installed_models: list[str] = self._unique_model_names(installed_models or [])
         self.character_registry_reloaded = False
         self._updating_cloud_model_combo = False
 
@@ -245,6 +245,59 @@ class SettingsDialog(QDialog):
 
         return tab
 
+    def _unique_model_names(self, model_names: list[str]) -> list[str]:
+        unique_names: list[str] = []
+        seen: set[str] = set()
+
+        for model_name in model_names:
+            text = str(model_name or "").strip()
+            if not text:
+                continue
+
+            key = text.casefold()
+            if key in seen:
+                continue
+
+            unique_names.append(text)
+            seen.add(key)
+
+        return unique_names
+
+    def _populate_local_model_combo(self, preferred_model: str | None = None) -> None:
+        if not hasattr(self, "local_model_combo"):
+            return
+
+        model_text = str(preferred_model or "").strip()
+        if not model_text:
+            model_text = str(getattr(self.settings, "local_model", "") or "").strip()
+        if not model_text:
+            model_text = AppSettings().local_model
+
+        was_blocked = self.local_model_combo.blockSignals(True)
+        try:
+            self.local_model_combo.clear()
+
+            for installed_model in self.installed_models:
+                if self.local_model_combo.findText(installed_model) < 0:
+                    self.local_model_combo.addItem(installed_model)
+
+            if self.local_model_combo.findText(model_text) < 0:
+                self.local_model_combo.addItem(model_text)
+
+            index = self.local_model_combo.findText(model_text)
+            if index >= 0:
+                self.local_model_combo.setCurrentIndex(index)
+            self.local_model_combo.setEditText(model_text)
+        finally:
+            self.local_model_combo.blockSignals(was_blocked)
+
+    def refresh_installed_local_models(self, model_names: list[str], preferred_model: str | None = None) -> None:
+        current_text = preferred_model or self.local_model_combo.currentText().strip()
+        self.installed_models = self._unique_model_names(model_names)
+        self._populate_local_model_combo(current_text)
+        if hasattr(self, "style_model_edit"):
+            self.style_model_edit.setText(self.local_model_combo.currentText().strip())
+
     def _create_model_tab(self) -> QWidget:
         tab = QWidget()
         layout = QVBoxLayout(tab)
@@ -278,28 +331,13 @@ class SettingsDialog(QDialog):
         # styling.
         self.local_model_combo = QComboBox()
         self.local_model_combo.setEditable(True)
-        # Initialise with the current local model. When editable, setEditText
-        # updates the line edit portion without adding a duplicate item.
-        try:
-            self.local_model_combo.setEditText(self.settings.local_model)
-        except AttributeError:
-            # Fallback for older Qt versions: add the item and set the index.
-            self.local_model_combo.addItem(self.settings.local_model)
-            self.local_model_combo.setCurrentIndex(0)
+        self._populate_local_model_combo(self.settings.local_model)
         self._finalize_combo_box(self.local_model_combo)
-
-        # Populate the combo box with any known installed models (excluding the current one).
-        for model_name in self.installed_models:
-            text = str(model_name or '').strip()
-            if text and text != self.settings.local_model:
-                # Avoid adding duplicates
-                if self.local_model_combo.findText(text) < 0:
-                    self.local_model_combo.addItem(text)
 
         self.style_model_edit = QLineEdit()
         # Disable manual editing of the style model. It should always match the local model.
         self.style_model_edit.setEnabled(False)
-        self.style_model_edit.setText(self.settings.style_model)
+        self.style_model_edit.setText(self.local_model_combo.currentText().strip() or self.settings.local_model)
         # Mirror local model text into the style model field to keep them in sync.
         # Note: the connection to the editable combo box's line edit is set up after both widgets are created.
 
@@ -491,6 +529,7 @@ class SettingsDialog(QDialog):
             False,
             auto_start_server,
             timeout_seconds,
+            False,
         )
 
     def _request_local_model_update(self) -> None:
@@ -526,6 +565,7 @@ class SettingsDialog(QDialog):
             False,
             auto_start_server,
             timeout_seconds,
+            True,
         )
 
     def _request_local_model_delete(self) -> None:

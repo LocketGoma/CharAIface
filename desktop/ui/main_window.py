@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta
 from pathlib import Path
 from shared.schema.chat import ChatMessage, ChatRequest
 from desktop.chat.chat_session import ChatSession
@@ -81,6 +82,7 @@ class MainWindow(QMainWindow):
         # update checks are enabled. The timer is restarted whenever the
         # settings change via the settings dialog.
         self._local_model_update_timer: QTimer | None = None
+        self._active_settings_dialog: SettingsDialog | None = None
 
         self.setMinimumSize(self.MIN_WINDOW_WIDTH, self.MIN_WINDOW_HEIGHT)
         self.resize(self.settings.window_width, self.settings.window_height)
@@ -325,6 +327,62 @@ class MainWindow(QMainWindow):
         else:
             QTimer.singleShot(0, self.close)
 
+    def _local_model_name_from_payload(self, model_payload: dict) -> str:
+        return str(
+            model_payload.get("model")
+            or model_payload.get("name")
+            or ""
+        ).strip()
+
+    def _local_model_names_from_list_result(self, result: dict | None) -> list[str]:
+        if not result or not result.get("success"):
+            return []
+
+        model_names: list[str] = []
+        seen: set[str] = set()
+
+        for model in result.get("models") or []:
+            if not isinstance(model, dict):
+                continue
+
+            model_name = self._local_model_name_from_payload(model)
+            if not model_name:
+                continue
+
+            key = self._normalize_ollama_model_name(model_name)
+            if key in seen:
+                continue
+
+            model_names.append(model_name)
+            seen.add(key)
+
+        return model_names
+
+    def _fetch_installed_local_model_names(self, auto_start_server: bool) -> list[str]:
+        try:
+            result = self.backend_client.list_ollama_models(
+                auto_start_server=auto_start_server,
+                timeout_seconds=15.0,
+            )
+            return self._local_model_names_from_list_result(result)
+        except Exception as exc:
+            print(f"[Settings] Failed to list installed models: {exc}")
+            return []
+
+    def _refresh_active_settings_local_models(
+        self,
+        model_names: list[str],
+        preferred_model: str | None = None,
+    ) -> None:
+        dialog = self._active_settings_dialog
+        if dialog is None:
+            return
+
+        try:
+            dialog.refresh_installed_local_models(model_names, preferred_model=preferred_model)
+        except RuntimeError:
+            self._active_settings_dialog = None
+
     def open_settings_dialog(self) -> None:
         if self.character_registry is None:
             print("[Settings] CharacterRegistry is not initialized.")
@@ -333,35 +391,7 @@ class MainWindow(QMainWindow):
         # Retrieve the list of installed local models so that the settings dialog
         # can populate its model selection combo box and download dialog. If the
         # query fails or returns no models, an empty list will be used.
-        installed_models: list[str] = []
-        try:
-            # For the purposes of populating the model selection UI, always
-            # auto-start the local AI server so that installed models can be enumerated.
-            result = self.backend_client.list_ollama_models(
-                auto_start_server=True,
-                timeout_seconds=15.0,
-            )
-            if result and result.get("success"):
-                # Collect all available model identifiers, preferring the full
-                # identifier ("model") when present. Duplicate entries are
-                # removed while preserving the original order. This prevents
-                # models from being "hidden" when multiple variants share the
-                # same base name but differ in version or quantization.
-                all_models: list[str] = []
-                for model in result.get("models") or []:
-                    if not isinstance(model, dict):
-                        continue
-                    full_name = model.get("model") or model.get("name") or ""
-                    if full_name:
-                        all_models.append(str(full_name))
-                # De-duplicate while preserving order
-                seen: set[str] = set()
-                for m in all_models:
-                    if m not in seen:
-                        installed_models.append(m)
-                        seen.add(m)
-        except Exception as exc:
-            print(f"[Settings] Failed to list installed models: {exc}")
+        installed_models = self._fetch_installed_local_model_names(auto_start_server=True)
 
         dialog = SettingsDialog(
             settings=self.settings.model_copy(deep=True),
@@ -385,22 +415,27 @@ class MainWindow(QMainWindow):
             self._preview_avatar_occluded_opacity
         )
 
-        if not dialog.exec():
-            self.settings.avatar_occluded_opacity = previous_avatar_occluded_opacity
-            self._update_avatar_occlusion_later()
-            return
+        self._active_settings_dialog = dialog
+        try:
+            if not dialog.exec():
+                self.settings.avatar_occluded_opacity = previous_avatar_occluded_opacity
+                self._update_avatar_occlusion_later()
+                return
 
-        character_registry_reloaded = bool(
-            getattr(dialog, "character_registry_reloaded", False)
-        )
+            character_registry_reloaded = bool(
+                getattr(dialog, "character_registry_reloaded", False)
+            )
 
-        dialog.apply_to_settings()
-        new_settings = dialog.settings
+            dialog.apply_to_settings()
+            new_settings = dialog.settings
 
-        self._apply_settings(
-            new_settings,
-            force_character_reload=character_registry_reloaded,
-        )
+            self._apply_settings(
+                new_settings,
+                force_character_reload=character_registry_reloaded,
+            )
+        finally:
+            if self._active_settings_dialog is dialog:
+                self._active_settings_dialog = None
 
     def _apply_settings(
         self,
@@ -1646,6 +1681,7 @@ class MainWindow(QMainWindow):
         auto_install_runtime: bool,
         auto_start_server: bool,
         timeout_seconds: float,
+        force_pull: bool,
     ) -> None:
         self._start_local_model_prepare_worker(
             model_name=model_name,
@@ -1653,6 +1689,7 @@ class MainWindow(QMainWindow):
             auto_install_runtime=auto_install_runtime,
             auto_start_server=auto_start_server,
             timeout_seconds=timeout_seconds,
+            force_pull=force_pull,
         )
 
 
@@ -1709,6 +1746,10 @@ class MainWindow(QMainWindow):
                 ),
             )
 
+        self._refresh_active_settings_local_models(
+            self._fetch_installed_local_model_names(auto_start_server=auto_start_server)
+        )
+
 
     def _on_settings_local_model_list_requested(
         self,
@@ -1743,6 +1784,9 @@ class MainWindow(QMainWindow):
             return
 
         models = result.get("models") or []
+        installed_model_names = self._local_model_names_from_list_result(result)
+        self._refresh_active_settings_local_models(installed_model_names)
+
         if not models:
             message = self.localization.t("local_ai.model.list.empty")
         else:
@@ -1750,7 +1794,7 @@ class MainWindow(QMainWindow):
             for model in models:
                 if not isinstance(model, dict):
                     continue
-                name = str(model.get("name") or model.get("model") or "unknown")
+                name = self._local_model_name_from_payload(model) or "unknown"
                 size = self._format_bytes(model.get("size"))
                 modified_at = str(model.get("modified_at") or "unknown")
                 lines.append(f"- {name} / {size} / {modified_at}")
@@ -1775,6 +1819,7 @@ class MainWindow(QMainWindow):
         auto_install_runtime: bool,
         auto_start_server: bool | None = None,
         timeout_seconds: float | None = None,
+        force_pull: bool = False,
     ) -> None:
         if self.local_model_prepare_thread is not None:
             QMessageBox.information(
@@ -1806,6 +1851,7 @@ class MainWindow(QMainWindow):
             auto_install_runtime=auto_install_runtime,
             auto_start_server=auto_start_server,
             timeout_seconds=timeout_seconds,
+            force_pull=force_pull,
         )
 
         self.local_model_prepare_worker.moveToThread(
@@ -1904,6 +1950,13 @@ class MainWindow(QMainWindow):
         else:
             print(f'[LocalAI] Model "{model_name}" is already available.')
 
+        self._refresh_active_settings_local_models(
+            self._fetch_installed_local_model_names(
+                auto_start_server=self.settings.auto_start_local_ai_server
+            ),
+            preferred_model=model_name,
+        )
+
         self.character_state.on_assistant_done()
 
     def _on_local_model_prepare_failed(self, error_code: str) -> None:
@@ -1966,32 +2019,61 @@ class MainWindow(QMainWindow):
         timer.timeout.connect(self._on_local_model_update_timer)
         self._local_model_update_timer = timer
         timer.start()
-        # Trigger an immediate check on scheduling to catch updates when the
-        # application first starts or settings are changed.
-        QTimer.singleShot(0, self._on_local_model_update_timer)
+        if self._is_local_model_update_check_due():
+            QTimer.singleShot(0, self._on_local_model_update_timer)
+
+    def _is_local_model_update_check_due(self) -> bool:
+        if not getattr(self.settings, "local_model_update_check_enabled", False):
+            return False
+
+        model_name = str(getattr(self.settings, "local_model", "") or "").strip()
+        if not model_name:
+            return False
+
+        try:
+            interval_days = int(getattr(self.settings, "local_model_update_check_interval_days", 7))
+        except Exception:
+            interval_days = 7
+        interval_days = max(1, min(60, interval_days))
+
+        raw_last_checked = str(
+            getattr(self.settings, "local_model_update_last_checked_at", "")
+            or ""
+        ).strip()
+        if not raw_last_checked:
+            return True
+
+        try:
+            last_checked = datetime.fromisoformat(raw_last_checked)
+        except ValueError:
+            return True
+
+        return datetime.now() - last_checked >= timedelta(days=interval_days)
+
+    def _record_local_model_update_checked_at(self) -> None:
+        self.settings.local_model_update_last_checked_at = datetime.now().isoformat()
+        self.settings_repository.save(self.settings)
 
     def _on_local_model_update_timer(self) -> None:
         """
-        Invoked periodically by the update timer to check whether a newer version
-        of the currently installed local model may be available. The user is
-        prompted to confirm the update. If confirmed, the model prepare
-        workflow is initiated with auto_pull enabled. After the check, the
-        last_checked timestamp is updated and saved.
+        Invoked periodically by the update timer to check whether the configured
+        interval has elapsed before asking the user to re-pull the selected
+        local model.
         """
-        # Do not start an update while a model prepare worker is already running
         if self.local_model_prepare_thread is not None:
             return
 
-        # Only proceed if a local model is configured
-        model_name = getattr(self.settings, "local_model", "").strip()
+        if not self._is_local_model_update_check_due():
+            return
+
+        model_name = str(getattr(self.settings, "local_model", "") or "").strip()
         if not model_name:
             return
 
-        # Ask the user whether to update. If the translation key is missing,
-        # fall back to a sensible default string.
         prompt = self.localization.t("local_ai.model.update.prompt")
         if not prompt or prompt.startswith("{"):
-            prompt = "A new version of the local AI model may be available. Would you like to update?"
+            prompt = "The local AI model update check interval has elapsed. Would you like to check and update the selected model now?"
+
         result = QMessageBox.question(
             self,
             self.localization.t("app.title"),
@@ -1999,26 +2081,15 @@ class MainWindow(QMainWindow):
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
 
+        self._record_local_model_update_checked_at()
+
         if result == QMessageBox.StandardButton.Yes:
-            # Trigger a model prepare with auto_pull enabled. Avoid auto
-            # installation of the runtime to reduce unexpected changes.
             self._start_local_model_prepare_worker(
                 model_name=model_name,
                 auto_pull=True,
                 auto_install_runtime=False,
+                force_pull=True,
             )
-
-        # Update the last checked timestamp and persist the settings. The
-        # digest is not updated here because the current implementation does
-        # not retrieve remote digests. When full update detection is
-        # implemented, this value should be updated accordingly.
-        try:
-            from datetime import datetime
-            now_str = datetime.now().isoformat()
-            self.settings.local_model_update_last_checked_at = now_str
-            self.settings_repository.save(self.settings)
-        except Exception:
-            pass
 
     def _local_ai_error_message(self, error_code: str) -> str:
         key = f"local_ai.error.{error_code}"
