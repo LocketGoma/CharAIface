@@ -75,6 +75,7 @@ class SettingsDialog(QDialog):
         self.theme_tab = self._create_theme_tab()
         self.model_tab = self._create_model_tab()
         self.cloud_ai_tab = self._create_cloud_ai_tab()
+        self.web_search_tab = self._create_web_search_tab()
         self.advanced_tab = self._create_advanced_tab()
 
         self.tabs.addTab(self.general_tab, self.localization.t("settings.tab.general"))
@@ -82,6 +83,7 @@ class SettingsDialog(QDialog):
         self.tabs.addTab(self.theme_tab, self.localization.t("settings.tab.theme"))
         self.tabs.addTab(self.model_tab, self.localization.t("settings.tab.model"))
         self.tabs.addTab(self.cloud_ai_tab, self.localization.t("settings.tab.cloud_ai"))
+        self.tabs.addTab(self.web_search_tab, self.localization.t("settings.tab.web_search"))
         self.tabs.addTab(self.advanced_tab, self.localization.t("settings.tab.advanced"))
 
         root_layout.addWidget(self.tabs)
@@ -107,6 +109,14 @@ class SettingsDialog(QDialog):
 
         root_layout.addWidget(self.button_box)
 
+    def accept(self) -> None:
+        # Keep the dialog-owned settings object synchronized before QDialog
+        # returns Accepted.  MainWindow applies it again after exec(), but doing
+        # it here prevents newly added tabs from appearing to reset when helper
+        # buttons or early accepted-state reads inspect dialog.settings.
+        self.apply_to_settings()
+        super().accept()
+
     def _create_general_tab(self) -> QWidget:
         tab = QWidget()
         layout = QVBoxLayout(tab)
@@ -126,8 +136,34 @@ class SettingsDialog(QDialog):
         self.language_combo = QComboBox()
         self._setup_language_combo()
 
+        self.user_country_combo = QComboBox()
+        self._setup_user_country_combo()
+
+        self.user_country_location_edit = QLineEdit()
+        self.user_country_location_edit.setText(self.settings.user_country_location)
+        self.user_country_location_edit.setPlaceholderText(
+            self.localization.t("settings.user_country.custom.placeholder")
+        )
+
+        self.user_country_detect_button = QPushButton(
+            self.localization.t("settings.user_country.detect_ip")
+        )
+        self.user_country_detect_button.clicked.connect(self._detect_user_country_by_ip)
+
+        user_country_widget = QWidget()
+        user_country_layout = QHBoxLayout(user_country_widget)
+        user_country_layout.setContentsMargins(0, 0, 0, 0)
+        user_country_layout.setSpacing(8)
+        user_country_layout.addWidget(self.user_country_combo, 1)
+        user_country_layout.addWidget(self.user_country_detect_button)
+
+        self.language_combo.currentIndexChanged.connect(self._update_user_country_ui)
+        self.user_country_combo.currentIndexChanged.connect(self._update_user_country_ui)
+
         form_layout.addRow(self.localization.t("settings.user_name"), self.user_name_edit)
         form_layout.addRow(self.localization.t("settings.language"), self.language_combo)
+        form_layout.addRow(self.localization.t("settings.user_country"), user_country_widget)
+        form_layout.addRow(self.localization.t("settings.user_country.custom"), self.user_country_location_edit)
 
         output_label = QLabel(self.localization.t("settings.conversation_output"))
         output_label.setObjectName("SettingsSectionLabel")
@@ -153,6 +189,8 @@ class SettingsDialog(QDialog):
         layout.addWidget(self.enforce_response_language_checkbox)
         layout.addWidget(self.emphasize_character_style_checkbox)
         layout.addStretch()
+
+        self._update_user_country_ui()
 
         return tab
 
@@ -756,6 +794,141 @@ class SettingsDialog(QDialog):
 
         return tab
 
+
+    def _create_web_search_tab(self) -> QWidget:
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(10)
+
+        description_label = QLabel(self.localization.t("settings.web_search.description"))
+        description_label.setObjectName("SettingsDescriptionLabel")
+        description_label.setWordWrap(True)
+        layout.addWidget(description_label)
+
+        form_layout = QFormLayout()
+        form_layout.setSpacing(10)
+
+        self.web_search_enabled_checkbox = QCheckBox()
+        self.web_search_enabled_checkbox.setChecked(bool(self.settings.web_search_enabled))
+
+        self.web_search_auto_enabled_checkbox = QCheckBox()
+        self.web_search_auto_enabled_checkbox.setChecked(bool(self.settings.web_search_auto_enabled))
+
+        self.web_search_provider_combo = QComboBox()
+        self._setup_policy_combo(
+            self.web_search_provider_combo,
+            [
+                ("settings.web_search.provider.none", "none"),
+                ("settings.web_search.provider.tavily", "tavily"),
+                ("settings.web_search.provider.firecrawl", "firecrawl"),
+            ],
+            self.settings.web_search_provider,
+        )
+
+        self.web_search_auth_mode_combo = QComboBox()
+        self._setup_policy_combo(
+            self.web_search_auth_mode_combo,
+            [
+                ("settings.cloud_ai.auth_mode.secure_store", "secure_store"),
+                ("settings.cloud_ai.auth_mode.env_var", "env_var"),
+            ],
+            self.settings.web_search_auth_mode,
+        )
+
+        self.web_search_credential_id_edit = QLineEdit()
+        self.web_search_credential_id_edit.setText(self.settings.web_search_credential_id)
+
+        self.web_search_api_key_edit = QLineEdit()
+        self.web_search_api_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self.web_search_api_key_edit.setPlaceholderText(
+            self.localization.t("settings.cloud_ai.api_key.placeholder")
+        )
+
+        self.web_search_api_key_env_edit = QLineEdit()
+        self.web_search_api_key_env_edit.setText(self.settings.web_search_api_key_env)
+        self.web_search_api_key_env_edit.setPlaceholderText("TAVILY_API_KEY")
+
+        self.web_search_auth_input_stack = QStackedWidget()
+        self.web_search_auth_input_stack.addWidget(self.web_search_api_key_edit)
+        self.web_search_auth_input_stack.addWidget(self.web_search_api_key_env_edit)
+
+        self.web_search_auth_input_label_widget = QLabel(
+            self._web_search_auth_input_label_text()
+        )
+
+        self.web_search_base_url_edit = QLineEdit()
+        self.web_search_base_url_edit.setText(self.settings.web_search_base_url)
+        self.web_search_base_url_edit.setPlaceholderText(
+            self.localization.t("settings.web_search.base_url.placeholder")
+        )
+
+        self.web_search_max_results_edit = QLineEdit()
+        self.web_search_max_results_edit.setText(str(self.settings.web_search_max_results))
+
+        self.web_search_timeout_edit = QLineEdit()
+        self.web_search_timeout_edit.setText(str(self.settings.web_search_timeout_seconds))
+
+        self.web_search_api_key_status_label = QLabel()
+        self.web_search_api_key_status_label.setWordWrap(True)
+        self.web_search_api_key_status_label.setObjectName("SettingsNoteLabel")
+
+        self.web_search_api_key_page_button = QPushButton(
+            self.localization.t("settings.web_search.open_api_key_page")
+        )
+        self.web_search_api_key_page_button.clicked.connect(self._open_web_search_api_key_page)
+
+        self.web_search_save_api_key_button = QPushButton(
+            self.localization.t("settings.cloud_ai.api_key.save")
+        )
+        self.web_search_save_api_key_button.clicked.connect(self._save_web_search_api_key)
+
+        self.web_search_delete_api_key_button = QPushButton(
+            self.localization.t("settings.cloud_ai.api_key.delete")
+        )
+        self.web_search_delete_api_key_button.clicked.connect(self._delete_web_search_api_key)
+
+        button_row = QWidget()
+        button_layout = QHBoxLayout(button_row)
+        button_layout.setContentsMargins(0, 0, 0, 0)
+        button_layout.setSpacing(8)
+        button_layout.addWidget(self.web_search_api_key_page_button)
+        button_layout.addWidget(self.web_search_save_api_key_button)
+        button_layout.addWidget(self.web_search_delete_api_key_button)
+        button_layout.addStretch()
+
+        self.web_search_provider_combo.currentIndexChanged.connect(self._on_web_search_provider_changed)
+        self.web_search_auth_mode_combo.currentIndexChanged.connect(self._update_web_search_auth_mode_ui)
+
+        form_layout.addRow(self.localization.t("settings.web_search.enabled"), self.web_search_enabled_checkbox)
+        form_layout.addRow(self.localization.t("settings.web_search.auto_enabled"), self.web_search_auto_enabled_checkbox)
+        form_layout.addRow(self.localization.t("settings.web_search.provider"), self.web_search_provider_combo)
+        form_layout.addRow(self.localization.t("settings.cloud_ai.auth_mode"), self.web_search_auth_mode_combo)
+        form_layout.addRow(self.web_search_auth_input_label_widget, self.web_search_auth_input_stack)
+        form_layout.addRow(self.localization.t("settings.cloud_ai.credential_id"), self.web_search_credential_id_edit)
+        form_layout.addRow("", self.web_search_api_key_status_label)
+        form_layout.addRow("", button_row)
+        form_layout.addRow(self.localization.t("settings.web_search.base_url"), self.web_search_base_url_edit)
+        form_layout.addRow(self.localization.t("settings.web_search.max_results"), self.web_search_max_results_edit)
+        form_layout.addRow(self.localization.t("settings.web_search.timeout_seconds"), self.web_search_timeout_edit)
+
+        layout.addLayout(form_layout)
+
+        note_label = QLabel(self.localization.t("settings.web_search.note"))
+        note_label.setWordWrap(True)
+        note_label.setObjectName("SettingsNoteLabel")
+        layout.addWidget(note_label)
+
+        layout.addStretch()
+
+        self._update_web_search_auth_mode_ui()
+        self._update_web_search_api_key_page_button()
+        self._update_web_search_api_key_status()
+        self._connect_web_search_setting_change_handlers()
+        self._apply_web_search_controls_to_settings()
+
+        return tab
+
     def _create_advanced_tab(self) -> QWidget:
         tab = QWidget()
         layout = QVBoxLayout(tab)
@@ -857,6 +1030,187 @@ class SettingsDialog(QDialog):
             self.language_combo.setCurrentIndex(index)
 
         self._finalize_combo_box(self.language_combo)
+
+    def _setup_user_country_combo(self) -> None:
+        items = [
+            ("settings.user_country.auto_language", "auto_language"),
+            ("settings.user_country.kr", "kr"),
+            ("settings.user_country.jp", "jp"),
+            ("settings.user_country.us", "us"),
+            ("settings.user_country.eu", "eu"),
+            ("settings.user_country.custom_option", "custom"),
+            ("settings.user_country.ip_auto", "ip_auto"),
+        ]
+        for label_key, value in items:
+            self.user_country_combo.addItem(self.localization.t(label_key), value)
+
+        index = self.user_country_combo.findData(self.settings.user_country_preset)
+        if index < 0:
+            index = self.user_country_combo.findData("auto_language")
+        if index >= 0:
+            self.user_country_combo.setCurrentIndex(index)
+
+        self._finalize_combo_box(self.user_country_combo)
+
+    def _country_region_for_preset(self, preset: str, language: str | None = None) -> tuple[str, str, str]:
+        normalized = (preset or "auto_language").strip().lower()
+        if normalized == "auto_language":
+            app_language = (language or self.language_combo.currentData() or self.settings.language or "ko").lower()
+            normalized = "kr" if app_language.startswith("ko") else "us"
+
+        mapping = {
+            "kr": ("KR", "South Korea", "south korea"),
+            "jp": ("JP", "Japan", "japan"),
+            "us": ("US", "United States", "united states"),
+            # Europe is a broad region. Firecrawl can use location="Europe"; Tavily only accepts countries,
+            # so leave tavily_country empty instead of forcing one European country.
+            "eu": ("", "Europe", ""),
+        }
+        return mapping.get(normalized, ("", "", ""))
+
+    def _format_user_country_text(self, country_code: str, location: str) -> str:
+        code = str(country_code or "").strip().upper()
+        loc = str(location or "").strip()
+        if code and loc:
+            return f"{code} - {loc}"
+        return code or loc
+
+    def _parse_user_country_input(self, text: str) -> tuple[str, str]:
+        value = str(text or "").strip()
+        if not value:
+            return "", ""
+
+        if "-" in value:
+            left, right = value.split("-", 1)
+            code = left.strip().upper()
+            location = right.strip()
+            if len(code) == 2 and code.isalpha():
+                return code, location
+
+        if len(value) == 2 and value.isalpha():
+            code = value.upper()
+            location = {
+                "KR": "South Korea",
+                "JP": "Japan",
+                "US": "United States",
+                "DE": "Germany",
+                "FR": "France",
+                "GB": "United Kingdom",
+                "UK": "United Kingdom",
+            }.get(code, "")
+            return code, location
+
+        return "", value
+
+    def _update_user_country_ui(self) -> None:
+        if not hasattr(self, "user_country_combo"):
+            return
+
+        preset = self.user_country_combo.currentData() or "auto_language"
+        custom_enabled = preset == "custom"
+        ip_enabled = preset == "ip_auto"
+
+        self.user_country_location_edit.setEnabled(custom_enabled)
+        self.user_country_detect_button.setEnabled(ip_enabled)
+
+        if preset == "custom":
+            return
+
+        if preset == "ip_auto":
+            text = self._format_user_country_text(
+                self.settings.user_country_code,
+                self.settings.user_country_location,
+            )
+            self.user_country_location_edit.setText(text)
+            return
+
+        code, location, _ = self._country_region_for_preset(preset)
+        self.user_country_location_edit.setText(self._format_user_country_text(code, location))
+
+    def _detect_user_country_by_ip(self) -> None:
+        providers = (
+            (
+                "ipapi",
+                "https://ipapi.co/json/",
+                lambda data: (
+                    str(data.get("country_code") or data.get("country") or "").strip().upper(),
+                    str(data.get("country_name") or "").strip(),
+                ),
+            ),
+            (
+                "ipwho.is",
+                "https://ipwho.is/",
+                lambda data: (
+                    str(data.get("country_code") or "").strip().upper(),
+                    str(data.get("country") or "").strip(),
+                ),
+            ),
+            (
+                "country.is",
+                "https://api.country.is/",
+                lambda data: (
+                    str(data.get("country") or "").strip().upper(),
+                    "",
+                ),
+            ),
+        )
+
+        errors: list[str] = []
+        country_code = ""
+        country_name = ""
+        selected_provider = ""
+
+        for provider_name, url, parser in providers:
+            try:
+                response = httpx.get(url, timeout=8.0)
+                response.raise_for_status()
+                data = response.json()
+                parsed_code, parsed_name = parser(data if isinstance(data, dict) else {})
+                parsed_code = str(parsed_code or "").strip().upper()
+                parsed_name = str(parsed_name or "").strip()
+                if parsed_code or parsed_name:
+                    country_code = parsed_code
+                    country_name = parsed_name or self._country_name_from_code(parsed_code)
+                    selected_provider = provider_name
+                    break
+                errors.append(f"{provider_name}: empty country response")
+            except Exception as error:
+                errors.append(f"{provider_name}: {error}")
+
+        if not country_code and not country_name:
+            detail = "; ".join(errors) if errors else "unknown error"
+            QMessageBox.warning(
+                self,
+                self.localization.t("settings.user_country.detect_ip.title"),
+                self.localization.t("settings.user_country.detect_ip.failed").format(error=detail),
+            )
+            return
+
+        self.settings.user_country_code = country_code
+        self.settings.user_country_location = country_name
+        self.user_country_location_edit.setText(self._format_user_country_text(country_code, country_name))
+        completed_text = self.localization.t("settings.user_country.detect_ip.completed").format(
+            country=self._format_user_country_text(country_code, country_name)
+        )
+        if selected_provider:
+            completed_text += f"\n(provider: {selected_provider})"
+        QMessageBox.information(
+            self,
+            self.localization.t("settings.user_country.detect_ip.title"),
+            completed_text,
+        )
+
+    def _country_name_from_code(self, country_code: str) -> str:
+        code = str(country_code or "").strip().upper()
+        return {
+            "KR": "South Korea",
+            "JP": "Japan",
+            "US": "United States",
+            "DE": "Germany",
+            "FR": "France",
+            "GB": "United Kingdom",
+            "UK": "United Kingdom",
+        }.get(code, "")
 
     def _setup_theme_combo(self) -> None:
         self.theme_combo.addItem(self.localization.t("settings.theme.character"), "character")
@@ -1628,7 +1982,7 @@ class SettingsDialog(QDialog):
                 "<tr>"
                 f"<td style='padding:2px 10px 2px 0; text-align:right;'>{name_text}</td>"
                 f"<td style='padding:2px 10px 2px 0; font-family:monospace; text-align:right;'>{color}</td>"
-                f"<td style='padding:2px 0; color:{square_color}; font-size:18px; text-align:right;'>■</td>"
+                f"<td style='padding:2px 0; color:{square_color}; font-size:13pt; text-align:right;'>■</td>"
                 "</tr>"
             )
 
@@ -1662,9 +2016,320 @@ class SettingsDialog(QDialog):
         url = str(self._cloud_ai_provider_defaults(provider).get("api_key_url", ""))
         self.cloud_ai_api_key_page_button.setEnabled(bool(url))
 
+
+    def _open_web_search_api_key_page(self) -> None:
+        provider = self.web_search_provider_combo.currentData() or "tavily"
+        url = str(self._web_search_provider_defaults(provider).get("api_key_url", ""))
+
+        if not url:
+            return
+
+        QDesktopServices.openUrl(QUrl(url))
+
+    def _update_web_search_api_key_page_button(self) -> None:
+        if not hasattr(self, "web_search_api_key_page_button"):
+            return
+
+        provider = self.web_search_provider_combo.currentData() or "tavily"
+        url = str(self._web_search_provider_defaults(provider).get("api_key_url", ""))
+        self.web_search_api_key_page_button.setEnabled(bool(url))
+
+
+    def _connect_web_search_setting_change_handlers(self) -> None:
+        """Keep dialog.settings synchronized while the Search tab is edited.
+
+        The Search tab has several helper buttons that can be pressed without
+        closing the dialog.  More importantly, users can switch tabs after
+        editing search options and later hit Save; keeping the dialog-owned
+        AppSettings object updated on every change prevents the tab from
+        appearing to reset or from saving stale defaults.
+        """
+        if getattr(self, "_web_search_change_handlers_connected", False):
+            return
+
+        self._web_search_change_handlers_connected = True
+
+        self.web_search_enabled_checkbox.toggled.connect(
+            self._on_web_search_controls_changed
+        )
+        self.web_search_auto_enabled_checkbox.toggled.connect(
+            self._on_web_search_controls_changed
+        )
+        self.web_search_provider_combo.currentIndexChanged.connect(
+            self._on_web_search_controls_changed
+        )
+        self.web_search_auth_mode_combo.currentIndexChanged.connect(
+            self._on_web_search_controls_changed
+        )
+        self.web_search_credential_id_edit.textChanged.connect(
+            self._on_web_search_controls_changed
+        )
+        self.web_search_api_key_env_edit.textChanged.connect(
+            self._on_web_search_controls_changed
+        )
+        self.web_search_base_url_edit.textChanged.connect(
+            self._on_web_search_controls_changed
+        )
+        self.web_search_max_results_edit.textChanged.connect(
+            self._on_web_search_controls_changed
+        )
+        self.web_search_timeout_edit.textChanged.connect(
+            self._on_web_search_controls_changed
+        )
+
+    def _on_web_search_controls_changed(self, *args) -> None:
+        self._apply_web_search_controls_to_settings()
+
+    def _web_search_provider_defaults(self, provider: str) -> dict[str, object]:
+        provider = (provider or "tavily").strip().lower()
+        defaults = {
+            "none": {
+                "credential_id": "",
+                "api_key_env": "",
+                "api_key_url": "",
+                "base_url": "",
+            },
+            "tavily": {
+                "credential_id": "CharAIface/tavily/api_key",
+                "api_key_env": "TAVILY_API_KEY",
+                "api_key_url": "https://app.tavily.com/",
+                "base_url": "",
+            },
+            "firecrawl": {
+                "credential_id": "CharAIface/firecrawl/api_key",
+                "api_key_env": "FIRECRAWL_API_KEY",
+                "api_key_url": "https://www.firecrawl.dev/app/api-keys",
+                "base_url": "",
+            },
+        }
+        return defaults.get(provider, defaults["tavily"])
+
+    def _default_web_search_api_key_env(self, provider: str) -> str:
+        return str(self._web_search_provider_defaults(provider).get("api_key_env", ""))
+
+    def _default_web_search_credential_id(self, provider: str) -> str:
+        return str(self._web_search_provider_defaults(provider).get("credential_id", ""))
+
+    def _current_web_search_auth_config(self) -> CloudCredentialConfig:
+        provider = self.web_search_provider_combo.currentData() or "tavily"
+        return CloudCredentialConfig(
+            provider=provider,
+            auth_mode=self.web_search_auth_mode_combo.currentData() or "secure_store",
+            credential_id=self.web_search_credential_id_edit.text().strip()
+            or self._default_web_search_credential_id(provider),
+            api_key_env=self.web_search_api_key_env_edit.text().strip() or None,
+        )
+
+    def _web_search_auth_input_label_text(self) -> str:
+        if not hasattr(self, "web_search_auth_mode_combo"):
+            return self.localization.t("settings.cloud_ai.api_key")
+
+        auth_mode = self.web_search_auth_mode_combo.currentData() or "secure_store"
+        if auth_mode == "env_var":
+            return self.localization.t("settings.cloud_ai.api_key_env")
+
+        return self.localization.t("settings.cloud_ai.api_key")
+
+    def _on_web_search_provider_changed(self) -> None:
+        provider = self.web_search_provider_combo.currentData() or "tavily"
+        current_env = self.web_search_api_key_env_edit.text().strip()
+        current_credential_id = self.web_search_credential_id_edit.text().strip()
+
+        known_envs = {"", "TAVILY_API_KEY", "FIRECRAWL_API_KEY"}
+        known_ids = {
+            "",
+            "CharAIface/tavily/api_key",
+            "CharAIface/firecrawl/api_key",
+        }
+
+        if current_env in known_envs:
+            self.web_search_api_key_env_edit.setText(self._default_web_search_api_key_env(provider))
+        if current_credential_id in known_ids:
+            self.web_search_credential_id_edit.setText(self._default_web_search_credential_id(provider))
+
+        self._update_web_search_api_key_page_button()
+        self._update_web_search_api_key_status()
+        self._apply_web_search_controls_to_settings()
+
+    def _update_web_search_auth_mode_ui(self) -> None:
+        if not hasattr(self, "web_search_auth_mode_combo"):
+            return
+
+        auth_mode = self.web_search_auth_mode_combo.currentData() or "secure_store"
+        secure_store_enabled = auth_mode == "secure_store"
+        env_var_enabled = auth_mode == "env_var"
+
+        self.web_search_auth_input_stack.setCurrentIndex(0 if secure_store_enabled else 1)
+        self.web_search_credential_id_edit.setEnabled(secure_store_enabled)
+        self.web_search_api_key_edit.setEnabled(secure_store_enabled)
+        self.web_search_save_api_key_button.setVisible(secure_store_enabled)
+        self.web_search_delete_api_key_button.setVisible(secure_store_enabled)
+        self.web_search_api_key_env_edit.setEnabled(env_var_enabled)
+
+        if hasattr(self, "web_search_auth_input_label_widget"):
+            self.web_search_auth_input_label_widget.setText(
+                self._web_search_auth_input_label_text()
+            )
+
+        self._update_web_search_api_key_status()
+        self._apply_web_search_controls_to_settings()
+
+    def _update_web_search_api_key_status(self) -> None:
+        if not hasattr(self, "web_search_api_key_status_label"):
+            return
+
+        config = self._current_web_search_auth_config()
+        if config.auth_mode == "env_var":
+            if config.api_key_env:
+                self.web_search_api_key_status_label.setText(
+                    self.localization.t(
+                        "settings.cloud_ai.api_key.status.env_var",
+                        env=config.api_key_env,
+                    )
+                )
+            else:
+                self.web_search_api_key_status_label.setText(
+                    self.localization.t("settings.cloud_ai.api_key.status.missing")
+                )
+            return
+
+        try:
+            has_key = CloudAuthManager.has_api_key(config)
+        except Exception:
+            has_key = False
+
+        if has_key:
+            self.web_search_api_key_status_label.setText(
+                self.localization.t("settings.cloud_ai.api_key.status.saved")
+            )
+        else:
+            self.web_search_api_key_status_label.setText(
+                self.localization.t("settings.cloud_ai.api_key.status.not_saved")
+            )
+
+    def _save_web_search_api_key(self) -> None:
+        self._apply_web_search_controls_to_settings()
+        config = self._current_web_search_auth_config()
+        api_key = self.web_search_api_key_edit.text().strip()
+
+        if not api_key:
+            QMessageBox.warning(
+                self,
+                self.localization.t("settings.web_search.message.title"),
+                self.localization.t("settings.cloud_ai.api_key.empty"),
+            )
+            return
+
+        try:
+            CloudAuthManager.save_api_key(config.credential_id, api_key)
+        except Exception as error:
+            QMessageBox.critical(
+                self,
+                self.localization.t("settings.web_search.message.title"),
+                self.localization.t(
+                    "settings.cloud_ai.api_key.save_failed",
+                    error=str(error),
+                ),
+            )
+            return
+
+        self.web_search_api_key_edit.clear()
+        self._update_web_search_api_key_status()
+        QMessageBox.information(
+            self,
+            self.localization.t("settings.web_search.message.title"),
+            self.localization.t("settings.cloud_ai.api_key.saved"),
+        )
+
+    def _delete_web_search_api_key(self) -> None:
+        self._apply_web_search_controls_to_settings()
+        config = self._current_web_search_auth_config()
+
+        try:
+            CloudAuthManager.delete_api_key(config.credential_id)
+        except Exception as error:
+            QMessageBox.critical(
+                self,
+                self.localization.t("settings.web_search.message.title"),
+                self.localization.t(
+                    "settings.cloud_ai.api_key.delete_failed",
+                    error=str(error),
+                ),
+            )
+            return
+
+        self._update_web_search_api_key_status()
+        QMessageBox.information(
+            self,
+            self.localization.t("settings.web_search.message.title"),
+            self.localization.t("settings.cloud_ai.api_key.deleted"),
+        )
+
+    def _apply_web_search_controls_to_settings(self) -> None:
+        if not hasattr(self, "web_search_enabled_checkbox"):
+            return
+
+        provider = str(
+            self.web_search_provider_combo.currentData() or AppSettings().web_search_provider
+        ).strip().lower()
+        if provider not in {"none", "tavily", "firecrawl"}:
+            provider = AppSettings().web_search_provider
+
+        auth_mode = str(
+            self.web_search_auth_mode_combo.currentData() or AppSettings().web_search_auth_mode
+        ).strip().lower()
+        if auth_mode not in {"secure_store", "env_var"}:
+            auth_mode = AppSettings().web_search_auth_mode
+
+        self.settings.web_search_enabled = self.web_search_enabled_checkbox.isChecked()
+        self.settings.web_search_auto_enabled = self.web_search_auto_enabled_checkbox.isChecked()
+        self.settings.web_search_provider = provider
+        self.settings.web_search_auth_mode = auth_mode
+        self.settings.web_search_credential_id = (
+            self.web_search_credential_id_edit.text().strip()
+            or self._default_web_search_credential_id(provider)
+        )
+        self.settings.web_search_api_key_env = (
+            self.web_search_api_key_env_edit.text().strip()
+            or self._default_web_search_api_key_env(provider)
+        )
+        self.settings.web_search_base_url = self.web_search_base_url_edit.text().strip()
+
+        try:
+            max_results = int(self.web_search_max_results_edit.text().strip())
+        except ValueError:
+            max_results = AppSettings().web_search_max_results
+        self.settings.web_search_max_results = max(1, min(10, max_results))
+
+        try:
+            timeout_seconds = int(self.web_search_timeout_edit.text().strip())
+        except ValueError:
+            timeout_seconds = AppSettings().web_search_timeout_seconds
+        self.settings.web_search_timeout_seconds = max(3, min(120, timeout_seconds))
+
     def apply_to_settings(self) -> None:
         self.settings.user_name = self.user_name_edit.text().strip() or AppSettings().user_name
         self.settings.language = self.language_combo.currentData()
+        self.settings.user_country_preset = self.user_country_combo.currentData() or AppSettings().user_country_preset
+        if self.settings.user_country_preset == "auto_language":
+            code, location, _ = self._country_region_for_preset(
+                "auto_language",
+                language=self.settings.language,
+            )
+            self.settings.user_country_code = code
+            self.settings.user_country_location = location
+        elif self.settings.user_country_preset in {"kr", "jp", "us", "eu"}:
+            code, location, _ = self._country_region_for_preset(self.settings.user_country_preset)
+            self.settings.user_country_code = code
+            self.settings.user_country_location = location
+        elif self.settings.user_country_preset == "custom":
+            code, location = self._parse_user_country_input(self.user_country_location_edit.text())
+            self.settings.user_country_code = code
+            self.settings.user_country_location = location
+        elif self.settings.user_country_preset == "ip_auto":
+            code, location = self._parse_user_country_input(self.user_country_location_edit.text())
+            self.settings.user_country_code = code or self.settings.user_country_code
+            self.settings.user_country_location = location or self.settings.user_country_location
         self.settings.conversation_markdown_enabled = self.conversation_markdown_checkbox.isChecked()
         self.settings.enforce_response_language = self.enforce_response_language_checkbox.isChecked()
         self.settings.emphasize_character_style = self.emphasize_character_style_checkbox.isChecked()
@@ -1742,6 +2407,9 @@ class SettingsDialog(QDialog):
 
         self.settings.cloud_ai_models = cloud_models
         self.settings.cloud_model = selected_model
+
+
+        self._apply_web_search_controls_to_settings()
 
         self.settings.developer_mode = self.developer_mode_checkbox.isChecked()
         self.settings.expand_chat_over_character_area = self.expand_chat_checkbox.isChecked()

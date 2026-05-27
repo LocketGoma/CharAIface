@@ -803,7 +803,9 @@ class MainWindow(QMainWindow):
             "- /deletesession <number|id>: Delete a saved local chat session.\n"
             "- /status: Show current desktop/session settings and a brief memory summary.\n"
             "- /health: Show backend health payload.\n"
-            "- /systemstatus: Show desktop/backend CPU and memory usage."
+            "- /systemstatus: Show desktop/backend CPU and memory usage.\n"
+            "- /cloudaistatus: Show cloud AI availability and unavailable reason.\n"
+            "- /search <query>: Search the web and answer using the search results."
         )
 
     def _command_status_text(self) -> str:
@@ -832,6 +834,14 @@ class MainWindow(QMainWindow):
             f"- cloud_provider: {self.settings.cloud_ai_provider}",
             f"- cloud_model: {self.settings.cloud_model or 'not selected'}",
             f"- cloud_available: {cloud_available}",
+            f"- web_search_enabled: {bool(getattr(self.settings, 'web_search_enabled', False))}",
+            f"- web_search_auto_enabled: {bool(getattr(self.settings, 'web_search_auto_enabled', False))}",
+            f"- web_search_provider: {getattr(self.settings, 'web_search_provider', 'none')}",
+            f"- web_search_auth_mode: {getattr(self.settings, 'web_search_auth_mode', 'secure_store')}",
+            f"- web_search_api_key_env: {getattr(self.settings, 'web_search_api_key_env', '')}",
+            f"- web_search_max_results: {getattr(self.settings, 'web_search_max_results', 5)}",
+            f"- web_search_timeout_seconds: {getattr(self.settings, 'web_search_timeout_seconds', 20)}",
+            f"- user_country: {getattr(self.settings, 'user_country_code', '')} / {getattr(self.settings, 'user_country_location', '')}",
             "",
             "Session",
             f"- current_session: {self.current_session_title or self.current_session_id or 'unsaved'}",
@@ -1303,6 +1313,7 @@ class MainWindow(QMainWindow):
             user_name=self.settings.user_name,
             developer_mode=self.settings.developer_mode,
             language=self.settings.language,
+            settings_snapshot=self.settings.model_dump(mode="json"),
         )
 
         self.active_chat_response_session_id = request_session_id

@@ -11,7 +11,7 @@ def build_qss(theme: ThemeDefinition) -> str:
 
     QWidget {{
         color: {p.text_primary};
-        font-size: 14px;
+        font-size: 10pt;
     }}
 
     QWidget#ContentArea {{
@@ -31,7 +31,7 @@ def build_qss(theme: ThemeDefinition) -> str:
 
     QLabel#SessionSidebarTitle {{
         color: {p.text_primary};
-        font-size: 15px;
+        font-size: 11pt;
         font-weight: bold;
         padding: 4px 2px;
     }}
@@ -196,7 +196,7 @@ def build_qss(theme: ThemeDefinition) -> str:
     }}
 
     QLabel#HeaderTitle {{
-        font-size: 18px;
+        font-size: 13pt;
         font-weight: bold;
         color: {p.text_primary};
     }}
@@ -266,7 +266,7 @@ def build_qss(theme: ThemeDefinition) -> str:
         border-radius: 10px;
         background-color: {p.user_bubble_bg};
         color: {p.text_primary};
-        font-size: 14px;
+        font-size: 10pt;
     }}
 
     QLabel#AssistantMessageBubble {{
@@ -274,7 +274,7 @@ def build_qss(theme: ThemeDefinition) -> str:
         border-radius: 10px;
         background-color: {p.assistant_bubble_bg};
         color: {p.text_primary};
-        font-size: 14px;
+        font-size: 10pt;
     }}
 
     QWidget#ChatBubbleStack {{
@@ -291,7 +291,7 @@ def build_qss(theme: ThemeDefinition) -> str:
         border: none;
         border-radius: 6px;
         padding: 2px 6px;
-        font-size: 12px;
+        font-size: 9pt;
     }}
 
     QPushButton#ChatMessageActionButton[actionFlash="true"] {{
@@ -330,13 +330,13 @@ def build_qss(theme: ThemeDefinition) -> str:
 
     QLabel#CharacterNameLabel {{
         color: {p.text_primary};
-        font-size: 16px;
+        font-size: 12pt;
         font-weight: bold;
     }}
 
     QLabel#StateLabel {{
         color: {p.text_secondary};
-        font-size: 12px;
+        font-size: 9pt;
     }}
 
     QFrame#UserNameBox {{
@@ -347,13 +347,13 @@ def build_qss(theme: ThemeDefinition) -> str:
 
     QLabel#UserLabel {{
         color: {p.text_secondary};
-        font-size: 14px;
+        font-size: 10pt;
         font-weight: bold;
     }}
 
     QLabel#UserNameLabel {{
         color: {p.text_primary};
-        font-size: 14px;
+        font-size: 10pt;
         font-weight: bold;
     }}
 
@@ -363,7 +363,7 @@ def build_qss(theme: ThemeDefinition) -> str:
         border: 1px solid {p.input_border};
         border-radius: 12px;
         padding: 8px;
-        font-size: 14px;
+        font-size: 10pt;
     }}
 
     QLineEdit {{
@@ -380,7 +380,7 @@ def build_qss(theme: ThemeDefinition) -> str:
         border: 1px solid #CFCFD8;
         border-radius: 8px;
         padding: 6px 28px 6px 10px;
-        font-size: 14px;
+        font-size: 10pt;
         font-weight: bold;
         selection-background-color: #E7F0FF;
         selection-color: #202123;
@@ -453,7 +453,7 @@ def build_qss(theme: ThemeDefinition) -> str:
     
     QLabel#OpacityValueLabel {{
         color: {p.text_secondary};
-        font-size: 13px;
+        font-size: 10pt;
         font-weight: bold;
     }}
 
@@ -529,14 +529,14 @@ def build_qss(theme: ThemeDefinition) -> str:
     }}
 
     QLabel#SettingsDescriptionLabel {{
-        font-size: 15px;
+        font-size: 11pt;
         font-weight: bold;
         color: {p.text_primary};
     }}
 
     QLabel#SettingsNoteLabel {{
         color: {p.text_secondary};
-        font-size: 13px;
+        font-size: 10pt;
     }}
 
     QLabel#CharacterInfoLabel {{

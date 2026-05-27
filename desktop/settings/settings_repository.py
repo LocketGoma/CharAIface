@@ -57,6 +57,10 @@ class SettingsRepository:
         migrated.pop("auto_download_models", None)
         migrated.pop("ask_before_model_download", None)
 
+        if "language" not in migrated:
+            migrated["language"] = AppSettings().language
+        self._migrate_user_country_settings(migrated)
+
         if "runtime_install_policy" not in migrated:
             migrated["runtime_install_policy"] = "ask"
 
@@ -95,8 +99,31 @@ class SettingsRepository:
             migrated["ai_route_policy"] = "auto"
 
         self._migrate_cloud_ai_settings(migrated)
+        self._migrate_web_search_settings(migrated)
 
         return migrated
+
+
+    def _migrate_user_country_settings(self, migrated: dict) -> None:
+        default_settings = AppSettings()
+        preset = str(migrated.get("user_country_preset", default_settings.user_country_preset)).strip().lower()
+        allowed = {"auto_language", "kr", "jp", "us", "eu", "custom", "ip_auto"}
+        if preset not in allowed:
+            preset = "auto_language"
+
+        migrated["user_country_preset"] = preset
+
+        if "user_country_code" not in migrated:
+            language = str(migrated.get("language", default_settings.language)).lower()
+            migrated["user_country_code"] = "KR" if language.startswith("ko") else "US"
+
+        if "user_country_location" not in migrated:
+            code = str(migrated.get("user_country_code", "")).strip().upper()
+            migrated["user_country_location"] = {
+                "KR": "South Korea",
+                "JP": "Japan",
+                "US": "United States",
+            }.get(code, "")
 
     def _migrate_cloud_ai_settings(self, migrated: dict) -> None:
         default_settings = AppSettings()
@@ -148,6 +175,71 @@ class SettingsRepository:
             normalized_models = list(default_settings.cloud_ai_models)
 
         migrated["cloud_ai_models"] = normalized_models
+
+
+    def _migrate_web_search_settings(self, migrated: dict) -> None:
+        default_settings = AppSettings()
+
+        provider = str(
+            migrated.get("web_search_provider", default_settings.web_search_provider)
+        ).strip().lower()
+        if provider not in {"none", "tavily", "firecrawl"}:
+            provider = default_settings.web_search_provider
+        migrated["web_search_provider"] = provider
+
+        auth_mode = str(
+            migrated.get("web_search_auth_mode", default_settings.web_search_auth_mode)
+        ).strip().lower()
+        if auth_mode not in {"secure_store", "env_var"}:
+            auth_mode = default_settings.web_search_auth_mode
+        migrated["web_search_auth_mode"] = auth_mode
+
+        migrated["web_search_enabled"] = bool(migrated.get("web_search_enabled", False))
+        migrated["web_search_auto_enabled"] = bool(
+            migrated.get("web_search_auto_enabled", False)
+        )
+
+        credential_id = str(migrated.get("web_search_credential_id", "")).strip()
+        if not credential_id:
+            credential_id = self._default_web_search_credential_id(provider)
+        migrated["web_search_credential_id"] = credential_id
+
+        api_key_env = str(migrated.get("web_search_api_key_env", "")).strip()
+        if not api_key_env:
+            api_key_env = self._default_web_search_api_key_env(provider)
+        migrated["web_search_api_key_env"] = api_key_env
+
+        migrated["web_search_base_url"] = str(
+            migrated.get("web_search_base_url", "") or ""
+        ).strip()
+
+        try:
+            max_results = int(migrated.get("web_search_max_results", 5))
+        except (TypeError, ValueError):
+            max_results = 5
+        migrated["web_search_max_results"] = max(1, min(10, max_results))
+
+        try:
+            timeout_seconds = int(migrated.get("web_search_timeout_seconds", 20))
+        except (TypeError, ValueError):
+            timeout_seconds = 20
+        migrated["web_search_timeout_seconds"] = max(3, min(120, timeout_seconds))
+
+    def _default_web_search_credential_id(self, provider: str) -> str:
+        provider = (provider or "tavily").strip().lower()
+        if provider == "firecrawl":
+            return "CharAIface/firecrawl/api_key"
+        if provider == "none":
+            return ""
+        return "CharAIface/tavily/api_key"
+
+    def _default_web_search_api_key_env(self, provider: str) -> str:
+        provider = (provider or "tavily").strip().lower()
+        if provider == "firecrawl":
+            return "FIRECRAWL_API_KEY"
+        if provider == "none":
+            return ""
+        return "TAVILY_API_KEY"
 
     def _guess_cloud_ai_provider(self, cloud_model: str) -> str:
         normalized = cloud_model.lower()

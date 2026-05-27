@@ -23,7 +23,7 @@ class CharacterStateController(QObject):
         self.current_state = state
         self.state_changed.emit(state)
 
-        if state == "assistant_done":
+        if state in {"assistant_done", "panic"}:
             self.done_to_idle_timer.start(self.done_to_idle_ms)
 
     def to_idle(self) -> None:

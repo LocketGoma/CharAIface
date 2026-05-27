@@ -8,6 +8,9 @@ RuntimeInstallPolicy = Literal["never", "ask"]
 ModelInstallPolicy = Literal["never", "ask", "auto"]
 AIRoutePolicy = Literal["local_only", "cloud_only", "local_first", "cloud_first", "auto"]
 CloudAIAuthMode = Literal["secure_store", "env_var"]
+WebSearchAuthMode = Literal["secure_store", "env_var"]
+WebSearchProvider = Literal["none", "tavily", "firecrawl"]
+UserCountryPreset = Literal["auto_language", "kr", "jp", "us", "eu", "custom", "ip_auto"]
 CloudAIProvider = Literal[
     "none",
     "openai",
@@ -21,6 +24,13 @@ CloudAIProvider = Literal[
 class AppSettings(BaseModel):
     language: str = "ko"
     fallback_language: str = "en"
+
+    # User country / search locale settings
+    # auto_language: Korean UI => KR, English UI => US.
+    # ip_auto stores the latest detected public-IP country in user_country_code/location.
+    user_country_preset: UserCountryPreset = "auto_language"
+    user_country_code: str = "KR"
+    user_country_location: str = "South Korea"
 
     theme_id: str = "light"
 
@@ -89,6 +99,17 @@ class AppSettings(BaseModel):
     local_model_update_check_interval_days: int = 7
     local_model_update_last_checked_at: str = ""
     local_model_update_last_known_digest: str = ""
+
+    # Web search / local AI tool settings
+    web_search_enabled: bool = False
+    web_search_auto_enabled: bool = False
+    web_search_provider: WebSearchProvider = "tavily"
+    web_search_auth_mode: WebSearchAuthMode = "secure_store"
+    web_search_credential_id: str = "CharAIface/tavily/api_key"
+    web_search_api_key_env: str = "TAVILY_API_KEY"
+    web_search_base_url: str = ""
+    web_search_max_results: int = 5
+    web_search_timeout_seconds: int = 20
 
     window_width: int = 980
     window_height: int = 720
