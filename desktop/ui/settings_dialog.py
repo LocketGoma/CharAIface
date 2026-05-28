@@ -1,5 +1,5 @@
 from PySide6.QtCore import Qt, QUrl, Signal
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtGui import QDesktopServices, QFontDatabase, QIntValidator
 
 import httpx
 from PySide6.QtWidgets import (
@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QSlider,
+    QSpinBox,
     QStackedWidget,
     QTabWidget,
     QTextEdit,
@@ -246,6 +247,20 @@ class SettingsDialog(QDialog):
         form_layout = QFormLayout()
         form_layout.setSpacing(10)
 
+        self.chat_font_combo = QComboBox()
+        self._setup_chat_font_combo()
+
+        self.chat_font_size_combo = QComboBox()
+        self._setup_chat_font_size_combo()
+
+        chat_font_widget = QWidget()
+        chat_font_layout = QHBoxLayout(chat_font_widget)
+        chat_font_layout.setContentsMargins(0, 0, 0, 0)
+        chat_font_layout.setSpacing(8)
+        chat_font_layout.addWidget(self.chat_font_combo, 1)
+        self.chat_font_size_combo.setFixedWidth(92)
+        chat_font_layout.addWidget(self.chat_font_size_combo)
+
         self.theme_combo = QComboBox()
         self._setup_theme_combo()
         self.theme_combo.currentIndexChanged.connect(self._refresh_theme_palette_view)
@@ -262,13 +277,14 @@ class SettingsDialog(QDialog):
         theme_select_layout.addWidget(self.theme_combo, 1)
         theme_select_layout.addWidget(self.theme_palette_button)
 
+        form_layout.addRow(self.localization.t("settings.chat_font.change"), chat_font_widget)
         form_layout.addRow(self.localization.t("settings.theme.select"), theme_select_widget)
         layout.addLayout(form_layout)
 
         self.theme_palette_view = QTextEdit()
         self.theme_palette_view.setReadOnly(True)
         self.theme_palette_view.setAcceptRichText(True)
-        self.theme_palette_view.setMinimumHeight(420)
+        self.theme_palette_view.setMinimumHeight(300)
         self.theme_palette_view.setObjectName("ThemePaletteView")
         self.theme_palette_view.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
         self.theme_palette_view.setVisible(False)
@@ -282,6 +298,90 @@ class SettingsDialog(QDialog):
         layout.addStretch()
 
         return tab
+
+    def _setup_chat_font_combo(self) -> None:
+        self.chat_font_combo.clear()
+        self.chat_font_combo.setEditable(True)
+        self.chat_font_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.chat_font_combo.setPlaceholderText(self.localization.t("settings.chat_font.family_label"))
+        self.chat_font_combo.lineEdit().setPlaceholderText(self.localization.t("settings.chat_font.family_label"))
+
+
+        preferred_fonts = [
+            "맑은 고딕",
+            "Malgun Gothic",
+            "Apple SD Gothic Neo",
+            "Noto Sans CJK KR",
+            "Noto Sans KR",
+            "Pretendard",
+            "Arial",
+            "Segoe UI",
+        ]
+
+        families = list(QFontDatabase.families())
+        seen: set[str] = set()
+
+        def add_family(family: str) -> None:
+            family = str(family or "").strip()
+            if not family or family in seen:
+                return
+            seen.add(family)
+            self.chat_font_combo.addItem(family, family)
+
+        for family in preferred_fonts:
+            if family in families:
+                add_family(family)
+
+        for family in sorted(families, key=lambda value: value.casefold()):
+            add_family(family)
+
+        current_family = str(self.settings.chat_font_family or "").strip()
+        if not current_family:
+            current_family = self._default_chat_font_family()
+
+        if current_family and current_family not in seen:
+            self.chat_font_combo.insertItem(0, current_family, current_family)
+
+        matched_index = -1
+        for index in range(self.chat_font_combo.count()):
+            if self.chat_font_combo.itemData(index) == current_family:
+                matched_index = index
+                break
+
+        if matched_index >= 0:
+            self.chat_font_combo.setCurrentIndex(matched_index)
+        else:
+            self.chat_font_combo.setCurrentText(current_family)
+
+    def _default_chat_font_family(self) -> str:
+        language = str(getattr(self.settings, "language", "ko") or "ko").strip().lower()
+        if language.startswith("ko"):
+            return "맑은 고딕"
+        return "Noto Sans"
+
+    def _setup_chat_font_size_combo(self) -> None:
+        self.chat_font_size_combo.clear()
+        self.chat_font_size_combo.setEditable(True)
+        self.chat_font_size_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.chat_font_size_combo.setPlaceholderText(self.localization.t("settings.chat_font.size_label"))
+        self.chat_font_size_combo.lineEdit().setPlaceholderText(self.localization.t("settings.chat_font.size_label"))
+        self.chat_font_size_combo.lineEdit().setValidator(QIntValidator(1, 200, self.chat_font_size_combo))
+        sizes = [9, 10, 11, 12, 14, 16, 18, 20, 22, 24, 28, 32, 36, 40, 44, 48, 54, 60, 66, 72]
+        for size in sizes:
+            self.chat_font_size_combo.addItem(str(size), size)
+
+        try:
+            current_size = int(self.settings.chat_font_size or 10)
+        except (TypeError, ValueError):
+            current_size = 10
+        current_size = max(1, min(200, current_size))
+        if current_size not in sizes:
+            self.chat_font_size_combo.addItem(str(current_size), current_size)
+
+        for index in range(self.chat_font_size_combo.count()):
+            if int(self.chat_font_size_combo.itemData(index)) == current_size:
+                self.chat_font_size_combo.setCurrentIndex(index)
+                break
 
     def _unique_model_names(self, model_names: list[str]) -> list[str]:
         unique_names: list[str] = []
@@ -945,6 +1045,20 @@ class SettingsDialog(QDialog):
         self.developer_mode_checkbox = QCheckBox()
         self.developer_mode_checkbox.setChecked(self.settings.developer_mode)
 
+        self.cloud_ai_usage_slider = QSlider(Qt.Orientation.Horizontal)
+        self.cloud_ai_usage_slider.setMinimum(0)
+        self.cloud_ai_usage_slider.setMaximum(100)
+        self.cloud_ai_usage_slider.setSingleStep(5)
+        self.cloud_ai_usage_slider.setPageStep(5)
+        self.cloud_ai_usage_slider.setTickInterval(5)
+        self.cloud_ai_usage_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
+        current_cloud_weight = int(getattr(self.settings, "cloud_ai_usage_weight_percent", 50) or 50)
+        current_cloud_weight = max(0, min(100, round(current_cloud_weight / 5) * 5))
+        self.cloud_ai_usage_slider.setValue(current_cloud_weight)
+        self.cloud_ai_usage_label = QLabel(f"{current_cloud_weight}%")
+        self.cloud_ai_usage_label.setObjectName("CloudAIWeightValueLabel")
+        self.cloud_ai_usage_slider.valueChanged.connect(self._on_cloud_ai_usage_weight_changed)
+
         self.expand_chat_checkbox = QCheckBox()
         self.expand_chat_checkbox.setChecked(self.settings.expand_chat_over_character_area)
 
@@ -973,6 +1087,15 @@ class SettingsDialog(QDialog):
         self.avatar_opacity_slider.valueChanged.connect(self._on_avatar_opacity_changed)
 
         form_layout.addRow(self.localization.t("settings.developer_mode"), self.developer_mode_checkbox)
+
+        cloud_weight_widget = QWidget()
+        cloud_weight_layout = QVBoxLayout(cloud_weight_widget)
+        cloud_weight_layout.setContentsMargins(0, 0, 0, 0)
+        cloud_weight_layout.setSpacing(4)
+        cloud_weight_layout.addWidget(self.cloud_ai_usage_slider)
+        cloud_weight_layout.addWidget(self.cloud_ai_usage_label)
+        form_layout.addRow(self.localization.t("settings.cloud_ai_usage_weight"), cloud_weight_widget)
+
         form_layout.addRow(self.localization.t("settings.expand_chat_over_character_area"), self.expand_chat_checkbox)
         form_layout.addRow(self.localization.t("settings.avatar_embarrassed_when_occluded"), self.embarrassed_when_occluded_checkbox)
 
@@ -1000,6 +1123,13 @@ class SettingsDialog(QDialog):
         opacity_description.setWordWrap(True)
         opacity_description.setObjectName("SettingsNoteLabel")
         layout.addWidget(opacity_description)
+
+        cloud_weight_description = QLabel(
+            self.localization.t("settings.cloud_ai_usage_weight.description")
+        )
+        cloud_weight_description.setWordWrap(True)
+        cloud_weight_description.setObjectName("SettingsNoteLabel")
+        layout.addWidget(cloud_weight_description)
 
         layout.addStretch()
 
@@ -1297,6 +1427,18 @@ class SettingsDialog(QDialog):
 
         self.avatar_opacity_label.setText(f"{snapped_value}%")
         self.avatar_opacity_preview_changed.emit(snapped_value / 100.0)
+
+    def _on_cloud_ai_usage_weight_changed(self, value: int) -> None:
+        snapped_value = round(value / 5) * 5
+        snapped_value = min(100, max(0, snapped_value))
+
+        if snapped_value != value:
+            self.cloud_ai_usage_slider.blockSignals(True)
+            self.cloud_ai_usage_slider.setValue(snapped_value)
+            self.cloud_ai_usage_slider.blockSignals(False)
+
+        self.cloud_ai_usage_label.setText(f"{snapped_value}%")
+        self.settings.cloud_ai_usage_weight_percent = snapped_value
 
     def _on_cloud_ai_provider_changed(self) -> None:
         if not hasattr(self, "cloud_ai_provider_combo"):
@@ -2335,6 +2477,13 @@ class SettingsDialog(QDialog):
         self.settings.emphasize_character_style = self.emphasize_character_style_checkbox.isChecked()
 
         self.settings.theme_id = self.theme_combo.currentData()
+        chat_font_family = str(self.chat_font_combo.currentText() or "").strip()
+        self.settings.chat_font_family = chat_font_family or self._default_chat_font_family()
+        try:
+            chat_font_size = int(str(self.chat_font_size_combo.currentText() or "").strip())
+        except (TypeError, ValueError):
+            chat_font_size = AppSettings().chat_font_size
+        self.settings.chat_font_size = max(1, min(200, chat_font_size))
         self.settings.selected_character_id = self.character_combo.currentData()
 
         self.settings.local_ai_provider = (
@@ -2412,6 +2561,7 @@ class SettingsDialog(QDialog):
         self._apply_web_search_controls_to_settings()
 
         self.settings.developer_mode = self.developer_mode_checkbox.isChecked()
+        self.settings.cloud_ai_usage_weight_percent = max(0, min(100, round(self.cloud_ai_usage_slider.value() / 5) * 5))
         self.settings.expand_chat_over_character_area = self.expand_chat_checkbox.isChecked()
         self.settings.enable_avatar_embarrassed_when_occluded = (
             self.embarrassed_when_occluded_checkbox.isChecked()

@@ -172,20 +172,26 @@ class ChatService:
     ) -> ChatRoute:
         settings = settings or self._effective_settings(request)
         policy = self._route_policy(settings)
+        cloud_available = self._cloud_ai_configured(settings) and self._cloud_ai_credentials_available(settings)
 
         if policy == "local_only":
             return "local_ollama"
 
         if policy == "cloud_only":
-            return "cloud_ai" if self._cloud_ai_configured(settings) else "local_ollama"
+            return "cloud_ai" if cloud_available else "local_ollama"
 
         if policy == "cloud_first":
-            return "cloud_ai" if self._cloud_ai_configured(settings) else "local_ollama"
+            return "cloud_ai" if cloud_available else "local_ollama"
 
         if policy == "local_first":
             return "local_ollama"
 
-        if policy == "auto" and self._cloud_ai_configured(settings):
+        if policy == "auto" and cloud_available:
+            cloud_weight = self._cloud_ai_usage_weight(settings)
+            if cloud_weight >= 75:
+                return "cloud_ai"
+            if cloud_weight <= 20:
+                return "local_ollama"
             if self._should_auto_use_cloud(request):
                 return "cloud_ai"
 
@@ -198,11 +204,49 @@ class ChatService:
             return "auto"
         return policy
 
+    def _cloud_ai_usage_weight(self, settings: dict[str, Any]) -> int:
+        try:
+            weight = int(settings.get("cloud_ai_usage_weight_percent", 50))
+        except (TypeError, ValueError):
+            weight = 50
+
+        weight = max(0, min(100, weight))
+        return int(round(weight / 5) * 5)
+
     def _cloud_ai_configured(self, settings: dict[str, Any]) -> bool:
         cloud_enabled = bool(settings.get("cloud_ai_enabled"))
         cloud_provider = str(settings.get("cloud_ai_provider") or "none").strip().lower()
         cloud_model = str(settings.get("cloud_model") or "").strip()
         return cloud_enabled and cloud_provider != "none" and bool(cloud_model)
+
+    def _cloud_ai_credentials_available(self, settings: dict[str, Any]) -> bool:
+        """Return whether a configured cloud provider has usable credentials.
+
+        Route selection must never raise because the chat endpoint is used for
+        every turn.  The actual cloud API may still fail later, in which case
+        the existing cloud->local fallback path handles the failure and
+        /cloudaistatus reports details.  This method only answers whether it is
+        reasonable to attempt the cloud route at all.
+        """
+        if not self._cloud_ai_configured(settings):
+            return False
+
+        provider = str(settings.get("cloud_ai_provider") or "none").strip().lower()
+        auth_mode = str(settings.get("cloud_ai_auth_mode") or "secure_store").strip()
+        credential_id = str(settings.get("cloud_ai_credential_id") or "").strip()
+        api_key_env = str(settings.get("cloud_ai_api_key_env") or "").strip() or None
+
+        credential_config = CloudCredentialConfig(
+            provider=provider,
+            auth_mode=auth_mode,
+            credential_id=credential_id,
+            api_key_env=api_key_env,
+        )
+
+        try:
+            return bool(CloudAuthManager.get_api_key(credential_config))
+        except Exception:
+            return False
 
     def _should_auto_use_cloud(self, request: ChatRequest) -> bool:
         latest_user_message = self._find_latest_user_message(request)
@@ -898,7 +942,12 @@ class ChatService:
                 }
             return {"used": False}
 
-        query = manual_query.strip() if manual_query is not None else self._auto_web_search_query(text)
+        raw_query = manual_query.strip() if manual_query is not None else self._auto_web_search_query(text)
+        query, context_source = self._resolve_contextual_web_search_query(
+            query=raw_query,
+            latest_user_text=text,
+            request=request,
+        )
         config = self._web_search_config_from_settings(settings)
         query = self._normalize_web_search_query_for_region(
             query=query,
@@ -930,12 +979,103 @@ class ChatService:
             "used": True,
             "manual": manual_requested,
             "query": query,
+            "raw_query": raw_query,
+            "context_source": context_source,
             "provider": result.provider,
             "region_country_code": config.country_code,
             "region_location": config.location,
             "result": result,
             "result_count": len(result.results),
         }
+
+
+    def _resolve_contextual_web_search_query(
+        self,
+        query: str,
+        latest_user_text: str,
+        request: ChatRequest,
+    ) -> tuple[str, str]:
+        normalized_query = str(query or "").strip()
+        if not normalized_query:
+            return normalized_query, "direct"
+
+        if not self._looks_like_contextual_retry_query(normalized_query):
+            return normalized_query, "direct"
+
+        prior_topic = self._find_previous_search_topic(request)
+        if not prior_topic:
+            return normalized_query, "direct"
+
+        modifiers = self._contextual_retry_modifiers(normalized_query)
+        resolved = prior_topic
+        if modifiers:
+            lowered = resolved.lower()
+            additions = [modifier for modifier in modifiers if modifier.lower() not in lowered]
+            if additions:
+                resolved = f"{resolved} {' '.join(additions)}".strip()
+
+        return resolved, "previous_conversation"
+
+    def _looks_like_contextual_retry_query(self, query: str) -> bool:
+        text = str(query or "").strip().lower()
+        if not text:
+            return False
+
+        compact = " ".join(text.split())
+        exact_phrases = {
+            "다시", "다시 알아와", "다시 찾아봐", "다시 검색", "다시 검색해", "다시 검색해줘",
+            "다시 해줘", "다시 확인", "다시 확인해", "다시 확인해줘", "재검색",
+            "그거 다시", "그거 다시 알아와", "그거 다시 찾아봐", "아까 그거", "방금 그거",
+            "다른 출처", "다른 출처로", "다른 출처로 다시", "최신으로 다시",
+            "again", "search again", "try again", "retry", "look it up again", "check again",
+        }
+        if compact in exact_phrases:
+            return True
+
+        contextual_markers = (
+            "다시", "재검색", "그거", "아까", "방금", "위 내용", "이전", "다른 출처",
+            "again", "retry", "previous", "above", "that", "same topic",
+        )
+        topic_markers = (
+            "날씨", "선거", "가격", "뉴스", "버전", "일정", "release", "version", "weather", "news", "price",
+        )
+        has_context = any(marker in compact for marker in contextual_markers)
+        has_new_topic = any(marker in compact for marker in topic_markers)
+        return has_context and not has_new_topic and len(compact) <= 40
+
+    def _contextual_retry_modifiers(self, query: str) -> list[str]:
+        text = str(query or "").strip().lower()
+        modifiers: list[str] = []
+        if "최신" in text or "latest" in text or "current" in text:
+            modifiers.append("최신")
+        if "다른 출처" in text or "another source" in text or "different source" in text:
+            modifiers.append("다른 출처")
+        return modifiers
+
+    def _find_previous_search_topic(self, request: ChatRequest) -> str:
+        latest_user = self._find_latest_user_message(request)
+        latest_user_id = id(latest_user) if latest_user is not None else None
+
+        for message in reversed(request.messages):
+            if id(message) == latest_user_id:
+                continue
+            if str(message.role) != "user":
+                continue
+            content = str(message.content or "").strip()
+            if not content:
+                continue
+
+            manual_query = self._manual_web_search_query(content)
+            candidate = manual_query.strip() if manual_query is not None else content
+            if not candidate:
+                continue
+            if self._looks_like_contextual_retry_query(candidate):
+                continue
+            if candidate.startswith("/"):
+                continue
+            return candidate
+
+        return ""
 
     def _normalize_web_search_query_for_region(
         self,
@@ -1948,6 +2088,7 @@ class ChatService:
             f"- language: {self._request_language(request, settings)}\n"
             f"- message_count: {len(request.messages)}\n"
             f"- ai_route_policy: {self._route_policy(settings)}\n"
+            f"- cloud_ai_usage_weight_percent: {self._cloud_ai_usage_weight(settings)}\n"
             f"- selected_route: {route}\n"
             f"- selected_model: {model}\n"
             f"- paid_model_used: {paid_model_used}\n"
@@ -1964,6 +2105,7 @@ class ChatService:
                 "source": "chat_service",
                 "command": "status",
                 "ai_route_policy": self._route_policy(settings),
+                "cloud_ai_usage_weight_percent": self._cloud_ai_usage_weight(settings),
                 "selected_route": route,
                 "selected_model": model,
                 "selected_paid_model_used": paid_model_used,

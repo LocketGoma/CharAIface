@@ -1,4 +1,4 @@
-key,ko,en
+﻿key,ko,en
 app.title,CharAIface,CharAIface
 chat.placeholder,메시지를 입력하세요...,Type a message...
 chat.send,전송,Send
@@ -213,3 +213,11 @@ settings.user_country.detect_ip.title,국가 자동 감지,Country Detection
 settings.user_country.detect_ip.failed,IP 기반 국가 감지에 실패했습니다. {error},Failed to detect country from IP. {error}
 settings.user_country.detect_ip.empty,IP 기반 국가 정보를 찾지 못했습니다.,Could not find country information from IP.
 settings.user_country.detect_ip.completed,감지된 국가: {country},Detected country: {country}
+settings.chat_font.change,채팅 결과 폰트 변경,Change chat result font
+settings.chat_font.family,채팅 결과 폰트,Chat result font
+settings.chat_font.family_label,글꼴,Font
+settings.chat_font.size,채팅 결과 글자 크기,Chat result font size
+settings.chat_font.size_label,크기,Size
+settings.chat_font.default,기본값,Default
+settings.cloud_ai_usage_weight,클라우드 AI 활용 가중치,Cloud AI usage weight
+settings.cloud_ai_usage_weight.description,자동 라우팅에서 클라우드 AI를 얼마나 우선할지 정합니다. 클라우드 AI를 사용할 수 없으면 이 값은 무시하고 로컬 AI로 진행합니다.,"Controls how strongly auto routing prefers Cloud AI. If Cloud AI is unavailable, this value is ignored and Local AI is used."

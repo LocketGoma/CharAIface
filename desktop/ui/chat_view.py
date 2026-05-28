@@ -2,7 +2,7 @@ from html import escape
 import re
 
 from PySide6.QtCore import QPoint, Qt, QTimer, Signal
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtGui import QFont, QGuiApplication
 
 try:
     import shiboken6
@@ -49,6 +49,8 @@ class ChatView(QScrollArea):
         self._bottom_reserved_height = 0
         self._left_reserved_width = 0
         self._right_reserved_width = 0
+        self._message_font_family = ""
+        self._message_font_size = 10
 
         self.setWidgetResizable(True)
 
@@ -112,6 +114,31 @@ class ChatView(QScrollArea):
     def message_widgets(self) -> list[QWidget]:
         return self._message_widgets.copy()
 
+    def set_message_font(self, family: str = "", size: int = 10) -> None:
+        self._message_font_family = str(family or "").strip()
+        try:
+            self._message_font_size = int(size)
+        except (TypeError, ValueError):
+            self._message_font_size = 10
+        self._message_font_size = max(1, min(200, self._message_font_size))
+
+        for label in self.findChildren(SelectableMessageLabel):
+            self._apply_message_font(label)
+
+    def _apply_message_font(self, label: SelectableMessageLabel) -> None:
+        font = QFont(label.font())
+        if self._message_font_family:
+            font.setFamily(self._message_font_family)
+        font.setPointSize(max(1, int(self._message_font_size)))
+        label.setFont(font)
+
+    def _message_html_style(self) -> str:
+        size = max(1, min(200, int(self._message_font_size)))
+        styles = [f"font-size:{size}pt"]
+        if self._message_font_family:
+            styles.append(f"font-family:'{escape(self._message_font_family, quote=True)}'")
+        return "; ".join(styles)
+
     def set_markdown_enabled(self, enabled: bool) -> None:
         self._markdown_enabled = bool(enabled)
 
@@ -158,6 +185,7 @@ class ChatView(QScrollArea):
         bubble_layout.setSpacing(4)
 
         label = SelectableMessageLabel(raw_text=message.content)
+        self._apply_message_font(label)
         label.setWordWrap(True)
         label.setTextFormat(Qt.TextFormat.RichText)
         label.setText(self._build_message_html(message))
@@ -312,7 +340,8 @@ class ChatView(QScrollArea):
         display_role = escape(self._display_role(message))
         content = self._content_to_html(message.content, self._should_render_markdown(message))
 
-        return f"<b>{display_role}</b><br>{content}"
+        style = self._message_html_style()
+        return f'<div style="{style}"><b>{display_role}</b><br>{content}</div>'
 
     def add_pending_assistant_message(self, text: str) -> QWidget:
         message = ChatMessage(

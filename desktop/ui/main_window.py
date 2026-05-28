@@ -129,6 +129,7 @@ class MainWindow(QMainWindow):
 
         self.chat_view = ChatView()
         self.chat_view.set_markdown_enabled(self.settings.conversation_markdown_enabled)
+        self.chat_view.set_message_font(self.settings.chat_font_family, self.settings.chat_font_size)
         self.chat_view.setParent(self.content_area)
 
         self.session_sidebar = SessionSidebar(parent=self.content_area)
@@ -449,6 +450,7 @@ class MainWindow(QMainWindow):
         self.settings = new_settings
         if hasattr(self, "chat_view"):
             self.chat_view.set_markdown_enabled(self.settings.conversation_markdown_enabled)
+            self.chat_view.set_message_font(self.settings.chat_font_family, self.settings.chat_font_size)
             self._render_current_chat_session()
 
         if self.settings.language != old_language:

@@ -33,6 +33,8 @@ class AppSettings(BaseModel):
     user_country_location: str = "South Korea"
 
     theme_id: str = "light"
+    chat_font_family: str = "맑은 고딕"
+    chat_font_size: int = 10
 
     selected_character_id: str = "default_sakura"
     user_name: str = "익명의 선생님"
@@ -62,6 +64,8 @@ class AppSettings(BaseModel):
 
     # AI routing
     ai_route_policy: AIRoutePolicy = "auto"
+    # 0: strongly prefer local AI, 100: strongly prefer cloud AI when available.
+    cloud_ai_usage_weight_percent: int = 50
 
     # Cloud AI routing / API settings
     cloud_ai_enabled: bool = False

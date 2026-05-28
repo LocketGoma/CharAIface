@@ -98,6 +98,23 @@ class SettingsRepository:
         if "ai_route_policy" not in migrated:
             migrated["ai_route_policy"] = "auto"
 
+        try:
+            cloud_weight = int(migrated.get("cloud_ai_usage_weight_percent", AppSettings().cloud_ai_usage_weight_percent))
+        except (TypeError, ValueError):
+            cloud_weight = AppSettings().cloud_ai_usage_weight_percent
+        migrated["cloud_ai_usage_weight_percent"] = max(0, min(100, round(cloud_weight / 5) * 5))
+
+        chat_font_family = str(migrated.get("chat_font_family", "") or "").strip()
+        if not chat_font_family:
+            language = str(migrated.get("language", AppSettings().language) or AppSettings().language).strip().lower()
+            chat_font_family = "맑은 고딕" if language.startswith("ko") else "Noto Sans"
+        migrated["chat_font_family"] = chat_font_family
+        try:
+            chat_font_size = int(migrated.get("chat_font_size", AppSettings().chat_font_size))
+        except (TypeError, ValueError):
+            chat_font_size = AppSettings().chat_font_size
+        migrated["chat_font_size"] = max(1, min(200, chat_font_size))
+
         self._migrate_cloud_ai_settings(migrated)
         self._migrate_web_search_settings(migrated)
 

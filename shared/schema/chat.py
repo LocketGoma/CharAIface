@@ -26,6 +26,7 @@ class ChatRequest(BaseModel):
     user_name: str | None = None
     developer_mode: bool = False
     language: str | None = None
+    settings_snapshot: dict[str, Any] = Field(default_factory=dict)
 
 
 class ChatResponse(BaseModel):
