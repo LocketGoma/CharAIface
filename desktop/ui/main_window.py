@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+import sys
 from pathlib import Path
 from shared.schema.chat import ChatMessage, ChatRequest
 from desktop.chat.chat_session import ChatSession
@@ -7,6 +8,7 @@ from desktop.client.backend_http_client import BackendHttpClient
 from desktop.workers.local_model_prepare_worker import LocalModelPrepareWorker
 from desktop.workers.chat_response_worker import ChatResponseWorker
 from PySide6.QtCore import QEvent, QPoint, Qt, QThread, QTimer
+from PySide6.QtGui import QAction, QCloseEvent
 from PySide6.QtWidgets import (
     QApplication,
     QFrame,
@@ -16,6 +18,8 @@ from PySide6.QtWidgets import (
     QInputDialog,
     QMessageBox,
     QPushButton,
+    QMenu,
+    QSystemTrayIcon,
     QVBoxLayout,
     QWidget,
 )
@@ -83,6 +87,9 @@ class MainWindow(QMainWindow):
         # settings change via the settings dialog.
         self._local_model_update_timer: QTimer | None = None
         self._active_settings_dialog: SettingsDialog | None = None
+        self._tray_icon: QSystemTrayIcon | None = None
+        self._tray_menu: QMenu | None = None
+        self._force_quit_requested = False
 
         self.setMinimumSize(self.MIN_WINDOW_WIDTH, self.MIN_WINDOW_HEIGHT)
         self.resize(self.settings.window_width, self.settings.window_height)
@@ -101,6 +108,7 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(root)
 
         self.apply_theme_from_settings()
+        self._setup_tray_icon()
         self.retranslate_ui()
         QTimer.singleShot(0, self._restore_window_geometry)
         QTimer.singleShot(100, self._check_backend_health)
@@ -496,6 +504,7 @@ class MainWindow(QMainWindow):
         self.retranslate_ui()
 
         self.settings_repository.save(self.settings)
+        self._setup_tray_icon()
         self._update_avatar_occlusion_later()
 
         # Reschedule periodic model update checks whenever the settings are applied. This
@@ -556,6 +565,8 @@ class MainWindow(QMainWindow):
         self.bottom_area.retranslate_ui()
         self.bottom_area.set_user_name(self.settings.user_name)
         self._update_chat_view_display_names()
+        if self._tray_icon is not None:
+            self._setup_tray_icon()
 
     def _show_about_dialog(self) -> None:
         QMessageBox.information(
@@ -859,7 +870,7 @@ class MainWindow(QMainWindow):
     def _command_system_status_text(self) -> str:
         desktop_status = get_process_status(sample_seconds=0.2)
         desktop_system = get_system_overview(sample_seconds=0.0)
-        backend_status = self.backend_client.system_status()
+        backend_status = self.backend_client.system_status() if self.settings.developer_mode else None
 
         lines = [
             "System Status:",
@@ -871,7 +882,13 @@ class MainWindow(QMainWindow):
             *self._format_process_status_lines(desktop_status),
         ]
 
-        if backend_status is None:
+        if not self.settings.developer_mode:
+            lines.extend([
+                "",
+                "Backend process",
+                "- hidden: developer mode is disabled",
+            ])
+        elif backend_status is None:
             lines.extend([
                 "",
                 "Backend process",
@@ -2306,14 +2323,153 @@ class MainWindow(QMainWindow):
             scroll_bar.setValue(scroll_bar.value() - step)
         else:
             scroll_bar.setValue(scroll_bar.value() + step)
+    def _is_macos(self) -> bool:
+        return sys.platform == "darwin"
+
+    def _hide_session_window_from_tray(self) -> None:
+        if self._is_macos():
+            # On macOS, keep the window represented by the Dock instead of
+            # fully hiding it like a Windows tray app.  This matches normal
+            # Dock behavior: the app remains alive and the session window can
+            # be restored from the Dock/app menu or the menu-bar icon.
+            self.showMinimized()
+            return
+
+        self.hide()
+
+    def _setup_tray_icon(self) -> None:
+        if not bool(getattr(self.settings, "enable_tray_icon", True)):
+            if self._tray_icon is not None:
+                self._tray_icon.hide()
+            self._tray_icon = None
+            self._tray_menu = None
+            return
+
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            self._tray_icon = None
+            self._tray_menu = None
+            return
+
+        if self._tray_icon is None:
+            icon = self.windowIcon()
+            if icon.isNull():
+                icon = QApplication.style().standardIcon(
+                    QApplication.style().StandardPixmap.SP_ComputerIcon
+                )
+
+            self._tray_icon = QSystemTrayIcon(icon, self)
+            self._tray_icon.activated.connect(self._on_tray_icon_activated)
+
+        menu = QMenu(self)
+
+        show_action = QAction(self.localization.t("tray.open_session_window"), self)
+        show_action.triggered.connect(self.show_session_window)
+        menu.addAction(show_action)
+
+        hide_action = QAction(self.localization.t("tray.hide"), self)
+        hide_action.triggered.connect(self._hide_session_window_from_tray)
+        menu.addAction(hide_action)
+
+        menu.addSeparator()
+
+        quit_action = QAction(self.localization.t("tray.quit"), self)
+        quit_action.triggered.connect(self._quit_from_tray)
+        menu.addAction(quit_action)
+
+        self._tray_menu = menu
+        self._tray_icon.setContextMenu(menu)
+        self._tray_icon.setToolTip(self.localization.t("app.title"))
+        self._tray_icon.show()
+
+    def _on_tray_icon_activated(self, reason) -> None:
+        if reason in (
+            QSystemTrayIcon.ActivationReason.Trigger,
+            QSystemTrayIcon.ActivationReason.DoubleClick,
+        ):
+            self.show_session_window()
+
+    def show_session_window(self) -> None:
+        """Show and focus the existing session window.
+
+        This is used by the tray/menu bar action and by the single-instance
+        activation channel.  It intentionally revives the current frontend
+        instead of starting another frontend process.
+        """
+        self._restore_session_window_focus()
+        # Some macOS window managers ignore the first activation request when it
+        # originates from a menu bar/tray action. Retry shortly on the Qt event
+        # loop instead of starting another frontend process.
+        QTimer.singleShot(60, self._restore_session_window_focus)
+        QTimer.singleShot(180, self._restore_session_window_focus)
+
+    def _restore_session_window_focus(self) -> None:
+        app = QApplication.instance()
+
+        if app is not None:
+            app.setActiveWindow(self)
+
+        self.setVisible(True)
+        self.show()
+        self.setWindowState(
+            (
+                self.windowState()
+                & ~Qt.WindowState.WindowMinimized
+                & ~Qt.WindowState.WindowFullScreen
+            )
+            | Qt.WindowState.WindowActive
+        )
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+
+        if app is not None:
+            app.alert(self, 0)
+
+
+    def _quit_from_tray(self) -> None:
+        self._force_quit_requested = True
+        self._save_current_chat_session()
+        app = QApplication.instance()
+        if app is not None:
+            app.quit()
+        else:
+            self.close()
+
+    def _should_minimize_to_tray_on_close(self) -> bool:
+        if self._force_quit_requested:
+            return False
+
+        if not bool(getattr(self.settings, "enable_tray_icon", True)):
+            return False
+
+        if str(getattr(self.settings, "close_button_behavior", "exit")) != "minimize_to_tray":
+            return False
+
+        return self._tray_icon is not None and self._tray_icon.isVisible()
+
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         self._update_content_geometry()
 
-    def closeEvent(self, event) -> None:
+    def closeEvent(self, event: QCloseEvent) -> None:
         self._save_current_chat_session()
         self.settings.window_width = self.width()
         self.settings.window_height = self.height()
         self.settings_repository.save(self.settings)
+
+        if self._should_minimize_to_tray_on_close():
+            event.ignore()
+            self._hide_session_window_from_tray()
+            if self._tray_icon is not None:
+                self._tray_icon.showMessage(
+                    self.localization.t("app.title"),
+                    self.localization.t("tray.minimized_message"),
+                    QSystemTrayIcon.MessageIcon.Information,
+                    1800,
+                )
+            return
+
+        if self._tray_icon is not None:
+            self._tray_icon.hide()
 
         super().closeEvent(event)

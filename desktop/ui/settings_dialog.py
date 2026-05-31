@@ -1045,6 +1045,30 @@ class SettingsDialog(QDialog):
         self.developer_mode_checkbox = QCheckBox()
         self.developer_mode_checkbox.setChecked(self.settings.developer_mode)
 
+        self.enable_tray_icon_checkbox = QCheckBox()
+        self.enable_tray_icon_checkbox.setChecked(
+            bool(getattr(self.settings, "enable_tray_icon", True))
+        )
+
+        self.close_button_behavior_combo = QComboBox()
+        self.close_button_behavior_combo.addItem(
+            self.localization.t("settings.close_button_behavior.exit"),
+            "exit",
+        )
+        self.close_button_behavior_combo.addItem(
+            self.localization.t("settings.close_button_behavior.minimize_to_tray"),
+            "minimize_to_tray",
+        )
+        close_behavior = str(
+            getattr(self.settings, "close_button_behavior", "minimize_to_tray")
+            or "minimize_to_tray"
+        ).strip()
+        close_behavior_index = self.close_button_behavior_combo.findData(close_behavior)
+        if close_behavior_index < 0:
+            close_behavior_index = self.close_button_behavior_combo.findData("minimize_to_tray")
+        if close_behavior_index >= 0:
+            self.close_button_behavior_combo.setCurrentIndex(close_behavior_index)
+
         self.cloud_ai_usage_slider = QSlider(Qt.Orientation.Horizontal)
         self.cloud_ai_usage_slider.setMinimum(0)
         self.cloud_ai_usage_slider.setMaximum(100)
@@ -1087,6 +1111,8 @@ class SettingsDialog(QDialog):
         self.avatar_opacity_slider.valueChanged.connect(self._on_avatar_opacity_changed)
 
         form_layout.addRow(self.localization.t("settings.developer_mode"), self.developer_mode_checkbox)
+        form_layout.addRow(self.localization.t("settings.enable_tray_icon"), self.enable_tray_icon_checkbox)
+        form_layout.addRow(self.localization.t("settings.close_button_behavior"), self.close_button_behavior_combo)
 
         cloud_weight_widget = QWidget()
         cloud_weight_layout = QVBoxLayout(cloud_weight_widget)
@@ -1130,6 +1156,13 @@ class SettingsDialog(QDialog):
         cloud_weight_description.setWordWrap(True)
         cloud_weight_description.setObjectName("SettingsNoteLabel")
         layout.addWidget(cloud_weight_description)
+
+        close_behavior_description = QLabel(
+            self.localization.t("settings.close_button_behavior.description")
+        )
+        close_behavior_description.setWordWrap(True)
+        close_behavior_description.setObjectName("SettingsNoteLabel")
+        layout.addWidget(close_behavior_description)
 
         layout.addStretch()
 
@@ -2561,6 +2594,11 @@ class SettingsDialog(QDialog):
         self._apply_web_search_controls_to_settings()
 
         self.settings.developer_mode = self.developer_mode_checkbox.isChecked()
+        self.settings.enable_tray_icon = self.enable_tray_icon_checkbox.isChecked()
+        self.settings.close_button_behavior = (
+            self.close_button_behavior_combo.currentData()
+            or AppSettings().close_button_behavior
+        )
         self.settings.cloud_ai_usage_weight_percent = max(0, min(100, round(self.cloud_ai_usage_slider.value() / 5) * 5))
         self.settings.expand_chat_over_character_area = self.expand_chat_checkbox.isChecked()
         self.settings.enable_avatar_embarrassed_when_occluded = (

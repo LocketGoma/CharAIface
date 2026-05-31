@@ -64,6 +64,17 @@ class SettingsRepository:
         if "runtime_install_policy" not in migrated:
             migrated["runtime_install_policy"] = "ask"
 
+        migrated["enable_tray_icon"] = bool(
+            migrated.get("enable_tray_icon", AppSettings().enable_tray_icon)
+        )
+
+        close_behavior = str(
+            migrated.get("close_button_behavior", AppSettings().close_button_behavior)
+        ).strip().lower()
+        if close_behavior not in {"exit", "minimize_to_tray"}:
+            close_behavior = AppSettings().close_button_behavior
+        migrated["close_button_behavior"] = close_behavior
+
         if "local_ai_provider" not in migrated:
             migrated["local_ai_provider"] = "ollama"
 

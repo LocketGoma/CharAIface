@@ -9,7 +9,7 @@ if [[ -f ".venv/bin/activate" ]]; then
 fi
 
 if command -v python >/dev/null 2>&1; then
-  python scripts/run_char_aiface.py "$@"
+  python ./scripts/run_char_aiface.py "$@"
 else
-  python3 scripts/run_char_aiface.py "$@"
+  python3 ./scripts/run_char_aiface.py "$@"
 fi

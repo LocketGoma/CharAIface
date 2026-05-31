@@ -1,6 +1,7 @@
 import sys
 from pathlib import Path
 
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QApplication
 
@@ -8,6 +9,11 @@ from desktop.localization.localization_manager import LocalizationManager
 from desktop.settings.settings_repository import SettingsRepository
 from desktop.theme.theme_manager import ThemeManager
 from desktop.ui.main_window import MainWindow
+from desktop.utils.app_icon import load_app_icon
+from desktop.utils.single_instance import (
+    FrontendSingleInstanceServer,
+    request_existing_frontend_activation,
+)
 
 
 def _ensure_valid_application_font(app: QApplication) -> None:
@@ -39,11 +45,38 @@ def _ensure_valid_application_font(app: QApplication) -> None:
     app.setFont(font)
 
 
+
+def _restore_window_when_app_activated(window: MainWindow, state: Qt.ApplicationState) -> None:
+    """Restore the session window when the user re-activates the app on macOS.
+
+    macOS users expect Dock activation to bring back the app window.  Windows
+    keeps the tray-hide behavior, so this hook is intentionally macOS-only.
+    """
+    if sys.platform != "darwin":
+        return
+
+    if state == Qt.ApplicationState.ApplicationActive and (
+        not window.isVisible() or window.isMinimized()
+    ):
+        window.show_session_window()
+
 def main() -> int:
+    # If another frontend is already alive, ask it to open the session window
+    # and exit before creating a second PySide frontend process.
+    if request_existing_frontend_activation():
+        return 0
+
     app = QApplication(sys.argv)
+    app.setApplicationName("CharAIface")
+    app.setApplicationDisplayName("CharAIface")
+    app.setOrganizationName("LocketGoma")
+    app.setQuitOnLastWindowClosed(False)
     _ensure_valid_application_font(app)
 
     project_root = Path(__file__).resolve().parents[1]
+    app_icon = load_app_icon(project_root)
+    if not app_icon.isNull():
+        app.setWindowIcon(app_icon)
 
     settings_path = project_root / "resources" / "data" / "settings.json"
     locale_path = project_root / "resources" / "locales" / "ui.csv"
@@ -72,6 +105,17 @@ def main() -> int:
         settings=settings,
         settings_repository=settings_repository,
     )
+    if not app_icon.isNull():
+        window.setWindowIcon(app_icon)
+
+    app.applicationStateChanged.connect(
+        lambda state: _restore_window_when_app_activated(window, state)
+    )
+
+    single_instance_server = FrontendSingleInstanceServer(window.show_session_window)
+    single_instance_server.start()
+    app.aboutToQuit.connect(single_instance_server.stop)
+
     window.show()
 
     return app.exec()

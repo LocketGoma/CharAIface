@@ -7,6 +7,7 @@ LocalAIProvider = Literal["ollama"]
 RuntimeInstallPolicy = Literal["never", "ask"]
 ModelInstallPolicy = Literal["never", "ask", "auto"]
 AIRoutePolicy = Literal["local_only", "cloud_only", "local_first", "cloud_first", "auto"]
+CloseButtonBehavior = Literal["exit", "minimize_to_tray"]
 CloudAIAuthMode = Literal["secure_store", "env_var"]
 WebSearchAuthMode = Literal["secure_store", "env_var"]
 WebSearchProvider = Literal["none", "tavily", "firecrawl"]
@@ -40,6 +41,8 @@ class AppSettings(BaseModel):
     user_name: str = "익명의 선생님"
 
     developer_mode: bool = False
+    enable_tray_icon: bool = True
+    close_button_behavior: CloseButtonBehavior = "minimize_to_tray"
 
     conversation_markdown_enabled: bool = True
     enforce_response_language: bool = True

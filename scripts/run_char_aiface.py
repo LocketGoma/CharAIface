@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
 import json
 import os
 import signal
@@ -15,12 +16,33 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 BACKEND_HOST = "127.0.0.1"
 BACKEND_PORT = 10420
 BACKEND_MODULE = "backend.app.main:app"
+FRONTEND_CONTROL_HOST = "127.0.0.1"
+FRONTEND_CONTROL_PORT = 10421
 SETTINGS_PATH = ROOT_DIR / "resources" / "data" / "settings.json"
+LOG_DIR = ROOT_DIR / "resources" / "logs"
+LOG_PATH = LOG_DIR / "launcher.log"
+_SHOW_LAUNCHER_STATUS = True
 
 
 _backend_process: subprocess.Popen | None = None
 _backend_pids_to_stop: set[int] = set()
 _cleanup_started = False
+
+
+def _write_launcher_log(message: str) -> None:
+    try:
+        LOG_DIR.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with LOG_PATH.open("a", encoding="utf-8") as log_file:
+            log_file.write(f"[{timestamp}] {message}\n")
+    except OSError:
+        pass
+
+
+def _launcher_status(message: str, *, always_print: bool = False) -> None:
+    _write_launcher_log(message)
+    if always_print or _SHOW_LAUNCHER_STATUS:
+        print(message)
 
 
 def _read_developer_mode() -> bool:
@@ -36,6 +58,21 @@ def _is_port_open(host: str, port: int, timeout: float = 0.4) -> bool:
     try:
         with socket.create_connection((host, port), timeout=timeout):
             return True
+    except OSError:
+        return False
+
+
+def _request_existing_frontend_activation(timeout: float = 0.35) -> bool:
+    """Activate an already-running frontend before touching backend lifecycle."""
+    try:
+        with socket.create_connection(
+            (FRONTEND_CONTROL_HOST, FRONTEND_CONTROL_PORT),
+            timeout=timeout,
+        ) as sock:
+            sock.settimeout(timeout)
+            sock.sendall(b"activate\n")
+            response = sock.recv(64)
+            return response.startswith(b"OK\n")
     except OSError:
         return False
 
@@ -147,7 +184,7 @@ def _stop_backend_pids(pids: set[int], label: str) -> None:
     if not pids:
         return
 
-    print(f"[Launcher] Stopping {label} backend process(es): {sorted(pids)}")
+    _launcher_status(f"[Launcher] Stopping {label} backend process(es): {sorted(pids)}")
 
     for pid in sorted(pids):
         _terminate_pid(pid, force=False)
@@ -201,14 +238,20 @@ def _start_backend(show_backend: bool) -> subprocess.Popen:
         str(BACKEND_PORT),
     ]
 
-    stdout = None if show_backend else subprocess.DEVNULL
-    stderr = None if show_backend else subprocess.DEVNULL
+    if show_backend:
+        stdout = None
+        stderr = None
+    else:
+        LOG_DIR.mkdir(parents=True, exist_ok=True)
+        backend_log = open(LOG_DIR / "backend.log", "a", encoding="utf-8")
+        stdout = backend_log
+        stderr = backend_log
     creationflags = 0
 
     if os.name == "nt" and not show_backend:
         creationflags = subprocess.CREATE_NO_WINDOW
 
-    print("[Launcher] Starting backend.")
+    _launcher_status("[Launcher] Starting backend.")
     return subprocess.Popen(
         command,
         cwd=str(ROOT_DIR),
@@ -229,7 +272,7 @@ def _run_desktop() -> int:
 
 
 def main() -> int:
-    global _backend_process, _backend_pids_to_stop
+    global _backend_process, _backend_pids_to_stop, _SHOW_LAUNCHER_STATUS
 
     parser = argparse.ArgumentParser(description="Run CharAIface backend and desktop together.")
     parser.add_argument(
@@ -255,14 +298,20 @@ def main() -> int:
 
     developer_mode = _read_developer_mode()
     show_backend = bool(args.show_backend or developer_mode)
+    _SHOW_LAUNCHER_STATUS = bool(show_backend)
+    _write_launcher_log("[Launcher] CharAIface launcher started.")
+
+    if _request_existing_frontend_activation():
+        _launcher_status("[Launcher] Existing frontend session window activated.")
+        return 0
 
     existing_pids = _find_port_listener_pids(BACKEND_PORT)
     if existing_pids:
         if args.reuse_backend:
-            print(f"[Launcher] Backend is already running. Adopting listener process(es): {sorted(existing_pids)}")
+            _launcher_status(f"[Launcher] Backend is already running. Adopting listener process(es): {sorted(existing_pids)}")
             _backend_pids_to_stop.update(existing_pids)
         else:
-            print(f"[Launcher] Backend port is already in use. Restarting listener process(es): {sorted(existing_pids)}")
+            _launcher_status(f"[Launcher] Backend port is already in use. Restarting listener process(es): {sorted(existing_pids)}")
             _stop_backend_pids(existing_pids, "existing")
 
     if not _is_port_open(BACKEND_HOST, BACKEND_PORT):
@@ -270,19 +319,19 @@ def main() -> int:
         _backend_pids_to_stop.add(_backend_process.pid)
 
         if not _wait_for_port(BACKEND_HOST, BACKEND_PORT, timeout_seconds=20.0):
-            print("[Launcher] Backend did not open the expected port.")
+            _launcher_status("[Launcher] Backend did not open the expected port.", always_print=True)
             _cleanup_backend()
             return 1
     else:
         active_pids = _find_port_listener_pids(BACKEND_PORT)
         _backend_pids_to_stop.update(active_pids)
-        print(f"[Launcher] Backend is running on port {BACKEND_PORT}: {sorted(active_pids)}")
+        _launcher_status(f"[Launcher] Backend is running on port {BACKEND_PORT}: {sorted(active_pids)}")
 
     try:
         return _run_desktop()
     finally:
         if args.keep_backend:
-            print("[Launcher] Keeping backend process alive because --keep-backend was specified.")
+            _launcher_status("[Launcher] Keeping backend process alive because --keep-backend was specified.")
         else:
             _cleanup_backend()
 

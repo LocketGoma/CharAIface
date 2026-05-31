@@ -221,3 +221,13 @@ settings.chat_font.size_label,크기,Size
 settings.chat_font.default,기본값,Default
 settings.cloud_ai_usage_weight,클라우드 AI 활용 가중치,Cloud AI usage weight
 settings.cloud_ai_usage_weight.description,자동 라우팅에서 클라우드 AI를 얼마나 우선할지 정합니다. 클라우드 AI를 사용할 수 없으면 이 값은 무시하고 로컬 AI로 진행합니다.,"Controls how strongly auto routing prefers Cloud AI. If Cloud AI is unavailable, this value is ignored and Local AI is used."
+settings.enable_tray_icon,트레이/메뉴바 아이콘 사용,Enable tray/menu bar icon
+settings.close_button_behavior,창 닫기 버튼 동작,Close button behavior
+settings.close_button_behavior.exit,앱 종료,Exit app
+settings.close_button_behavior.minimize_to_tray,트레이로 최소화,Minimize to tray
+settings.close_button_behavior.description,창 닫기 버튼을 눌렀을 때 앱을 종료할지 트레이/메뉴바로 숨길지 선택합니다. 트레이 메뉴에서 종료를 선택하면 백엔드도 함께 종료됩니다.,Choose whether the window close button exits the app or hides it to the tray/menu bar. Choosing Quit from the tray menu exits the backend as well.
+tray.show,열기,Open
+tray.open_session_window,세션 윈도우 열기,Open Session Window
+tray.hide,숨기기,Hide
+tray.quit,종료,Quit
+tray.minimized_message,CharAIface가 트레이/메뉴바에서 계속 실행 중입니다.,CharAIface is still running in the tray/menu bar.

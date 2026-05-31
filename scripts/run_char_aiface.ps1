@@ -8,7 +8,7 @@ $ProjectRoot = Split-Path -Parent $ScriptPath
 Set-Location $ProjectRoot
 
 $VenvPython = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
-$Launcher = Join-Path $ProjectRoot "run_char_aiface.py"
+$Launcher = Join-Path $ProjectRoot "scripts\run_char_aiface.py"
 
 if (!(Test-Path $VenvPython)) {
     Write-Host "[ERROR] Virtual environment was not found: .venv" -ForegroundColor Red
@@ -18,11 +18,11 @@ if (!(Test-Path $VenvPython)) {
 }
 
 if (!(Test-Path $Launcher)) {
-    Write-Host "[ERROR] run_char_aiface.py was not found." -ForegroundColor Red
+    Write-Host "[ERROR] scripts\run_char_aiface.py was not found." -ForegroundColor Red
     Write-Host "        Make sure this script is inside the CharAIface project."
     exit 1
 }
 
 Write-Host "[CharAIface] Starting CharAIface..."
-& $VenvPython $Launcher
+& $VenvPython $Launcher @args
 exit $LASTEXITCODE

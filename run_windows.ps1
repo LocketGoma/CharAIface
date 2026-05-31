@@ -58,5 +58,5 @@ if ($NeedsInstall) {
     }
 }
 
-& powershell -ExecutionPolicy Bypass -File $RunScript
+& powershell -ExecutionPolicy Bypass -File $RunScript @args
 exit $LASTEXITCODE
