@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$PROJECT_ROOT"
+
 if [[ -f ".venv/bin/activate" ]]; then
   source ".venv/bin/activate"
 fi
+
 if command -v python >/dev/null 2>&1; then
-  python run_char_aiface.py "$@"
+  python scripts/run_char_aiface.py "$@"
 else
-  python3 run_char_aiface.py "$@"
+  python3 scripts/run_char_aiface.py "$@"
 fi
