@@ -234,3 +234,6 @@ resources/builtin/
 resources/data/settings.json
 resources/data/chat_sessions/sessions
 resources/data/chat_sessions/session_index.json
+*.icns
+*.ico
+**/__init__.py
