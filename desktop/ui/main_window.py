@@ -40,6 +40,18 @@ from desktop.ui.settings_dialog import SettingsDialog
 from desktop.ui.session_sidebar import SessionSidebar
 
 
+CHAT_RESPONSE_STATE_RULES = {
+    "panic": ("paid_model_unavailable", "panic"),
+    "error": ("error",),
+}
+
+CHAT_RESPONSE_STATE_HANDLERS = {
+    "panic": "on_panic",
+    "error": "on_error",
+    "assistant_done": "on_assistant_done",
+}
+
+
 class MainWindow(QMainWindow):
     MIN_WINDOW_WIDTH = 600
     MIN_WINDOW_HEIGHT = 450
@@ -1362,14 +1374,23 @@ class MainWindow(QMainWindow):
             print(f"[Chat] Response target session was not found: {session_id}")
 
         metadata = getattr(response.message, "metadata", {}) or {}
-        if metadata.get("paid_model_unavailable"):
-            self.character_state.on_panic()
-        elif metadata.get("error"):
-            self.character_state.on_error()
-        else:
-            self.character_state.on_assistant_done()
+        self._apply_chat_response_state(metadata)
 
         self._update_avatar_occlusion_later()
+
+    def _chat_response_state_from_metadata(self, metadata: dict) -> str:
+        for state, keys in CHAT_RESPONSE_STATE_RULES.items():
+            if any(metadata.get(key) for key in keys):
+                return state
+        return "assistant_done"
+
+    def _apply_chat_response_state(self, metadata: dict) -> None:
+        state = self._chat_response_state_from_metadata(metadata)
+        handler_name = CHAT_RESPONSE_STATE_HANDLERS.get(
+            state,
+            CHAT_RESPONSE_STATE_HANDLERS["assistant_done"],
+        )
+        getattr(self.character_state, handler_name)()
 
     def _on_chat_response_failed(self, session_id: str, error: str) -> None:
         self._clear_pending_assistant_response(session_id)
