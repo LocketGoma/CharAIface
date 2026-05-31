@@ -147,11 +147,11 @@ def _check_project_layout() -> bool:
         else:
             _warn(f"Optional directory missing: {relative_path}")
 
-    launcher = PROJECT_ROOT / "scripts" / "run_char_aiface.py"
-    if launcher.exists():
-        _ok("Launcher found: scripts/run_char_aiface.py")
+    run_script = PROJECT_ROOT / "run_char_aiface.py"
+    if run_script.exists():
+        _ok("Launcher found: run_char_aiface.py")
     else:
-        _error("Launcher missing: scripts/run_char_aiface.py")
+        _error("Launcher missing: run_char_aiface.py")
         success = False
 
     if REQUIREMENTS_FILE.exists():
