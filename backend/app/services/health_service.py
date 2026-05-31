@@ -9,12 +9,23 @@ from backend.app.services.cloud_auth_manager import (
     CloudAuthManager,
     CloudCredentialConfig,
 )
+from backend.app.core.backend_helper import (
+    ANTHROPIC_VERSION,
+    cloud_provider_base_url,
+    normalize_cloud_provider,
+)
 from backend.app.services.local_ai.ollama_manager import OllamaManager
 
 
 APP_NAME = "CharAIface Backend"
 APP_VERSION = "0.1.0"
 CLOUD_AI_TIMEOUT_SECONDS = 5.0
+CLOUD_HEALTH_PROVIDER_CHECKS = {
+    "openai": "_check_openai",
+    "openrouter": "_check_openrouter",
+    "anthropic": "_check_anthropic",
+    "gemini": "_check_gemini",
+}
 
 
 class HealthService:
@@ -129,7 +140,7 @@ class HealthService:
                 "error_code": "cloud_ai_disabled",
             }
 
-        provider = str(settings.get("cloud_ai_provider", "none")).strip().lower()
+        provider = normalize_cloud_provider(settings.get("cloud_ai_provider", "none"))
         if not provider or provider == "none":
             return {
                 "configured": False,
@@ -175,25 +186,16 @@ class HealthService:
         base_url = str(settings.get("cloud_ai_base_url", "")).strip()
 
         try:
-            if provider == "openai":
-                return self._check_openai(api_key, base_url)
-
-            if provider == "openrouter":
-                return self._check_openrouter(api_key, base_url)
-
-            if provider == "anthropic":
-                return self._check_anthropic(api_key, base_url)
-
-            if provider == "gemini":
-                return self._check_gemini(api_key, base_url)
-
-            return {
-                "configured": True,
-                "available": False,
-                "provider": provider,
-                "state": "unsupported_provider",
-                "error_code": "cloud_ai_provider_unsupported",
-            }
+            handler_name = CLOUD_HEALTH_PROVIDER_CHECKS.get(provider)
+            if handler_name is None:
+                return {
+                    "configured": True,
+                    "available": False,
+                    "provider": provider,
+                    "state": "unsupported_provider",
+                    "error_code": "cloud_ai_provider_unsupported",
+                }
+            return getattr(self, handler_name)(api_key, base_url)
 
         except httpx.HTTPStatusError as error:
             return {
@@ -231,7 +233,7 @@ class HealthService:
             return {}
 
     def _check_openai(self, api_key: str, base_url: str = "") -> dict[str, Any]:
-        url = (base_url or "https://api.openai.com/v1").rstrip("/")
+        url = cloud_provider_base_url("openai", base_url).rstrip("/")
         response = httpx.get(
             f"{url}/models",
             headers={"Authorization": f"Bearer {api_key}"},
@@ -248,7 +250,7 @@ class HealthService:
         }
 
     def _check_openrouter(self, api_key: str, base_url: str = "") -> dict[str, Any]:
-        url = (base_url or "https://openrouter.ai/api/v1").rstrip("/")
+        url = cloud_provider_base_url("openrouter", base_url).rstrip("/")
         response = httpx.get(
             f"{url}/models",
             headers={"Authorization": f"Bearer {api_key}"},
@@ -265,12 +267,12 @@ class HealthService:
         }
 
     def _check_anthropic(self, api_key: str, base_url: str = "") -> dict[str, Any]:
-        url = (base_url or "https://api.anthropic.com/v1").rstrip("/")
+        url = cloud_provider_base_url("anthropic", base_url).rstrip("/")
         response = httpx.get(
             f"{url}/models",
             headers={
                 "x-api-key": api_key,
-                "anthropic-version": "2023-06-01",
+                "anthropic-version": ANTHROPIC_VERSION,
             },
             timeout=CLOUD_AI_TIMEOUT_SECONDS,
         )
@@ -285,7 +287,7 @@ class HealthService:
         }
 
     def _check_gemini(self, api_key: str, base_url: str = "") -> dict[str, Any]:
-        url = (base_url or "https://generativelanguage.googleapis.com/v1beta").rstrip("/")
+        url = cloud_provider_base_url("gemini", base_url).rstrip("/")
         response = httpx.get(
             f"{url}/models",
             params={"key": api_key},

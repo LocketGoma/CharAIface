@@ -11,6 +11,12 @@ from backend.app.services.cloud_auth_manager import (
     CloudAuthManager,
     CloudCredentialConfig,
 )
+from backend.app.core.backend_helper import (
+    ANTHROPIC_VERSION,
+    CLOUD_PROVIDERS_WITH_PUBLIC_MODEL_CATALOG,
+    cloud_provider_base_url,
+    normalize_cloud_provider,
+)
 
 
 router = APIRouter(prefix="/cloud-ai", tags=["cloud-ai"])
@@ -19,6 +25,20 @@ CLOUD_AI_TIMEOUT_SECONDS = 10.0
 CLOUD_AI_MODEL_LIST_TIMEOUT_SECONDS = 30.0
 RECENT_MODEL_MAX_AGE_DAYS = 365
 
+CLOUD_PROVIDER_CHECK_HANDLERS = {
+    "openai": "_check_openai_provider",
+    "openrouter": "_check_openrouter_provider",
+    "anthropic": "_check_anthropic_provider",
+    "gemini": "_check_gemini_provider",
+}
+
+CLOUD_PROVIDER_MODEL_FETCHERS = {
+    "openai": "_fetch_openai_models",
+    "openrouter": "_fetch_openrouter_models",
+    "anthropic": "_fetch_anthropic_models",
+    "gemini": "_fetch_gemini_models_for_provider",
+    "custom": "_fetch_custom_provider_models",
+}
 
 class CloudAITestRequest(BaseModel):
     provider: str
@@ -96,7 +116,7 @@ def test_cloud_ai_connection(request: CloudAITestRequest) -> dict[str, Any]:
 
 @router.post("/models")
 def list_cloud_ai_models(request: CloudAIModelsRequest) -> dict[str, Any]:
-    provider = request.provider.strip().lower()
+    provider = normalize_cloud_provider(request.provider)
 
     if provider == "none":
         return {
@@ -128,7 +148,7 @@ def list_cloud_ai_models(request: CloudAIModelsRequest) -> dict[str, Any]:
 
     # OpenRouter's public catalog can be listed without a key.
     # Other providers need a key to return account-appropriate results.
-    if provider != "openrouter" and not api_key:
+    if provider not in CLOUD_PROVIDERS_WITH_PUBLIC_MODEL_CATALOG and not api_key:
         return {
             "ok": False,
             "provider": provider,
@@ -178,132 +198,142 @@ def list_cloud_ai_models(request: CloudAIModelsRequest) -> dict[str, Any]:
 
 
 def _check_provider(request: CloudAITestRequest, api_key: str) -> dict[str, Any]:
-    provider = request.provider.strip().lower()
+    provider = normalize_cloud_provider(request.provider)
+    handler_name = CLOUD_PROVIDER_CHECK_HANDLERS.get(provider)
+    if handler_name is None:
+        return {
+            "ok": False,
+            "provider": provider,
+            "state": "unsupported_provider",
+            "error_code": "cloud_ai_provider_unsupported",
+        }
+    return globals()[handler_name](request, api_key)
 
-    if provider == "openai":
-        base_url = request.base_url.strip() or "https://api.openai.com/v1"
-        response = httpx.get(
-            f"{base_url.rstrip('/')}/models",
-            headers={"Authorization": f"Bearer {api_key}"},
-            timeout=CLOUD_AI_TIMEOUT_SECONDS,
-        )
-        response.raise_for_status()
-        return _ready_response(provider)
+def _check_openai_provider(request: CloudAITestRequest, api_key: str) -> dict[str, Any]:
+    provider = normalize_cloud_provider(request.provider)
+    base_url = cloud_provider_base_url(provider, request.base_url)
+    response = httpx.get(
+        f"{base_url.rstrip('/')}/models",
+        headers={"Authorization": f"Bearer {api_key}"},
+        timeout=CLOUD_AI_TIMEOUT_SECONDS,
+    )
+    response.raise_for_status()
+    return _ready_response(provider)
 
-    if provider == "openrouter":
-        base_url = request.base_url.strip() or "https://openrouter.ai/api/v1"
-        response = httpx.get(
-            f"{base_url.rstrip('/')}/models",
-            headers={"Authorization": f"Bearer {api_key}"},
-            timeout=CLOUD_AI_TIMEOUT_SECONDS,
-        )
-        response.raise_for_status()
-        return _ready_response(provider)
 
-    if provider == "anthropic":
-        base_url = request.base_url.strip() or "https://api.anthropic.com/v1"
-        response = httpx.get(
-            f"{base_url.rstrip('/')}/models",
-            headers={
-                "x-api-key": api_key,
-                "anthropic-version": "2023-06-01",
-            },
-            timeout=CLOUD_AI_TIMEOUT_SECONDS,
-        )
-        response.raise_for_status()
-        return _ready_response(provider)
+def _check_openrouter_provider(request: CloudAITestRequest, api_key: str) -> dict[str, Any]:
+    provider = normalize_cloud_provider(request.provider)
+    base_url = cloud_provider_base_url(provider, request.base_url)
+    response = httpx.get(
+        f"{base_url.rstrip('/')}/models",
+        headers={"Authorization": f"Bearer {api_key}"},
+        timeout=CLOUD_AI_TIMEOUT_SECONDS,
+    )
+    response.raise_for_status()
+    return _ready_response(provider)
 
-    if provider == "gemini":
-        base_url = (
-            request.base_url.strip()
-            or "https://generativelanguage.googleapis.com/v1beta"
-        )
-        response = httpx.get(
-            f"{base_url.rstrip('/')}/models",
-            params={"key": api_key},
-            timeout=CLOUD_AI_TIMEOUT_SECONDS,
-        )
-        response.raise_for_status()
-        return _ready_response(provider)
 
-    return {
-        "ok": False,
-        "provider": provider,
-        "state": "unsupported_provider",
-        "error_code": "cloud_ai_provider_unsupported",
-    }
+def _check_anthropic_provider(request: CloudAITestRequest, api_key: str) -> dict[str, Any]:
+    provider = normalize_cloud_provider(request.provider)
+    base_url = cloud_provider_base_url(provider, request.base_url)
+    response = httpx.get(
+        f"{base_url.rstrip('/')}/models",
+        headers={
+            "x-api-key": api_key,
+            "anthropic-version": ANTHROPIC_VERSION,
+        },
+        timeout=CLOUD_AI_TIMEOUT_SECONDS,
+    )
+    response.raise_for_status()
+    return _ready_response(provider)
+
+
+def _check_gemini_provider(request: CloudAITestRequest, api_key: str) -> dict[str, Any]:
+    provider = normalize_cloud_provider(request.provider)
+    base_url = cloud_provider_base_url(provider, request.base_url)
+    response = httpx.get(
+        f"{base_url.rstrip('/')}/models",
+        params={"key": api_key},
+        timeout=CLOUD_AI_TIMEOUT_SECONDS,
+    )
+    response.raise_for_status()
+    return _ready_response(provider)
 
 
 def _fetch_provider_models(request: CloudAIModelsRequest, api_key: str) -> list[str]:
-    provider = request.provider.strip().lower()
+    provider = normalize_cloud_provider(request.provider)
+    handler_name = CLOUD_PROVIDER_MODEL_FETCHERS.get(provider)
+    if handler_name is None:
+        return []
+    return globals()[handler_name](request, api_key)
 
-    if provider == "openai":
-        base_url = request.base_url.strip() or "https://api.openai.com/v1"
-        response = httpx.get(
-            f"{base_url.rstrip('/')}/models",
-            headers={"Authorization": f"Bearer {api_key}"},
-            timeout=CLOUD_AI_MODEL_LIST_TIMEOUT_SECONDS,
-        )
-        response.raise_for_status()
-        data = response.json()
-        return _filter_openai_model_items(data.get("data", []))
 
-    if provider == "openrouter":
-        base_url = request.base_url.strip() or "https://openrouter.ai/api/v1"
-        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
-        response = httpx.get(
-            f"{base_url.rstrip('/')}/models",
-            headers=headers,
-            timeout=CLOUD_AI_MODEL_LIST_TIMEOUT_SECONDS,
-        )
-        response.raise_for_status()
-        data = response.json()
-        return _filter_openrouter_model_items(data.get("data", []))
+def _fetch_openai_models(request: CloudAIModelsRequest, api_key: str) -> list[str]:
+    base_url = cloud_provider_base_url("openai", request.base_url)
+    response = httpx.get(
+        f"{base_url.rstrip('/')}/models",
+        headers={"Authorization": f"Bearer {api_key}"},
+        timeout=CLOUD_AI_MODEL_LIST_TIMEOUT_SECONDS,
+    )
+    response.raise_for_status()
+    data = response.json()
+    return _filter_openai_model_items(data.get("data", []))
 
-    if provider == "anthropic":
-        base_url = request.base_url.strip() or "https://api.anthropic.com/v1"
-        response = httpx.get(
-            f"{base_url.rstrip('/')}/models",
-            headers={
-                "x-api-key": api_key,
-                "anthropic-version": "2023-06-01",
-            },
-            timeout=CLOUD_AI_MODEL_LIST_TIMEOUT_SECONDS,
-        )
-        response.raise_for_status()
-        data = response.json()
-        return _filter_anthropic_model_items(data.get("data", []))
 
-    if provider == "gemini":
-        base_url = (
-            request.base_url.strip()
-            or "https://generativelanguage.googleapis.com/v1beta"
-        )
-        response = httpx.get(
-            f"{base_url.rstrip('/')}/models",
-            params={"key": api_key},
-            timeout=CLOUD_AI_MODEL_LIST_TIMEOUT_SECONDS,
-        )
-        response.raise_for_status()
-        data = response.json()
-        return _filter_gemini_models(data.get("models", []))
+def _fetch_openrouter_models(request: CloudAIModelsRequest, api_key: str) -> list[str]:
+    base_url = cloud_provider_base_url("openrouter", request.base_url)
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+    response = httpx.get(
+        f"{base_url.rstrip('/')}/models",
+        headers=headers,
+        timeout=CLOUD_AI_MODEL_LIST_TIMEOUT_SECONDS,
+    )
+    response.raise_for_status()
+    data = response.json()
+    return _filter_openrouter_model_items(data.get("data", []))
 
-    if provider == "custom":
-        base_url = request.base_url.strip()
-        if not base_url:
-            return []
 
-        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
-        response = httpx.get(
-            f"{base_url.rstrip('/')}/models",
-            headers=headers,
-            timeout=CLOUD_AI_MODEL_LIST_TIMEOUT_SECONDS,
-        )
-        response.raise_for_status()
-        data = response.json()
-        return _unique_sorted(_extract_id_list(data.get("data", [])))
+def _fetch_anthropic_models(request: CloudAIModelsRequest, api_key: str) -> list[str]:
+    base_url = cloud_provider_base_url("anthropic", request.base_url)
+    response = httpx.get(
+        f"{base_url.rstrip('/')}/models",
+        headers={
+            "x-api-key": api_key,
+            "anthropic-version": ANTHROPIC_VERSION,
+        },
+        timeout=CLOUD_AI_MODEL_LIST_TIMEOUT_SECONDS,
+    )
+    response.raise_for_status()
+    data = response.json()
+    return _filter_anthropic_model_items(data.get("data", []))
 
-    return []
+
+def _fetch_gemini_models_for_provider(request: CloudAIModelsRequest, api_key: str) -> list[str]:
+    base_url = cloud_provider_base_url("gemini", request.base_url)
+    response = httpx.get(
+        f"{base_url.rstrip('/')}/models",
+        params={"key": api_key},
+        timeout=CLOUD_AI_MODEL_LIST_TIMEOUT_SECONDS,
+    )
+    response.raise_for_status()
+    data = response.json()
+    return _filter_gemini_models(data.get("models", []))
+
+
+def _fetch_custom_provider_models(request: CloudAIModelsRequest, api_key: str) -> list[str]:
+    base_url = request.base_url.strip()
+    if not base_url:
+        return []
+
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+    response = httpx.get(
+        f"{base_url.rstrip('/')}/models",
+        headers=headers,
+        timeout=CLOUD_AI_MODEL_LIST_TIMEOUT_SECONDS,
+    )
+    response.raise_for_status()
+    data = response.json()
+    return _unique_sorted(_extract_id_list(data.get("data", [])))
 
 
 def _extract_id_list(items: Any) -> list[str]:

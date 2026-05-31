@@ -11,6 +11,11 @@ from backend.app.services.cloud_auth_manager import (
     CloudAuthManager,
     CloudCredentialConfig,
 )
+from backend.app.core.backend_helper import (
+    ANTHROPIC_VERSION,
+    cloud_provider_base_url,
+    normalize_cloud_provider,
+)
 from backend.app.services.health_service import HealthService
 from backend.app.services.system_status_service import SystemStatusService
 from backend.app.services.web_search_service import (
@@ -35,6 +40,29 @@ DEFAULT_LOCAL_AI_BASE_URL = "http://127.0.0.1:11434"
 OLLAMA_CHAT_TIMEOUT_SECONDS = 120.0
 CLOUD_AI_CHAT_TIMEOUT_SECONDS = 120.0
 MAX_CHAT_HISTORY_MESSAGES = 24
+
+ROUTE_POLICY_HANDLERS = {
+    "local_only": "_route_local_only",
+    "cloud_only": "_route_cloud_when_available",
+    "cloud_first": "_route_cloud_when_available",
+    "local_first": "_route_local_only",
+    "auto": "_route_auto",
+}
+
+CLOUD_CHAT_PROVIDER_HANDLERS = {
+    "openai": "_call_openai_cloud_chat",
+    "openrouter": "_call_openrouter_cloud_chat",
+    "anthropic": "_call_anthropic_cloud_chat",
+    "gemini": "_call_gemini_cloud_chat",
+    "custom": "_call_custom_cloud_chat",
+}
+
+CLOUD_PROVIDER_PROBE_HANDLERS = {
+    "openai": "_probe_openai_provider",
+    "openrouter": "_probe_openrouter_provider",
+    "anthropic": "_probe_anthropic_provider",
+    "gemini": "_probe_gemini_provider",
+}
 
 
 class ChatService:
@@ -173,28 +201,41 @@ class ChatService:
         settings = settings or self._effective_settings(request)
         policy = self._route_policy(settings)
         cloud_available = self._cloud_ai_configured(settings) and self._cloud_ai_credentials_available(settings)
+        handler_name = ROUTE_POLICY_HANDLERS.get(policy, ROUTE_POLICY_HANDLERS["auto"])
+        handler = getattr(self, handler_name)
+        return handler(request, settings, cloud_available)
 
-        if policy == "local_only":
+    def _route_local_only(
+        self,
+        request: ChatRequest,
+        settings: dict[str, Any],
+        cloud_available: bool,
+    ) -> ChatRoute:
+        return "local_ollama"
+
+    def _route_cloud_when_available(
+        self,
+        request: ChatRequest,
+        settings: dict[str, Any],
+        cloud_available: bool,
+    ) -> ChatRoute:
+        return "cloud_ai" if cloud_available else "local_ollama"
+
+    def _route_auto(
+        self,
+        request: ChatRequest,
+        settings: dict[str, Any],
+        cloud_available: bool,
+    ) -> ChatRoute:
+        if not cloud_available:
             return "local_ollama"
-
-        if policy == "cloud_only":
-            return "cloud_ai" if cloud_available else "local_ollama"
-
-        if policy == "cloud_first":
-            return "cloud_ai" if cloud_available else "local_ollama"
-
-        if policy == "local_first":
+        cloud_weight = self._cloud_ai_usage_weight(settings)
+        if cloud_weight >= 75:
+            return "cloud_ai"
+        if cloud_weight <= 20:
             return "local_ollama"
-
-        if policy == "auto" and cloud_available:
-            cloud_weight = self._cloud_ai_usage_weight(settings)
-            if cloud_weight >= 75:
-                return "cloud_ai"
-            if cloud_weight <= 20:
-                return "local_ollama"
-            if self._should_auto_use_cloud(request):
-                return "cloud_ai"
-
+        if self._should_auto_use_cloud(request):
+            return "cloud_ai"
         return "local_ollama"
 
     def _route_policy(self, settings: dict[str, Any]) -> str:
@@ -534,55 +575,89 @@ class ChatService:
         model: str,
         messages: list[dict[str, str]],
     ) -> str:
-        provider = provider.strip().lower()
+        provider = normalize_cloud_provider(provider)
+        handler_name = CLOUD_CHAT_PROVIDER_HANDLERS.get(provider)
+        if handler_name is None:
+            raise ValueError(f"Unsupported Cloud AI provider: {provider}")
 
-        if provider == "openai":
-            return self._call_openai_compatible_chat(
-                base_url=base_url or "https://api.openai.com/v1",
-                api_key=api_key,
-                model=model,
-                messages=messages,
-            )
+        handler = getattr(self, handler_name)
+        return handler(base_url=base_url, api_key=api_key, model=model, messages=messages)
 
-        if provider == "openrouter":
-            return self._call_openai_compatible_chat(
-                base_url=base_url or "https://openrouter.ai/api/v1",
-                api_key=api_key,
-                model=model,
-                messages=messages,
-                extra_headers={
-                    "HTTP-Referer": "https://char-aiface.local",
-                    "X-Title": "CharAIface",
-                },
-            )
+    def _call_openai_cloud_chat(
+        self,
+        base_url: str,
+        api_key: str,
+        model: str,
+        messages: list[dict[str, str]],
+    ) -> str:
+        return self._call_openai_compatible_chat(
+            base_url=cloud_provider_base_url("openai", base_url),
+            api_key=api_key,
+            model=model,
+            messages=messages,
+        )
 
-        if provider == "anthropic":
-            return self._call_anthropic_chat(
-                base_url=base_url or "https://api.anthropic.com/v1",
-                api_key=api_key,
-                model=model,
-                messages=messages,
-            )
+    def _call_openrouter_cloud_chat(
+        self,
+        base_url: str,
+        api_key: str,
+        model: str,
+        messages: list[dict[str, str]],
+    ) -> str:
+        return self._call_openai_compatible_chat(
+            base_url=cloud_provider_base_url("openrouter", base_url),
+            api_key=api_key,
+            model=model,
+            messages=messages,
+            extra_headers={
+                "HTTP-Referer": "https://char-aiface.local",
+                "X-Title": "CharAIface",
+            },
+        )
 
-        if provider == "gemini":
-            return self._call_gemini_chat(
-                base_url=base_url or "https://generativelanguage.googleapis.com/v1beta",
-                api_key=api_key,
-                model=model,
-                messages=messages,
-            )
+    def _call_anthropic_cloud_chat(
+        self,
+        base_url: str,
+        api_key: str,
+        model: str,
+        messages: list[dict[str, str]],
+    ) -> str:
+        return self._call_anthropic_chat(
+            base_url=cloud_provider_base_url("anthropic", base_url),
+            api_key=api_key,
+            model=model,
+            messages=messages,
+        )
 
-        if provider == "custom":
-            if not base_url.strip():
-                raise ValueError("Custom Cloud AI provider requires a base_url.")
-            return self._call_openai_compatible_chat(
-                base_url=base_url,
-                api_key=api_key,
-                model=model,
-                messages=messages,
-            )
+    def _call_gemini_cloud_chat(
+        self,
+        base_url: str,
+        api_key: str,
+        model: str,
+        messages: list[dict[str, str]],
+    ) -> str:
+        return self._call_gemini_chat(
+            base_url=cloud_provider_base_url("gemini", base_url),
+            api_key=api_key,
+            model=model,
+            messages=messages,
+        )
 
-        raise ValueError(f"Unsupported Cloud AI provider: {provider}")
+    def _call_custom_cloud_chat(
+        self,
+        base_url: str,
+        api_key: str,
+        model: str,
+        messages: list[dict[str, str]],
+    ) -> str:
+        if not base_url.strip():
+            raise ValueError("Custom Cloud AI provider requires a base_url.")
+        return self._call_openai_compatible_chat(
+            base_url=base_url,
+            api_key=api_key,
+            model=model,
+            messages=messages,
+        )
 
     def _call_openai_compatible_chat(
         self,
@@ -656,7 +731,7 @@ class ChatService:
             f"{base_url.rstrip('/')}/messages",
             headers={
                 "x-api-key": api_key,
-                "anthropic-version": "2023-06-01",
+                "anthropic-version": ANTHROPIC_VERSION,
                 "Content-Type": "application/json",
             },
             json={
@@ -1678,36 +1753,35 @@ class ChatService:
         }
 
     def _probe_cloud_ai_provider(self, provider: str, base_url: str, api_key: str) -> None:
-        provider = provider.strip().lower()
-        if provider == "openai":
-            url = (base_url or "https://api.openai.com/v1").rstrip("/")
-            response = httpx.get(f"{url}/models", headers={"Authorization": f"Bearer {api_key}"}, timeout=5.0)
-            response.raise_for_status()
-            return
+        provider = normalize_cloud_provider(provider)
+        handler_name = CLOUD_PROVIDER_PROBE_HANDLERS.get(provider)
+        if handler_name is None:
+            raise ValueError(f"Unsupported cloud AI provider: {provider}")
+        getattr(self, handler_name)(base_url=base_url, api_key=api_key)
 
-        if provider == "openrouter":
-            url = (base_url or "https://openrouter.ai/api/v1").rstrip("/")
-            response = httpx.get(f"{url}/models", headers={"Authorization": f"Bearer {api_key}"}, timeout=5.0)
-            response.raise_for_status()
-            return
+    def _probe_openai_provider(self, base_url: str, api_key: str) -> None:
+        url = cloud_provider_base_url("openai", base_url).rstrip("/")
+        response = httpx.get(f"{url}/models", headers={"Authorization": f"Bearer {api_key}"}, timeout=5.0)
+        response.raise_for_status()
 
-        if provider == "anthropic":
-            url = (base_url or "https://api.anthropic.com/v1").rstrip("/")
-            response = httpx.get(
-                f"{url}/models",
-                headers={"x-api-key": api_key, "anthropic-version": "2023-06-01"},
-                timeout=5.0,
-            )
-            response.raise_for_status()
-            return
+    def _probe_openrouter_provider(self, base_url: str, api_key: str) -> None:
+        url = cloud_provider_base_url("openrouter", base_url).rstrip("/")
+        response = httpx.get(f"{url}/models", headers={"Authorization": f"Bearer {api_key}"}, timeout=5.0)
+        response.raise_for_status()
 
-        if provider == "gemini":
-            url = (base_url or "https://generativelanguage.googleapis.com/v1beta").rstrip("/")
-            response = httpx.get(f"{url}/models", params={"key": api_key}, timeout=5.0)
-            response.raise_for_status()
-            return
+    def _probe_anthropic_provider(self, base_url: str, api_key: str) -> None:
+        url = cloud_provider_base_url("anthropic", base_url).rstrip("/")
+        response = httpx.get(
+            f"{url}/models",
+            headers={"x-api-key": api_key, "anthropic-version": ANTHROPIC_VERSION},
+            timeout=5.0,
+        )
+        response.raise_for_status()
 
-        raise ValueError(f"Unsupported cloud AI provider: {provider}")
+    def _probe_gemini_provider(self, base_url: str, api_key: str) -> None:
+        url = cloud_provider_base_url("gemini", base_url).rstrip("/")
+        response = httpx.get(f"{url}/models", params={"key": api_key}, timeout=5.0)
+        response.raise_for_status()
 
     def _create_cloud_ai_status_response(self, request: ChatRequest) -> ChatResponse:
         settings = self._effective_settings(request)

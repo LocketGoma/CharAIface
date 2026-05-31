@@ -112,6 +112,7 @@ class AppSettings(BaseModel):
     web_search_auto_enabled: bool = False
     web_search_provider: WebSearchProvider = "tavily"
     web_search_auth_mode: WebSearchAuthMode = "secure_store"
+    # TODO: Keep this schema default in sync with desktop.core.frontend_helper.WEB_SEARCH_PROVIDER_DEFAULTS.
     web_search_credential_id: str = "CharAIface/tavily/api_key"
     web_search_api_key_env: str = "TAVILY_API_KEY"
     web_search_base_url: str = ""

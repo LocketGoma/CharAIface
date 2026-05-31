@@ -48,6 +48,12 @@ class WebSearchError(RuntimeError):
     pass
 
 
+WEB_SEARCH_PROVIDER_HANDLERS = {
+    "tavily": "_search_tavily",
+    "firecrawl": "_search_firecrawl",
+}
+
+
 class WebSearchService:
     DEFAULT_TAVILY_BASE_URL = "https://api.tavily.com"
     DEFAULT_FIRECRAWL_BASE_URL = "https://api.firecrawl.dev/v2"
@@ -68,13 +74,10 @@ class WebSearchService:
         if not api_key:
             raise WebSearchError("Web search API key was not found.")
 
-        if provider == "tavily":
-            return self._search_tavily(query=query, api_key=api_key, config=config)
-
-        if provider == "firecrawl":
-            return self._search_firecrawl(query=query, api_key=api_key, config=config)
-
-        raise WebSearchError(f"Unsupported web search provider: {provider}")
+        handler_name = WEB_SEARCH_PROVIDER_HANDLERS.get(provider)
+        if handler_name is None:
+            raise WebSearchError(f"Unsupported web search provider: {provider}")
+        return getattr(self, handler_name)(query=query, api_key=api_key, config=config)
 
     def _resolve_api_key(self, config: WebSearchConfig) -> str | None:
         credential_config = CloudCredentialConfig(

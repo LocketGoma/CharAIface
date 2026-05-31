@@ -28,6 +28,16 @@ from backend.app.services.cloud_auth_manager import (
     CloudCredentialConfig,
 )
 from desktop.characters.character_registry import CharacterRegistry
+from desktop.core.frontend_helper import (
+    KNOWN_CLOUD_PROVIDER_IDS,
+    WEB_SEARCH_PROVIDER_DEFAULTS,
+    cloud_ai_provider_defaults,
+    default_cloud_api_key_env,
+    default_cloud_credential_id,
+    default_web_search_api_key_env,
+    default_web_search_credential_id,
+    web_search_provider_defaults,
+)
 from desktop.localization.localization_manager import LocalizationManager
 from desktop.settings.app_settings import AppSettings
 from desktop.theme.theme_manager import ThemeManager
@@ -1594,78 +1604,13 @@ class SettingsDialog(QDialog):
         return models
 
     def _cloud_ai_provider_defaults(self, provider: str) -> dict[str, object]:
-        defaults: dict[str, dict[str, object]] = {
-            "none": {
-                "api_key_env": "",
-                "credential_id": "CharAIface/openai/api_key",
-                "api_key_url": "",
-                "base_url": "",
-                "model": "",
-                "models": [],
-            },
-            "openai": {
-                "api_key_env": "OPENAI_API_KEY",
-                "credential_id": "CharAIface/openai/api_key",
-                "api_key_url": "https://platform.openai.com/api-keys",
-                "base_url": "",
-                "model": "gpt-4.1-mini",
-                "models": ["gpt-4.1-mini", "gpt-4.1", "gpt-5.1-mini", "gpt-5.1"],
-            },
-            "openrouter": {
-                "api_key_env": "OPENROUTER_API_KEY",
-                "credential_id": "CharAIface/openrouter/api_key",
-                "api_key_url": "https://openrouter.ai/settings/keys",
-                "base_url": "https://openrouter.ai/api/v1",
-                "model": "openai/gpt-4.1-mini",
-                "models": [
-                    "openai/gpt-4.1-mini",
-                    "openai/gpt-4.1",
-                    "anthropic/claude-3-5-sonnet-latest",
-                    "google/gemini-2.0-flash",
-                ],
-            },
-            "anthropic": {
-                "api_key_env": "ANTHROPIC_API_KEY",
-                "credential_id": "CharAIface/anthropic/api_key",
-                "api_key_url": "https://console.anthropic.com/settings/keys",
-                "base_url": "",
-                "model": "claude-3-5-sonnet-latest",
-                "models": [
-                    "claude-3-5-sonnet-latest",
-                    "claude-3-5-haiku-latest",
-                    "claude-3-opus-latest",
-                ],
-            },
-            "gemini": {
-                "api_key_env": "GEMINI_API_KEY",
-                "credential_id": "CharAIface/gemini/api_key",
-                "api_key_url": "https://aistudio.google.com/app/apikey",
-                "base_url": "",
-                "model": "gemini-2.0-flash",
-                "models": ["gemini-2.0-flash", "gemini-1.5-pro", "gemini-1.5-flash"],
-            },
-            "custom": {
-                "api_key_env": "CUSTOM_API_KEY",
-                "credential_id": "CharAIface/custom/api_key",
-                "api_key_url": "",
-                "base_url": "",
-                "model": "custom/model-id",
-                "models": ["custom/model-id"],
-            },
-        }
-
-        return defaults.get(provider, defaults["openai"])
+        return cloud_ai_provider_defaults(provider)
 
     def _default_cloud_api_key_env(self, provider: str) -> str:
-        return str(self._cloud_ai_provider_defaults(provider).get("api_key_env", ""))
+        return default_cloud_api_key_env(provider)
 
     def _default_cloud_credential_id(self, provider: str) -> str:
-        return str(
-            self._cloud_ai_provider_defaults(provider).get(
-                "credential_id",
-                CloudAuthManager.default_credential_id(provider),
-            )
-        )
+        return default_cloud_credential_id(provider)
 
     def _known_cloud_api_key_env_names(self) -> set[str]:
         return {
@@ -1693,7 +1638,7 @@ class SettingsDialog(QDialog):
         return tuple(models) in known_model_lists
 
     def _known_cloud_provider_ids(self) -> tuple[str, ...]:
-        return ("none", "openai", "openrouter", "anthropic", "gemini", "custom")
+        return KNOWN_CLOUD_PROVIDER_IDS
 
     def _current_cloud_auth_config(self) -> CloudCredentialConfig:
         provider = self.cloud_ai_provider_combo.currentData() or "openai"
@@ -2256,34 +2201,13 @@ class SettingsDialog(QDialog):
         self._apply_web_search_controls_to_settings()
 
     def _web_search_provider_defaults(self, provider: str) -> dict[str, object]:
-        provider = (provider or "tavily").strip().lower()
-        defaults = {
-            "none": {
-                "credential_id": "",
-                "api_key_env": "",
-                "api_key_url": "",
-                "base_url": "",
-            },
-            "tavily": {
-                "credential_id": "CharAIface/tavily/api_key",
-                "api_key_env": "TAVILY_API_KEY",
-                "api_key_url": "https://app.tavily.com/",
-                "base_url": "",
-            },
-            "firecrawl": {
-                "credential_id": "CharAIface/firecrawl/api_key",
-                "api_key_env": "FIRECRAWL_API_KEY",
-                "api_key_url": "https://www.firecrawl.dev/app/api-keys",
-                "base_url": "",
-            },
-        }
-        return defaults.get(provider, defaults["tavily"])
+        return web_search_provider_defaults(provider)
 
     def _default_web_search_api_key_env(self, provider: str) -> str:
-        return str(self._web_search_provider_defaults(provider).get("api_key_env", ""))
+        return default_web_search_api_key_env(provider)
 
     def _default_web_search_credential_id(self, provider: str) -> str:
-        return str(self._web_search_provider_defaults(provider).get("credential_id", ""))
+        return default_web_search_credential_id(provider)
 
     def _current_web_search_auth_config(self) -> CloudCredentialConfig:
         provider = self.web_search_provider_combo.currentData() or "tavily"
@@ -2310,11 +2234,13 @@ class SettingsDialog(QDialog):
         current_env = self.web_search_api_key_env_edit.text().strip()
         current_credential_id = self.web_search_credential_id_edit.text().strip()
 
-        known_envs = {"", "TAVILY_API_KEY", "FIRECRAWL_API_KEY"}
+        known_envs = {
+            "",
+            *(str(defaults.get("api_key_env", "")) for defaults in WEB_SEARCH_PROVIDER_DEFAULTS.values()),
+        }
         known_ids = {
             "",
-            "CharAIface/tavily/api_key",
-            "CharAIface/firecrawl/api_key",
+            *(str(defaults.get("credential_id", "")) for defaults in WEB_SEARCH_PROVIDER_DEFAULTS.values()),
         }
 
         if current_env in known_envs:

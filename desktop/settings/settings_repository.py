@@ -3,6 +3,17 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
+from desktop.core.frontend_helper import (
+    KNOWN_WEB_SEARCH_PROVIDER_IDS,
+    default_cloud_api_key_env,
+    default_cloud_base_url,
+    default_cloud_credential_id,
+    default_cloud_models,
+    default_web_search_api_key_env,
+    default_web_search_credential_id,
+    guess_cloud_ai_provider,
+    normalize_provider,
+)
 from desktop.settings.app_settings import AppSettings
 
 
@@ -160,30 +171,30 @@ class SettingsRepository:
             migrated["cloud_ai_enabled"] = False
 
         if "cloud_ai_provider" not in migrated:
-            migrated["cloud_ai_provider"] = self._guess_cloud_ai_provider(
+            migrated["cloud_ai_provider"] = guess_cloud_ai_provider(
                 str(migrated.get("cloud_model", default_settings.cloud_model))
             )
 
-        provider = str(migrated.get("cloud_ai_provider", "openai")).strip().lower()
+        provider = normalize_provider(migrated.get("cloud_ai_provider", "openai"), "openai")
 
         if "cloud_ai_base_url" not in migrated:
-            migrated["cloud_ai_base_url"] = self._default_cloud_base_url(provider)
+            migrated["cloud_ai_base_url"] = default_cloud_base_url(provider)
 
         if "cloud_ai_auth_mode" not in migrated:
             migrated["cloud_ai_auth_mode"] = "secure_store"
 
         if "cloud_ai_credential_id" not in migrated:
-            migrated["cloud_ai_credential_id"] = self._default_cloud_credential_id(provider)
+            migrated["cloud_ai_credential_id"] = default_cloud_credential_id(provider)
 
         if "cloud_ai_api_key_env" not in migrated:
-            migrated["cloud_ai_api_key_env"] = self._default_cloud_api_key_env(provider)
+            migrated["cloud_ai_api_key_env"] = default_cloud_api_key_env(provider)
 
         if "cloud_model" not in migrated:
             migrated["cloud_model"] = ""
 
         cloud_models = migrated.get("cloud_ai_models")
         if cloud_models is None:
-            cloud_models = self._default_cloud_models(provider)
+            cloud_models = default_cloud_models(provider)
         elif isinstance(cloud_models, str):
             cloud_models = cloud_models.replace(",", "\n").splitlines()
         elif not isinstance(cloud_models, list):
@@ -208,10 +219,11 @@ class SettingsRepository:
     def _migrate_web_search_settings(self, migrated: dict) -> None:
         default_settings = AppSettings()
 
-        provider = str(
-            migrated.get("web_search_provider", default_settings.web_search_provider)
-        ).strip().lower()
-        if provider not in {"none", "tavily", "firecrawl"}:
+        provider = normalize_provider(
+            migrated.get("web_search_provider", default_settings.web_search_provider),
+            default_settings.web_search_provider,
+        )
+        if provider not in KNOWN_WEB_SEARCH_PROVIDER_IDS:
             provider = default_settings.web_search_provider
         migrated["web_search_provider"] = provider
 
@@ -229,12 +241,12 @@ class SettingsRepository:
 
         credential_id = str(migrated.get("web_search_credential_id", "")).strip()
         if not credential_id:
-            credential_id = self._default_web_search_credential_id(provider)
+            credential_id = default_web_search_credential_id(provider)
         migrated["web_search_credential_id"] = credential_id
 
         api_key_env = str(migrated.get("web_search_api_key_env", "")).strip()
         if not api_key_env:
-            api_key_env = self._default_web_search_api_key_env(provider)
+            api_key_env = default_web_search_api_key_env(provider)
         migrated["web_search_api_key_env"] = api_key_env
 
         migrated["web_search_base_url"] = str(
@@ -253,92 +265,3 @@ class SettingsRepository:
             timeout_seconds = 20
         migrated["web_search_timeout_seconds"] = max(3, min(120, timeout_seconds))
 
-    def _default_web_search_credential_id(self, provider: str) -> str:
-        provider = (provider or "tavily").strip().lower()
-        if provider == "firecrawl":
-            return "CharAIface/firecrawl/api_key"
-        if provider == "none":
-            return ""
-        return "CharAIface/tavily/api_key"
-
-    def _default_web_search_api_key_env(self, provider: str) -> str:
-        provider = (provider or "tavily").strip().lower()
-        if provider == "firecrawl":
-            return "FIRECRAWL_API_KEY"
-        if provider == "none":
-            return ""
-        return "TAVILY_API_KEY"
-
-    def _guess_cloud_ai_provider(self, cloud_model: str) -> str:
-        normalized = cloud_model.lower()
-
-        if normalized.startswith("openrouter/"):
-            return "openrouter"
-        if normalized.startswith("anthropic/") or normalized.startswith("claude-"):
-            return "anthropic"
-        if normalized.startswith("gemini") or normalized.startswith("google/"):
-            return "gemini"
-        if normalized.startswith("custom/"):
-            return "custom"
-
-        return "openai"
-
-    def _default_cloud_api_key_env(self, provider: str) -> str:
-        if provider == "openrouter":
-            return "OPENROUTER_API_KEY"
-        if provider == "anthropic":
-            return "ANTHROPIC_API_KEY"
-        if provider == "gemini":
-            return "GEMINI_API_KEY"
-        if provider == "none":
-            return ""
-
-        return "OPENAI_API_KEY"
-
-    def _default_cloud_credential_id(self, provider: str) -> str:
-        normalized = (provider or "custom").strip().lower().replace(" ", "_")
-        if not normalized or normalized == "none":
-            normalized = "openai"
-        return f"CharAIface/{normalized}/api_key"
-
-    def _default_cloud_base_url(self, provider: str) -> str:
-        if provider == "openrouter":
-            return "https://openrouter.ai/api/v1"
-        return ""
-
-    def _default_cloud_model(self, provider: str) -> str:
-        models = self._default_cloud_models(provider)
-        if models:
-            return models[0]
-        return ""
-
-    def _default_cloud_models(self, provider: str) -> list[str]:
-        if provider == "openrouter":
-            return [
-                "openai/gpt-4.1-mini",
-                "openai/gpt-4.1",
-                "anthropic/claude-3-5-sonnet-latest",
-                "google/gemini-2.0-flash",
-            ]
-        if provider == "anthropic":
-            return [
-                "claude-3-5-sonnet-latest",
-                "claude-3-5-haiku-latest",
-                "claude-3-opus-latest",
-            ]
-        if provider == "gemini":
-            return [
-                "gemini-2.0-flash",
-                "gemini-1.5-pro",
-                "gemini-1.5-flash",
-            ]
-        if provider == "custom":
-            return ["custom/model-id"]
-        if provider == "none":
-            return []
-        return [
-            "gpt-4.1-mini",
-            "gpt-4.1",
-            "gpt-5.1-mini",
-            "gpt-5.1",
-        ]
