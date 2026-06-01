@@ -150,6 +150,9 @@ class SettingsDialog(QDialog):
         self.user_country_combo = QComboBox()
         self._setup_user_country_combo()
 
+        self.preferred_unit_system_combo = QComboBox()
+        self._setup_preferred_unit_system_combo()
+
         self.user_country_location_edit = QLineEdit()
         self.user_country_location_edit.setText(self.settings.user_country_location)
         self.user_country_location_edit.setPlaceholderText(
@@ -175,6 +178,7 @@ class SettingsDialog(QDialog):
         form_layout.addRow(self.localization.t("settings.language"), self.language_combo)
         form_layout.addRow(self.localization.t("settings.user_country"), user_country_widget)
         form_layout.addRow(self.localization.t("settings.user_country.custom"), self.user_country_location_edit)
+        form_layout.addRow(self.localization.t("settings.preferred_unit_system"), self.preferred_unit_system_combo)
 
         output_label = QLabel(self.localization.t("settings.conversation_output"))
         output_label.setObjectName("SettingsSectionLabel")
@@ -1224,6 +1228,26 @@ class SettingsDialog(QDialog):
             self.user_country_combo.setCurrentIndex(index)
 
         self._finalize_combo_box(self.user_country_combo)
+
+    def _setup_preferred_unit_system_combo(self) -> None:
+        items = [
+            ("settings.preferred_unit_system.metric", "metric"),
+            ("settings.preferred_unit_system.imperial", "imperial"),
+        ]
+        for label_key, value in items:
+            self.preferred_unit_system_combo.addItem(self.localization.t(label_key), value)
+
+        current_value = str(
+            getattr(self.settings, "preferred_unit_system", AppSettings().preferred_unit_system)
+            or AppSettings().preferred_unit_system
+        ).strip().lower()
+        index = self.preferred_unit_system_combo.findData(current_value)
+        if index < 0:
+            index = self.preferred_unit_system_combo.findData(AppSettings().preferred_unit_system)
+        if index >= 0:
+            self.preferred_unit_system_combo.setCurrentIndex(index)
+
+        self._finalize_combo_box(self.preferred_unit_system_combo)
 
     def _country_region_for_preset(self, preset: str, language: str | None = None) -> tuple[str, str, str]:
         normalized = (preset or "auto_language").strip().lower()
@@ -2431,6 +2455,10 @@ class SettingsDialog(QDialog):
             code, location = self._parse_user_country_input(self.user_country_location_edit.text())
             self.settings.user_country_code = code or self.settings.user_country_code
             self.settings.user_country_location = location or self.settings.user_country_location
+        self.settings.preferred_unit_system = (
+            self.preferred_unit_system_combo.currentData()
+            or AppSettings().preferred_unit_system
+        )
         self.settings.conversation_markdown_enabled = self.conversation_markdown_checkbox.isChecked()
         self.settings.enforce_response_language = self.enforce_response_language_checkbox.isChecked()
         self.settings.emphasize_character_style = self.emphasize_character_style_checkbox.isChecked()

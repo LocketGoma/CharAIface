@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any, Literal
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import httpx
 
@@ -40,6 +40,7 @@ DEFAULT_LOCAL_AI_BASE_URL = "http://127.0.0.1:11434"
 OLLAMA_CHAT_TIMEOUT_SECONDS = 120.0
 CLOUD_AI_CHAT_TIMEOUT_SECONDS = 120.0
 MAX_CHAT_HISTORY_MESSAGES = 24
+CHAT_SERVICE_MARKERS_FILENAME = "chat_service_markers.json"
 
 ROUTE_POLICY_HANDLERS = {
     "local_only": "_route_local_only",
@@ -72,6 +73,35 @@ class ChatService:
         self.web_search_service = WebSearchService()
         self.project_root = Path(__file__).resolve().parents[3]
         self.settings_path = self.project_root / "resources" / "data" / "settings.json"
+        self.markers_path = self.project_root / "resources" / "data" / CHAT_SERVICE_MARKERS_FILENAME
+        self.chat_service_markers = self._load_chat_service_markers()
+
+    def _load_chat_service_markers(self) -> dict[str, tuple[str, ...]]:
+        try:
+            data = json.loads(self.markers_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as error:
+            print(f"[ChatService] Failed to load {CHAT_SERVICE_MARKERS_FILENAME}: {error}")
+            return {}
+
+        if not isinstance(data, dict):
+            return {}
+
+        markers: dict[str, tuple[str, ...]] = {}
+        for category, raw_values in data.items():
+            if not isinstance(category, str) or not isinstance(raw_values, list):
+                continue
+
+            values: list[str] = []
+            for value in raw_values:
+                if not isinstance(value, str):
+                    continue
+                normalized = self._compact_search_trigger_text(value)
+                if normalized:
+                    values.append(normalized)
+
+            markers[category] = tuple(dict.fromkeys(values))
+
+        return markers
 
     def create_response(self, request: ChatRequest) -> ChatResponse:
         latest_user_message = self._find_latest_user_message(request)
@@ -1020,7 +1050,6 @@ class ChatService:
         raw_query = manual_query.strip() if manual_query is not None else self._auto_web_search_query(text)
         query, context_source = self._resolve_contextual_web_search_query(
             query=raw_query,
-            latest_user_text=text,
             request=request,
         )
         config = self._web_search_config_from_settings(settings)
@@ -1059,6 +1088,7 @@ class ChatService:
             "provider": result.provider,
             "region_country_code": config.country_code,
             "region_location": config.location,
+            "preferred_unit_system": self._preferred_unit_system(settings),
             "result": result,
             "result_count": len(result.results),
         }
@@ -1067,7 +1097,6 @@ class ChatService:
     def _resolve_contextual_web_search_query(
         self,
         query: str,
-        latest_user_text: str,
         request: ChatRequest,
     ) -> tuple[str, str]:
         normalized_query = str(query or "").strip()
@@ -1097,34 +1126,30 @@ class ChatService:
             return False
 
         compact = " ".join(text.split())
-        exact_phrases = {
-            "다시", "다시 알아와", "다시 찾아봐", "다시 검색", "다시 검색해", "다시 검색해줘",
-            "다시 해줘", "다시 확인", "다시 확인해", "다시 확인해줘", "재검색",
-            "그거 다시", "그거 다시 알아와", "그거 다시 찾아봐", "아까 그거", "방금 그거",
-            "다른 출처", "다른 출처로", "다른 출처로 다시", "최신으로 다시",
-            "again", "search again", "try again", "retry", "look it up again", "check again",
-        }
-        if compact in exact_phrases:
+        if compact in self._chat_service_markers("web_search_contextual_retry_exact"):
             return True
 
-        contextual_markers = (
-            "다시", "재검색", "그거", "아까", "방금", "위 내용", "이전", "다른 출처",
-            "again", "retry", "previous", "above", "that", "same topic",
+        has_context = self._has_any_marker(
+            compact,
+            self._chat_service_markers("web_search_contextual_retry_context"),
         )
-        topic_markers = (
-            "날씨", "선거", "가격", "뉴스", "버전", "일정", "release", "version", "weather", "news", "price",
+        has_new_topic = self._has_any_marker(
+            compact,
+            self._chat_service_markers("web_search_contextual_retry_new_topic"),
         )
-        has_context = any(marker in compact for marker in contextual_markers)
-        has_new_topic = any(marker in compact for marker in topic_markers)
         return has_context and not has_new_topic and len(compact) <= 40
 
     def _contextual_retry_modifiers(self, query: str) -> list[str]:
-        text = str(query or "").strip().lower()
+        text = self._compact_search_trigger_text(query)
         modifiers: list[str] = []
-        if "최신" in text or "latest" in text or "current" in text:
-            modifiers.append("최신")
-        if "다른 출처" in text or "another source" in text or "different source" in text:
-            modifiers.append("다른 출처")
+        if self._has_any_marker(text, self._chat_service_markers("web_search_contextual_retry_latest")):
+            modifier = self._first_chat_service_marker("web_search_contextual_retry_latest_append")
+            if modifier:
+                modifiers.append(modifier)
+        if self._has_any_marker(text, self._chat_service_markers("web_search_contextual_retry_alternate_source")):
+            modifier = self._first_chat_service_marker("web_search_contextual_retry_alternate_source_append")
+            if modifier:
+                modifiers.append(modifier)
         return modifiers
 
     def _find_previous_search_topic(self, request: ChatRequest) -> str:
@@ -1171,30 +1196,47 @@ class ChatService:
         # Short weather queries such as '/검색 내일 날씨' are too ambiguous for
         # general search APIs. Add the configured country/region and an absolute
         # date hint so Firecrawl/Tavily have a more stable query.
-        weather_markers = ("날씨", "weather", "forecast")
-        relative_date_markers = ("내일", "tomorrow", "오늘", "today")
-        if any(marker in lowered for marker in weather_markers):
+        if self._has_any_marker(lowered, self._chat_service_markers("web_search_weather_topic")):
             additions: list[str] = []
-            if country_code == "KR" and "한국" not in normalized and "대한민국" not in normalized and "korea" not in lowered:
-                additions.append("대한민국")
-            elif country_code == "JP" and "일본" not in normalized and "japan" not in lowered:
-                additions.append("일본")
-            elif country_code == "US" and "미국" not in normalized and "united states" not in lowered and "usa" not in lowered:
-                additions.append("United States")
+            if country_code == "KR" and not self._has_any_marker(
+                lowered,
+                self._chat_service_markers("web_search_region_kr_existing"),
+            ):
+                additions.extend(self._chat_service_markers("web_search_region_kr_append")[:1])
+            elif country_code == "JP" and not self._has_any_marker(
+                lowered,
+                self._chat_service_markers("web_search_region_jp_existing"),
+            ):
+                additions.extend(self._chat_service_markers("web_search_region_jp_append")[:1])
+            elif country_code == "US" and not self._has_any_marker(
+                lowered,
+                self._chat_service_markers("web_search_region_us_existing"),
+            ):
+                additions.extend(self._chat_service_markers("web_search_region_us_append")[:1])
             elif location and location.lower() not in lowered:
                 additions.append(location)
 
             now = datetime.now(timezone.utc).astimezone()
-            if "내일" in normalized or "tomorrow" in lowered:
-                from datetime import timedelta
+            compact = self._compact_search_trigger_text(normalized)
+            if self._has_any_marker(compact, self._chat_service_markers("web_search_relative_tomorrow")):
                 additions.append((now + timedelta(days=1)).strftime("%Y-%m-%d"))
-            elif "오늘" in normalized or "today" in lowered:
+            elif self._has_any_marker(compact, self._chat_service_markers("web_search_relative_today")):
                 additions.append(now.strftime("%Y-%m-%d"))
+
+            unit_hint = self._weather_search_unit_query_hint(settings)
+            if unit_hint and unit_hint.lower() not in lowered:
+                additions.append(unit_hint)
 
             if additions:
                 normalized = f"{normalized} {' '.join(additions)}".strip()
 
         return normalized
+
+    def _weather_search_unit_query_hint(self, settings: dict[str, Any]) -> str:
+        unit_system = self._preferred_unit_system(settings)
+        if unit_system == "imperial":
+            return "fahrenheit"
+        return "섭씨 celsius"
 
     def _manual_web_search_query(self, text: str) -> str | None:
         stripped = str(text or "").strip()
@@ -1215,16 +1257,50 @@ class ChatService:
         if not stripped or stripped.startswith("/"):
             return False
 
-        lowered = stripped.lower()
-        keywords = (
-            "최신", "최근", "오늘", "현재", "뉴스", "검색", "찾아", "알아봐",
-            "가격", "일정", "발표", "업데이트", "release", "released", "latest",
-            "current", "today", "news", "search", "web", "internet", "price",
-        )
-        return any(keyword in lowered for keyword in keywords)
+        compact = self._compact_search_trigger_text(stripped)
+        if self._looks_like_local_context_request(compact):
+            return False
+
+        if self._looks_like_explicit_web_search_request(compact):
+            return True
+
+        if not self._has_any_marker(compact, self._chat_service_markers("web_search_current")):
+            return False
+
+        if not self._has_any_marker(compact, self._chat_service_markers("web_search_current_topics")):
+            return False
+
+        if self._looks_like_explanation_only_request(compact):
+            return False
+
+        return self._has_any_marker(compact, self._chat_service_markers("web_search_request"))
 
     def _auto_web_search_query(self, text: str) -> str:
         return str(text or "").strip()
+
+    def _compact_search_trigger_text(self, text: str) -> str:
+        return " ".join(str(text or "").strip().lower().split())
+
+    def _has_any_marker(self, text: str, markers: tuple[str, ...]) -> bool:
+        return any(marker in text for marker in markers)
+
+    def _chat_service_markers(self, category: str) -> tuple[str, ...]:
+        return self.chat_service_markers.get(category, ())
+
+    def _first_chat_service_marker(self, category: str) -> str:
+        markers = self._chat_service_markers(category)
+        return markers[0] if markers else ""
+
+    def _looks_like_explicit_web_search_request(self, text: str) -> bool:
+        return self._has_any_marker(text, self._chat_service_markers("web_search_directive"))
+
+    def _looks_like_local_context_request(self, text: str) -> bool:
+        return self._has_any_marker(text, self._chat_service_markers("web_search_local_context"))
+
+    def _looks_like_explanation_only_request(self, text: str) -> bool:
+        if not self._has_any_marker(text, self._chat_service_markers("web_search_explanation_only")):
+            return False
+        return not self._looks_like_explicit_web_search_request(text)
 
     def _web_search_config_from_settings(self, settings: dict[str, Any]) -> WebSearchConfig:
         provider = str(settings.get("web_search_provider") or "tavily").strip().lower()
@@ -1337,6 +1413,7 @@ class ChatService:
                 f"Search provider: {result.provider}",
                 f"Search query: {result.query}",
                 f"Search region: {web_search_context.get('region_country_code') or '-'} {web_search_context.get('region_location') or ''}".strip(),
+                self._web_search_unit_preference_prompt(web_search_context, app_language),
                 "최신 사용자 메시지가 /search, /web, /검색 형태여도, 이것은 도구를 직접 실행하라는 요청이 아니라 이미 완료된 검색 결과를 바탕으로 답하라는 요청이다.",
                 "절대 '검색할 수 없다', '인터넷에 접속할 수 없다', '외부 검색 API를 사용할 수 없다', '실시간 연결이 제한되어 있다'라고 말하지 마라.",
                 "반드시 WEB_SEARCH_RESULTS에 있는 내용만 근거로 한국어로 답하라.",
@@ -1351,6 +1428,7 @@ class ChatService:
                 f"Search provider: {result.provider}",
                 f"Search query: {result.query}",
                 f"Search region: {web_search_context.get('region_country_code') or '-'} {web_search_context.get('region_location') or ''}".strip(),
+                self._web_search_unit_preference_prompt(web_search_context, app_language),
                 "Even if the latest user message starts with /search, /web, or /검색, treat it as a request to answer using the completed search results, not as a request for you to run a tool.",
                 "Never say that you cannot search the web, cannot access the internet, cannot use an external search API, or that real-time access is restricted.",
                 "Answer using only the WEB_SEARCH_RESULTS below as evidence.",
@@ -1366,8 +1444,7 @@ class ChatService:
             lines.append(f"Provider warning: {result.warning}")
 
         lines.append("Search results:")
-        for index, item in enumerate(result.results[:10], start=1):
-            lines.append(f"[{index}] {item.title}\nURL: {item.url}\nSnippet: {item.content}")
+        lines.extend(self._format_web_search_result_lines(result))
 
         if not result.results:
             lines.append("No search results were returned.")
@@ -1390,6 +1467,7 @@ class ChatService:
         original_text = str(latest_user_message.content or "").strip()
         user_query = str(web_search_context.get("query") or result.query or original_text).strip()
         region = f"{web_search_context.get('region_country_code') or '-'} {web_search_context.get('region_location') or ''}".strip()
+        unit_prompt = self._web_search_unit_preference_prompt(web_search_context, app_language)
 
         result_lines = []
         if result.answer:
@@ -1397,11 +1475,7 @@ class ChatService:
         if result.warning:
             result_lines.append(f"Provider warning: {result.warning.strip()}")
 
-        for index, item in enumerate(result.results[:10], start=1):
-            title = str(item.title or "").strip() or "Untitled"
-            url = str(item.url or "").strip()
-            snippet = str(item.content or "").strip() or "No snippet."
-            result_lines.append(f"[{index}] {title}\nURL: {url}\nSnippet: {snippet}")
+        result_lines.extend(self._format_web_search_result_lines(result))
 
         if not result_lines:
             result_lines.append("No search results were returned.")
@@ -1418,6 +1492,7 @@ class ChatService:
                 f"답해야 할 검색어: {user_query}\n"
                 f"검색 제공자: {result.provider}\n"
                 f"검색 지역: {region}\n\n"
+                f"{unit_prompt}\n\n"
                 "WEB_SEARCH_RESULTS:\n"
                 f"{results_block}\n\n"
                 "위 검색 결과를 바탕으로 한국어로 답하세요."
@@ -1432,10 +1507,67 @@ class ChatService:
             f"Search query to answer: {user_query}\n"
             f"Search provider: {result.provider}\n"
             f"Search region: {region}\n\n"
+            f"{unit_prompt}\n\n"
             "WEB_SEARCH_RESULTS:\n"
             f"{results_block}\n\n"
             "Answer using the search results above."
         ).strip()
+
+    def _preferred_unit_system(self, settings: dict[str, Any]) -> str:
+        unit_system = str(settings.get("preferred_unit_system") or "metric").strip().lower()
+        if unit_system not in {"metric", "imperial"}:
+            return "metric"
+        return unit_system
+
+    def _web_search_unit_preference_prompt(
+        self,
+        web_search_context: dict[str, Any] | None,
+        app_language: str,
+    ) -> str:
+        unit_system = str(
+            (web_search_context or {}).get("preferred_unit_system") or "metric"
+        ).strip().lower()
+        if unit_system == "imperial":
+            if app_language.startswith("ko"):
+                return (
+                    "단위 표기 우선순위: 화씨/야드파운드법을 우선 사용하라. "
+                    "날씨 온도는 화씨(°F)를 먼저 쓰고, 거리/길이/무게는 가능한 경우 야드파운드법을 우선하라. "
+                    "단, 원문 출처나 공식 규격에서 특정 단위 자체가 의미를 가지는 경우에는 그 원 단위를 보존하고 임의 변환하지 마라. "
+                    "날씨 출처의 숫자가 다른 단위로 보이면 숫자만 유지한 채 단위 기호를 바꾸지 말고, 변환이 필요하면 계산한 변환값을 근사치로 표시하라."
+                )
+            return (
+                "Unit preference: prefer Fahrenheit and imperial/US customary units. "
+                "For weather, put Fahrenheit (°F) first; prefer imperial units for distance, length, and weight when appropriate. "
+                "However, preserve source-specific or official units when the original unit itself is meaningful; do not force a conversion. "
+                "If a weather source number appears to use another unit, do not keep the number and only relabel the unit symbol; calculate and label the approximate converted value when conversion is needed."
+            )
+
+        if app_language.startswith("ko"):
+            return (
+                "단위 표기 우선순위: 섭씨/미터법을 우선 사용하라. "
+                "날씨 온도는 섭씨(°C)를 먼저 쓰고, 거리/길이/무게는 가능한 경우 미터법을 우선하라. "
+                "단, 원문 출처나 공식 규격에서 특정 단위 자체가 의미를 가지는 경우에는 그 원 단위를 보존하고 임의 변환하지 마라. "
+                "날씨 출처의 숫자가 화씨로 보이면 숫자만 유지한 채 °C로 바꾸지 말고, 섭씨로 환산한 근사치를 표시하라."
+            )
+        return (
+            "Unit preference: prefer Celsius and metric units. "
+            "For weather, put Celsius (°C) first; prefer metric units for distance, length, and weight when appropriate. "
+            "However, preserve source-specific or official units when the original unit itself is meaningful; do not force a conversion. "
+            "If a weather source number appears to be Fahrenheit, do not keep the number and only relabel it as °C; show the approximate converted Celsius value."
+        )
+
+    def _format_web_search_result_lines(
+        self,
+        result: WebSearchResult,
+        limit: int = 10,
+    ) -> list[str]:
+        lines: list[str] = []
+        for index, item in enumerate(result.results[:limit], start=1):
+            title = str(item.title or "").strip() or "Untitled"
+            url = str(item.url or "").strip()
+            snippet = str(item.content or "").strip() or "No snippet."
+            lines.append(f"[{index}] {title}\nURL: {url}\nSnippet: {snippet}")
+        return lines
 
     def _looks_like_web_search_refusal(
         self,
@@ -1448,31 +1580,7 @@ class ChatService:
             return False
 
         lowered = str(content or "").lower()
-        refusal_markers = (
-            "검색을 활용할 수 없",
-            "검색 기능을 사용할 수 없",
-            "웹 검색을 할 수 없",
-            "인터넷에 접속할 수 없",
-            "실시간 검색",
-            "현재는 ai가 검색",
-            "외부 검색 api",
-            "검색 api",
-            "사용이 제한되어",
-            "실시간 연결",
-            "api 인증",
-            "환경 설정",
-            "보안 및 권한",
-            "cannot search",
-            "can't search",
-            "cannot access the internet",
-            "can't access the internet",
-            "do not have access to the internet",
-            "no browsing capability",
-            "external search api",
-            "search api is unavailable",
-            "api access is restricted",
-        )
-        return any(marker in lowered for marker in refusal_markers)
+        return self._has_any_marker(lowered, self._chat_service_markers("web_search_refusal"))
 
     def _create_web_search_fallback_answer(
         self,

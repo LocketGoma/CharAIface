@@ -12,6 +12,7 @@ CloudAIAuthMode = Literal["secure_store", "env_var"]
 WebSearchAuthMode = Literal["secure_store", "env_var"]
 WebSearchProvider = Literal["none", "tavily", "firecrawl"]
 UserCountryPreset = Literal["auto_language", "kr", "jp", "us", "eu", "custom", "ip_auto"]
+PreferredUnitSystem = Literal["metric", "imperial"]
 CloudAIProvider = Literal[
     "none",
     "openai",
@@ -32,6 +33,7 @@ class AppSettings(BaseModel):
     user_country_preset: UserCountryPreset = "auto_language"
     user_country_code: str = "KR"
     user_country_location: str = "South Korea"
+    preferred_unit_system: PreferredUnitSystem = "metric"
 
     theme_id: str = "light"
     chat_font_family: str = "맑은 고딕"

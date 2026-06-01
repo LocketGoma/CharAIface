@@ -71,6 +71,12 @@ class SettingsRepository:
         if "language" not in migrated:
             migrated["language"] = AppSettings().language
         self._migrate_user_country_settings(migrated)
+        preferred_unit_system = str(
+            migrated.get("preferred_unit_system", AppSettings().preferred_unit_system)
+        ).strip().lower()
+        if preferred_unit_system not in {"metric", "imperial"}:
+            preferred_unit_system = AppSettings().preferred_unit_system
+        migrated["preferred_unit_system"] = preferred_unit_system
 
         if "runtime_install_policy" not in migrated:
             migrated["runtime_install_policy"] = "ask"
@@ -264,4 +270,3 @@ class SettingsRepository:
         except (TypeError, ValueError):
             timeout_seconds = 20
         migrated["web_search_timeout_seconds"] = max(3, min(120, timeout_seconds))
-

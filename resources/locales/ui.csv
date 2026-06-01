@@ -1,233 +1,264 @@
 ﻿key,ko,en
 app.title,CharAIface,CharAIface
-chat.placeholder,메시지를 입력하세요...,Type a message...
-chat.send,전송,Send
-chat.pending_response,응답 생성 중...,Generating response...
-settings.title,설정,Settings
-settings.tab.general,일반,General
-settings.tab.character,캐릭터,Character
-settings.tab.theme,테마,Theme
-settings.tab.model,모델,Model
-settings.tab.advanced,고급,Advanced
-settings.button.save,저장,Save
-settings.button.cancel,취소,Cancel
-settings.general.description,기본 앱 설정입니다.,Basic application settings.
-settings.user_name,유저 이름,User Name
-settings.language,언어,Language
-settings.character,캐릭터,Character
-settings.character.description,사용할 캐릭터팩을 선택합니다.,Select the character pack to use.
-settings.character.select,캐릭터,Character
-settings.character.not_found,캐릭터 정보를 찾을 수 없습니다.,Character information not found.
-settings.character.builtin,기본 캐릭터,Built-in Character
-settings.character.user,사용자 캐릭터,User Character
-settings.character.builtin.short,기본,Built-in
-settings.character.user.short,사용자,User
-settings.character.no_description,설명 없음,No description
-settings.character.unknown_author,Unknown,Unknown
-settings.character.warning,경고,Warning
-settings.character.theme,테마,Theme
-settings.character.theme_base,Base,Base
-settings.character.theme_override,Override,Override
-settings.character.theme_colors,color(s),color(s)
-settings.theme,테마,Theme
-settings.theme.description,앱 UI 테마를 선택합니다.,Select the app UI theme.
-settings.theme.select,테마,Theme
-settings.theme.character,캐릭터 특화,Character Theme
-settings.theme.character.description,캐릭터 특화 테마를 선택하면 현재 캐릭터팩의 색상 팔레트를 사용합니다.,Character Theme uses the color palette from the current character pack.
-settings.models,모델,Models
-settings.model.description,로컬 AI 모델 및 런타임 설정입니다.,Local AI model and runtime settings.
-settings.model.local_ai,로컬 AI,Local AI
-settings.model.style_ai,말투 변환 AI,Style Rewriter AI
-settings.model.cloud_ai,클라우드 AI,Cloud AI
-settings.model.note,로컬 AI 모델은 필요 시 Ollama를 통해 준비됩니다. 클라우드 AI 설정은 별도 탭에서 관리합니다.,Local AI models are prepared through Ollama when needed. Cloud AI settings are managed in a separate tab.
-settings.advanced.description,고급 사용자용 설정입니다.,Advanced user settings.
-settings.developer_mode,개발자 모드,Developer Mode
-settings.expand_chat_over_character_area,채팅 공간 확장,Expand Chat Area
-settings.avatar_embarrassed_when_occluded,가려질 때 당황 상태,Use Embarrassed State When Covered
-settings.avatar_occluded_opacity,가려질 때 투명도,Opacity When Covered
-settings.expand_chat_over_character_area.description,채팅 공간 확장: 캐릭터 표시되는 공간까지 채팅을 표시합니다.,Expand Chat Area: display chat messages over the character display area.
-settings.avatar_occluded_opacity.description,투명도는 10% 단위로 설정합니다. 기본값은 30%입니다.,Opacity is set in 10% increments. The default is 30%.
-state.idle,대기 중,Idle
-state.user_typing,사용자 입력중,User typing
-state.thinking,생각중,Thinking
-state.searching,검색중,Searching
-state.assistant_typing,문자입력중,Typing
-state.assistant_done,문자입력완료,Done
-state.embarrassed,당황,Embarrassed
-state.panic,패닉,Panic
-state.error,오류,Error
-theme.character,캐릭터 특화,Character Theme
-theme.light,라이트,Light
-theme.dark,다크,Dark
-model.lightweight,가벼움,Lightweight
-model.balanced,균형형,Balanced
-model.high_quality,고품질,High Quality
-developer.mode,개발자 모드,Developer Mode
-chat.initial_message,CharAIface 기본 화면입니다. 아직 실제 AI 응답 연결 전입니다.,This is the CharAIface default screen. Real AI responses are not connected yet.
+
+about.message,"{app_name}현재 캐릭터: {character_name}로컬/클라우드 AI와 캐릭터 UI를 함께 쓰는 데스크톱 AI 인터페이스입니다.이 영역은 추후 앱 소개, 크레딧, 버전 정보, 사용자 지정 안내문 공간으로 확장할 수 있습니다.","{app_name}Current character: {character_name}A desktop AI interface combining local/cloud AI with a character UI.This area can later be expanded for app info, credits, version details, or a custom user notice."
+about.title,정보,About
+
 chat.backend_fallback,백엔드 응답을 가져오지 못했습니다. 임시 로컬 응답입니다.,Could not get a backend response. This is a temporary local response.
+chat.initial_message,CharAIface 기본 화면입니다. 아직 실제 AI 응답 연결 전입니다.,This is the CharAIface default screen. Real AI responses are not connected yet.
 chat.initial_notice.model_required,안내 : 안녕하세요! {app_name}의 {character_name} 입니다! 사용을 위해서는 로컬 AI 모델 설치가 필요합니다. 가이드를 따라주세요,"Notice: Hello! I'm {character_name} from {app_name}! To use the app, a local AI model must be installed. Please follow the guide."
 chat.initial_notice.new_session,안내 : 안녕하세요. {app_name}의 {character_name} 입니다! 새로운 세션이 확인되었습니다.,Notice: Hello. I'm {character_name} from {app_name}! A new session has been detected.
 chat.paid_model_label, (유료 모델 사용) , (Paid model used)
-local_ai.runtime.missing,로컬 AI 실행에 필요한 Ollama가 설치되어 있지 않습니다.,"Ollama is required to run local AI, but it is not installed."
-local_ai.ollama.install.confirm,로컬 AI 실행에 필요한 Ollama가 설치되어 있지 않습니다.winget을 사용해 Ollama 설치를 시도할까요?,"Ollama is required to run local AI, but it is not installed.Do you want to install Ollama using winget?"
-local_ai.model.ensure.confirm,"로컬 AI 모델 ""{model}"" 상태를 확인하고, 없으면 다운로드합니다.진행할까요?","CharAIface will check the local AI model ""{model}"" and download it if missing.Continue?"
-local_ai.model.prepare.already_running,이미 로컬 AI 모델 준비 작업이 진행 중입니다.,Local AI model preparation is already running.
-local_ai.model.prepare.failed,로컬 AI 모델 준비에 실패했습니다.{error},Failed to prepare the local AI model.{error}
-local_ai.model.download.completed,"로컬 AI 모델 ""{model}"" 다운로드가 완료되었습니다.","Local AI model ""{model}"" has been downloaded."
-local_ai.model.download.title,로컬 모델 다운로드,Download Local Model
-local_ai.model.download.prompt,다운로드할 모델을 선택하거나 입력하세요.,Select or enter a model to download or update:
-local_ai.model.update.title,로컬 AI 모델 업데이트,Local AI Model Update
-local_ai.model.update.prompt,새로운 버전의 로컬 AI 모델이 있을 수 있습니다. 업데이트하시겠습니까?,A new version of the local AI model may be available. Would you like to update?
-local_ai.model.update.check.button,업데이트 확인,Check for Updates
-settings.local_model_update_check_enabled,모델 업데이트 확인 사용,Enable model update check
-settings.local_model_update_interval_days,업데이트 확인 간격 (일),Update check interval (days)
-local_ai.error.request_failed,로컬 AI 모델 확인/다운로드 요청에 실패했습니다.,Failed to request local AI model check/download.
-local_ai.error.ollama_not_installed,Ollama가 설치되어 있지 않거나 PATH에서 찾을 수 없습니다.,Ollama is not installed or was not found in PATH.
-local_ai.error.ollama_server_unavailable,Ollama 서버에 연결할 수 없습니다.,Ollama server is not available.
-local_ai.error.ollama_model_list_failed,Ollama 모델 목록을 가져오지 못했습니다.,Failed to retrieve the Ollama model list.
+chat.pending_response,응답 생성 중...,Generating response...
+chat.placeholder,메시지를 입력하세요...,Type a message...
+chat.send,전송,Send
+
+character.default_missing,기본 캐릭터가 없습니다!,Default character is missing!
+
+developer.mode,개발자 모드,Developer Mode
+
+state.assistant_done,문자입력완료,Done
+state.assistant_typing,문자입력중,Typing
+state.embarrassed,당황,Embarrassed
+state.error,오류,Error
+state.idle,대기 중,Idle
+state.panic,패닉,Panic
+state.searching,검색중,Searching
+state.thinking,생각중,Thinking
+state.user_typing,사용자 입력중,User typing
+
+theme.character,캐릭터 특화,Character Theme
+theme.dark,다크,Dark
+theme.light,라이트,Light
+
+model.balanced,균형형,Balanced
+model.high_quality,고품질,High Quality
+model.lightweight,가벼움,Lightweight
+
+local_ai.error.model_delete_failed,모델 삭제 요청이 실패했습니다.,Model delete request failed.
+local_ai.error.model_name_empty,모델명이 비어 있습니다.,Model name is empty.
 local_ai.error.model_not_installed,로컬 AI 모델이 설치되어 있지 않습니다.,The local AI model is not installed.
 local_ai.error.model_pull_failed,로컬 AI 모델 다운로드에 실패했습니다.,Failed to download the local AI model.
 local_ai.error.ollama_install_failed,Ollama 설치에 실패했습니다.,Failed to install Ollama.
-local_ai.error.winget_not_available,winget을 사용할 수 없습니다. Ollama를 수동으로 설치해야 합니다.,winget is not available. Please install Ollama manually.
+local_ai.error.ollama_model_list_failed,Ollama 모델 목록 조회에 실패했습니다.,Failed to list Ollama models.
+local_ai.error.ollama_not_installed,Ollama가 설치되어 있지 않거나 PATH에서 찾을 수 없습니다.,Ollama is not installed or was not found in PATH.
+local_ai.error.ollama_server_unavailable,Ollama 서버에 연결할 수 없습니다.,Ollama server is not available.
+local_ai.error.request_failed,백엔드 요청에 실패했습니다.,Backend request failed.
 local_ai.error.unknown,알 수 없는 오류입니다.,Unknown error.
+local_ai.error.winget_not_available,winget을 사용할 수 없습니다. Ollama를 수동으로 설치해야 합니다.,winget is not available. Please install Ollama manually.
+
+local_ai.model.delete.button,로컬 모델 삭제,Delete Local Model
+local_ai.model.delete.completed,"로컬 AI 모델 ""{model}""을 삭제했습니다.","Local AI model ""{model}"" has been deleted."
+local_ai.model.delete.confirm,"로컬 AI 모델 ""{model}""을 삭제합니다. Ollama 저장소에서 제거되며 디스크 용량을 확보할 수 있습니다. 진행할까요?","Delete local AI model ""{model}"". It will be removed from Ollama storage and may free disk space. Continue?"
+local_ai.model.delete.failed,로컬 AI 모델 삭제에 실패했습니다. {error},Failed to delete the local AI model. {error}
+local_ai.model.delete.not_installed,"로컬 AI 모델 ""{model}""은 설치되어 있지 않습니다.","Local AI model ""{model}"" is not installed."
+local_ai.model.download.button,로컬 모델 다운로드,Download Local Model
+local_ai.model.download.completed,"로컬 AI 모델 ""{model}"" 다운로드가 완료되었습니다.","Local AI model ""{model}"" has been downloaded."
+local_ai.model.download.progress,로컬모델 다운로드중 ({progress}%),Downloading local model ({progress}%)
+local_ai.model.download.progress.status,로컬모델 다운로드중 ({status}),Downloading local model ({status})
+local_ai.model.download.prompt,다운로드할 모델을 선택하거나 입력하세요.,Select or enter a model to download or update:
+local_ai.model.download.title,로컬 모델 다운로드,Download Local Model
+local_ai.model.empty,로컬 AI 모델명을 입력하세요.,Enter a local AI model name.
+local_ai.model.ensure.confirm,"로컬 AI 모델 ""{model}"" 상태를 확인하고, 없으면 다운로드합니다.진행할까요?","CharAIface will check the local AI model ""{model}"" and download it if missing.Continue?"
+local_ai.model.list.button,로컬 모델 확인,Check Local Models
+local_ai.model.list.empty,설치된 로컬 AI 모델이 없습니다.,No local AI models are installed.
+local_ai.model.list.failed,로컬 AI 모델 목록 확인에 실패했습니다. {error},Failed to check local AI models. {error}
+local_ai.model.list.result,설치된 로컬 AI 모델: {count}개{models},Installed local AI models: {count}{models}
+local_ai.model.prepare.already_running,이미 로컬 AI 모델 준비 작업이 진행 중입니다.,Local AI model preparation is already running.
+local_ai.model.prepare.failed,로컬 AI 모델 준비에 실패했습니다.{error},Failed to prepare the local AI model.{error}
+local_ai.model.update.check.button,업데이트 확인,Check for Updates
+local_ai.model.update.prompt,새로운 버전의 로컬 AI 모델이 있을 수 있습니다. 업데이트하시겠습니까?,A new version of the local AI model may be available. Would you like to update?
+local_ai.model.update.title,로컬 AI 모델 업데이트,Local AI Model Update
+
+local_ai.ollama.install.confirm,로컬 AI 실행에 필요한 Ollama가 설치되어 있지 않습니다.winget을 사용해 Ollama 설치를 시도할까요?,"Ollama is required to run local AI, but it is not installed.Do you want to install Ollama using winget?"
+
+local_ai.runtime.missing,로컬 AI 실행에 필요한 Ollama가 설치되어 있지 않습니다.,"Ollama is required to run local AI, but it is not installed."
+
+settings.title,설정,Settings
+
+settings.button.cancel,취소,Cancel
+settings.button.save,저장,Save
+
+settings.tab.advanced,고급,Advanced
+settings.tab.character,캐릭터,Character
+settings.tab.cloud_ai,클라우드 AI,Cloud AI
+settings.tab.general,일반,General
+settings.tab.model,모델,Model
+settings.tab.theme,테마,Theme
+settings.tab.web_search,검색,Search
+
+settings.general.description,기본 앱 설정입니다.,Basic application settings.
+settings.language,언어,Language
+settings.user_name,유저 이름,User Name
+
+settings.user_country,사용자 국가,User Country
+settings.user_country.auto_language,언어 기준 자동,Auto from Language
+settings.user_country.custom,국가/지역 직접 입력,Custom Country/Region
+settings.user_country.custom.placeholder,"예: KR, JP, US, Germany, Europe","e.g. KR, JP, US, Germany, Europe"
+settings.user_country.custom_option,직접 입력,Custom
+settings.user_country.detect_ip,IP로 감지,Detect by IP
+settings.user_country.detect_ip.completed,감지된 국가: {country},Detected country: {country}
+settings.user_country.detect_ip.empty,IP 기반 국가 정보를 찾지 못했습니다.,Could not find country information from IP.
+settings.user_country.detect_ip.failed,IP 기반 국가 감지에 실패했습니다. {error},Failed to detect country from IP. {error}
+settings.user_country.detect_ip.title,국가 자동 감지,Country Detection
+settings.user_country.eu,유럽,Europe
+settings.user_country.ip_auto,IP 기반 자동,Auto from IP
+settings.user_country.jp,일본,Japan
+settings.user_country.kr,한국,Korea
+settings.user_country.us,미국,United States
+
+settings.preferred_unit_system,단위 표기 우선순위,Preferred units
+settings.preferred_unit_system.imperial,화씨 / 야드파운드법,Fahrenheit / imperial
+settings.preferred_unit_system.metric,섭씨 / 미터법,Celsius / metric
+
+settings.conversation_markdown_enabled,대화 마크다운 활성화,Enable conversation Markdown
+settings.conversation_output,대화 출력 설정,Conversation Output
+settings.emphasize_character_style,캐릭터 스타일 강조,Emphasize character style
+settings.enforce_response_language,선택된 언어 사용 강조,Emphasize selected language
+
+settings.character,캐릭터,Character
+settings.character.builtin,기본 캐릭터,Built-in Character
+settings.character.builtin.short,기본,Built-in
+settings.character.description,사용할 캐릭터팩을 선택합니다.,Select the character pack to use.
+settings.character.no_description,설명 없음,No description
+settings.character.not_found,캐릭터 정보를 찾을 수 없습니다.,Character information not found.
+settings.character.reload,캐릭터 다시 불러오기,Reload Characters
+settings.character.reload.completed,캐릭터팩 {count}개를 다시 불러왔습니다.,Reloaded {count} character pack(s).
+settings.character.reload_all,캐릭터 셋 전체 다시 로드,Reload All Character Sets
+settings.character.select,캐릭터,Character
+settings.character.theme,테마,Theme
+settings.character.theme_base,Base,Base
+settings.character.theme_colors,color(s),color(s)
+settings.character.theme_override,Override,Override
+settings.character.unknown_author,Unknown,Unknown
+settings.character.user,사용자 캐릭터,User Character
+settings.character.user.short,사용자,User
+settings.character.warning,경고,Warning
+
+settings.theme,테마,Theme
+settings.theme.character,캐릭터 특화,Character Theme
+settings.theme.character.description,캐릭터 특화 테마를 선택하면 현재 캐릭터팩의 색상 팔레트를 사용합니다.,Character Theme uses the color palette from the current character pack.
+settings.theme.description,앱 UI 테마를 선택합니다.,Select the app UI theme.
+settings.theme.palette.hide,색상표 숨기기,Hide Color Palette
+settings.theme.palette.show,색상표 확인,Show Color Palette
+settings.theme.select,테마,Theme
+
+settings.model.cloud_ai,클라우드 AI,Cloud AI
+settings.model.description,로컬 AI 모델 및 런타임 설정입니다.,Local AI model and runtime settings.
+settings.model.local_ai,로컬 AI,Local AI
+settings.model.note,로컬 AI 모델은 필요 시 Ollama를 통해 준비됩니다. 클라우드 AI 설정은 별도 탭에서 관리합니다.,Local AI models are prepared through Ollama when needed. Cloud AI settings are managed in a separate tab.
+settings.model.style_ai,말투 변환 AI,Style Rewriter AI
+settings.models,모델,Models
+
+settings.auto_start_local_ai_server,로컬 AI 서버 자동 시작,Auto-start local AI server
+settings.local_ai.base_url,로컬 AI 주소,Local AI URL
 settings.local_ai.provider,로컬 AI 제공자,Local AI Provider
 settings.local_ai.provider.ollama,Ollama,Ollama
-settings.local_ai.base_url,로컬 AI 주소,Local AI URL
+settings.model_download_timeout_seconds,모델 다운로드 제한 시간(초),Model download timeout (seconds)
+settings.warn_large_local_model,큰 로컬 모델 경고,Warn for large local models
+
 settings.runtime_install_policy,로컬 AI 런타임 설치 정책,Local AI Runtime Install Policy
-settings.runtime_install_policy.never,설치 시도 안 함,Never install
 settings.runtime_install_policy.ask,확인 후 설치,Ask before install
+settings.runtime_install_policy.never,설치 시도 안 함,Never install
+
 settings.model_install_policy,모델 다운로드 정책,Model Download Policy
-settings.model_install_policy.never,다운로드 안 함,Never download
 settings.model_install_policy.ask,확인 후 다운로드,Ask before download
 settings.model_install_policy.auto,자동 다운로드,Auto download
-settings.auto_start_local_ai_server,로컬 AI 서버 자동 시작,Auto-start local AI server
-settings.warn_large_local_model,큰 로컬 모델 경고,Warn for large local models
-settings.model_download_timeout_seconds,모델 다운로드 제한 시간(초),Model download timeout (seconds)
-character.default_missing,기본 캐릭터가 없습니다!,Default character is missing!
-settings.tab.cloud_ai,클라우드 AI,Cloud AI
+settings.model_install_policy.never,다운로드 안 함,Never download
+
+settings.local_model_update_check_enabled,모델 업데이트 확인 사용,Enable model update check
+settings.local_model_update_interval_days,업데이트 확인 간격 (일),Update check interval (days)
+
+settings.cloud_ai.api_key,API Key,API Key
+settings.cloud_ai.api_key.delete,API Key 삭제,Delete API Key
+settings.cloud_ai.api_key.delete_failed,API Key 삭제에 실패했습니다: {error},Failed to delete API key: {error}
+settings.cloud_ai.api_key.deleted,API Key를 안전 저장소에서 삭제했습니다.,The API key has been deleted from the secure store.
+settings.cloud_ai.api_key.empty,저장할 API Key를 입력하세요.,Enter an API key to save.
+settings.cloud_ai.api_key.placeholder,API Key를 입력하세요. 저장 후에는 다시 표시되지 않습니다.,Enter an API key. It will not be shown again after saving.
+settings.cloud_ai.api_key.save,API Key 저장,Save API Key
+settings.cloud_ai.api_key.save_failed,API Key 저장에 실패했습니다: {error},Failed to save API key: {error}
+settings.cloud_ai.api_key.saved,API Key가 안전 저장소에 저장되었습니다.,The API key has been saved in the secure store.
+settings.cloud_ai.api_key.status.env_var,환경변수 {env}에서 API Key를 읽습니다.,The API key will be read from environment variable {env}.
+settings.cloud_ai.api_key.status.missing,API Key 환경변수명이 설정되지 않았습니다.,No API key environment variable is configured.
+settings.cloud_ai.api_key.status.not_saved,저장된 API Key가 없습니다.,No API key is saved.
+settings.cloud_ai.api_key.status.saved,API Key가 안전 저장소에 저장되어 있습니다.,An API key is saved in the secure store.
+settings.cloud_ai.api_key_env,API 키가 저장된 환경변수 이름,Environment variable name that stores the API key
+settings.cloud_ai.auth_mode,인증 방식,Authentication mode
+settings.cloud_ai.auth_mode.env_var,환경변수에서 읽기,Read from environment variable
+settings.cloud_ai.auth_mode.secure_store,앱에 안전하게 저장,Store safely in this app
+settings.cloud_ai.base_url,Custom API Base URL,Custom API Base URL
+settings.cloud_ai.base_url.placeholder,Custom 제공자에서만 사용합니다. 비워두면 제공자 기본값을 사용합니다.,Used only for Custom providers. Leave empty to use the provider default.
+settings.cloud_ai.credential_id,보안 저장소 ID,Secure credential ID
+settings.cloud_ai.default_model,선택된 클라우드 모델,Selected Cloud Model
 settings.cloud_ai.description,클라우드 AI 제공자와 API 키 인증을 설정합니다. 실제 API 키는 설정 파일에 저장하지 않습니다.,Configure cloud AI providers and API key authentication. Actual API keys are not saved in the settings file.
 settings.cloud_ai.enabled,클라우드 AI 사용,Enable Cloud AI
+settings.cloud_ai.message.title,클라우드 AI,Cloud AI
+settings.cloud_ai.model_list,사용 가능 모델 목록,Available Model List
+settings.cloud_ai.model_list.placeholder,사용할 모델을 목록에서 선택하세요.,Select a model from the list.
+settings.cloud_ai.models.empty,불러온 모델 목록이 비어 있습니다.,Loaded model list is empty.
+settings.cloud_ai.models.failed,모델 목록을 불러오지 못했습니다: {error},Failed to load model list: {error}
+settings.cloud_ai.models.loaded,{count}개의 모델을 불러왔습니다.,Loaded {count} models.
+settings.cloud_ai.models.provider_disabled,클라우드 AI 제공자가 사용 안 함으로 설정되어 있습니다.,Cloud AI provider is disabled.
+settings.cloud_ai.models.request_failed,모델 목록 요청에 실패했습니다: {error},Model list request failed: {error}
+settings.cloud_ai.models.save_first,입력한 API Key를 먼저 저장한 뒤 모델 목록을 새로고침하세요.,Save the entered API key before refreshing the model list.
+settings.cloud_ai.note,기본 방식은 API Key를 OS 보안 저장소에 저장합니다. 환경변수 방식은 고급 사용자용입니다.,"By default, API keys are stored in the OS secure store. Environment variable mode is for advanced users."
+settings.cloud_ai.open_api_key_page,API 키 페이지 열기,Open API Key Page
 settings.cloud_ai.provider,클라우드 AI 제공자,Cloud AI Provider
+settings.cloud_ai.provider.anthropic,Anthropic,Anthropic
+settings.cloud_ai.provider.custom,직접 설정,Custom
+settings.cloud_ai.provider.gemini,Gemini,Gemini
 settings.cloud_ai.provider.none,사용 안 함,Disabled
 settings.cloud_ai.provider.openai,OpenAI,OpenAI
 settings.cloud_ai.provider.openrouter,OpenRouter,OpenRouter
-settings.cloud_ai.provider.anthropic,Anthropic,Anthropic
-settings.cloud_ai.provider.gemini,Gemini,Gemini
-settings.cloud_ai.provider.custom,직접 설정,Custom
-settings.cloud_ai.base_url,Custom API Base URL,Custom API Base URL
-settings.cloud_ai.base_url.placeholder,Custom 제공자에서만 사용합니다. 비워두면 제공자 기본값을 사용합니다.,Used only for Custom providers. Leave empty to use the provider default.
-settings.cloud_ai.api_key_env,API 키가 저장된 환경변수 이름,Environment variable name that stores the API key
-settings.cloud_ai.default_model,선택된 클라우드 모델,Selected Cloud Model
-settings.cloud_ai.model_list,사용 가능 모델 목록,Available Model List
-settings.cloud_ai.model_list.placeholder,사용할 모델을 목록에서 선택하세요.,Select a model from the list.
-settings.cloud_ai.note,기본 방식은 API Key를 OS 보안 저장소에 저장합니다. 환경변수 방식은 고급 사용자용입니다.,"By default, API keys are stored in the OS secure store. Environment variable mode is for advanced users."
-settings.cloud_ai.open_api_key_page,API 키 페이지 열기,Open API Key Page
-settings.character.reload,캐릭터 다시 불러오기,Reload Characters
-settings.character.reload_all,캐릭터 셋 전체 다시 로드,Reload All Character Sets
-settings.character.reload.completed,캐릭터팩 {count}개를 다시 불러왔습니다.,Reloaded {count} character pack(s).
-settings.cloud_ai.auth_mode,인증 방식,Authentication mode
-settings.cloud_ai.auth_mode.secure_store,앱에 안전하게 저장,Store safely in this app
-settings.cloud_ai.auth_mode.env_var,환경변수에서 읽기,Read from environment variable
-settings.cloud_ai.api_key,API Key,API Key
-settings.cloud_ai.api_key.placeholder,API Key를 입력하세요. 저장 후에는 다시 표시되지 않습니다.,Enter an API key. It will not be shown again after saving.
-settings.cloud_ai.credential_id,보안 저장소 ID,Secure credential ID
-settings.cloud_ai.api_key.save,API Key 저장,Save API Key
-settings.cloud_ai.api_key.delete,API Key 삭제,Delete API Key
-settings.cloud_ai.api_key.empty,저장할 API Key를 입력하세요.,Enter an API key to save.
-settings.cloud_ai.api_key.saved,API Key가 안전 저장소에 저장되었습니다.,The API key has been saved in the secure store.
-settings.cloud_ai.api_key.deleted,API Key를 안전 저장소에서 삭제했습니다.,The API key has been deleted from the secure store.
-settings.cloud_ai.api_key.save_failed,API Key 저장에 실패했습니다: {error},Failed to save API key: {error}
-settings.cloud_ai.api_key.delete_failed,API Key 삭제에 실패했습니다: {error},Failed to delete API key: {error}
-settings.cloud_ai.api_key.status.saved,API Key가 안전 저장소에 저장되어 있습니다.,An API key is saved in the secure store.
-settings.cloud_ai.api_key.status.not_saved,저장된 API Key가 없습니다.,No API key is saved.
-settings.cloud_ai.api_key.status.env_var,환경변수 {env}에서 API Key를 읽습니다.,The API key will be read from environment variable {env}.
-settings.cloud_ai.api_key.status.missing,API Key 환경변수명이 설정되지 않았습니다.,No API key environment variable is configured.
-settings.cloud_ai.selected_model,선택된 클라우드 모델,Selected Cloud Model
-settings.cloud_ai.test_connection,연결 테스트,Test Connection
-settings.cloud_ai.message.title,클라우드 AI,Cloud AI
-settings.cloud_ai.test.save_first,입력한 API Key를 먼저 저장한 뒤 연결 테스트를 실행하세요.,Save the entered API key before testing the connection.
-settings.cloud_ai.test.request_failed,연결 테스트 요청에 실패했습니다: {error},Connection test request failed: {error}
-settings.cloud_ai.test.succeeded,클라우드 AI 연결 테스트에 성공했습니다.,Cloud AI connection test succeeded.
-settings.cloud_ai.test.failed,클라우드 AI 연결 테스트에 실패했습니다: {error},Cloud AI connection test failed: {error}
-settings.cloud_ai.selected_model.none,선택되지 않음,Not selected
-settings.theme.palette.show,색상표 확인,Show Color Palette
-settings.theme.palette.hide,색상표 숨기기,Hide Color Palette
 settings.cloud_ai.refresh_models,모델 목록 새로고침,Refresh Model List
-settings.cloud_ai.models.save_first,입력한 API Key를 먼저 저장한 뒤 모델 목록을 새로고침하세요.,Save the entered API key before refreshing the model list.
-settings.cloud_ai.models.provider_disabled,클라우드 AI 제공자가 사용 안 함으로 설정되어 있습니다.,Cloud AI provider is disabled.
-settings.cloud_ai.models.request_failed,모델 목록 요청에 실패했습니다: {error},Model list request failed: {error}
-settings.cloud_ai.models.failed,모델 목록을 불러오지 못했습니다: {error},Failed to load model list: {error}
-settings.cloud_ai.models.empty,불러온 모델 목록이 비어 있습니다.,Loaded model list is empty.
-settings.cloud_ai.models.loaded,{count}개의 모델을 불러왔습니다.,Loaded {count} models.
-local_ai.model.download.button,로컬 모델 다운로드,Download Local Model
-local_ai.model.empty,로컬 AI 모델명을 입력하세요.,Enter a local AI model name.
-local_ai.model.download.progress,로컬모델 다운로드중 ({progress}%),Downloading local model ({progress}%)
-local_ai.model.download.progress.status,로컬모델 다운로드중 ({status}),Downloading local model ({status})
-local_ai.model.delete.button,로컬 모델 삭제,Delete Local Model
-local_ai.model.delete.confirm,"로컬 AI 모델 ""{model}""을 삭제합니다. Ollama 저장소에서 제거되며 디스크 용량을 확보할 수 있습니다. 진행할까요?","Delete local AI model ""{model}"". It will be removed from Ollama storage and may free disk space. Continue?"
-local_ai.model.delete.completed,"로컬 AI 모델 ""{model}""을 삭제했습니다.","Local AI model ""{model}"" has been deleted."
-local_ai.model.delete.not_installed,"로컬 AI 모델 ""{model}""은 설치되어 있지 않습니다.","Local AI model ""{model}"" is not installed."
-local_ai.model.delete.failed,로컬 AI 모델 삭제에 실패했습니다. {error},Failed to delete the local AI model. {error}
-local_ai.error.model_delete_failed,모델 삭제 요청이 실패했습니다.,Model delete request failed.
-local_ai.error.model_name_empty,모델명이 비어 있습니다.,Model name is empty.
-local_ai.error.request_failed,백엔드 요청에 실패했습니다.,Backend request failed.
-local_ai.model.list.button,로컬 모델 확인,Check Local Models
-local_ai.model.list.failed,로컬 AI 모델 목록 확인에 실패했습니다. {error},Failed to check local AI models. {error}
-local_ai.model.list.empty,설치된 로컬 AI 모델이 없습니다.,No local AI models are installed.
-local_ai.model.list.result,설치된 로컬 AI 모델: {count}개{models},Installed local AI models: {count}{models}
-local_ai.error.ollama_model_list_failed,Ollama 모델 목록 조회에 실패했습니다.,Failed to list Ollama models.
+settings.cloud_ai.selected_model,선택된 클라우드 모델,Selected Cloud Model
+settings.cloud_ai.selected_model.none,선택되지 않음,Not selected
+settings.cloud_ai.test.failed,클라우드 AI 연결 테스트에 실패했습니다: {error},Cloud AI connection test failed: {error}
+settings.cloud_ai.test.request_failed,연결 테스트 요청에 실패했습니다: {error},Connection test request failed: {error}
+settings.cloud_ai.test.save_first,입력한 API Key를 먼저 저장한 뒤 연결 테스트를 실행하세요.,Save the entered API key before testing the connection.
+settings.cloud_ai.test.succeeded,클라우드 AI 연결 테스트에 성공했습니다.,Cloud AI connection test succeeded.
+settings.cloud_ai.test_connection,연결 테스트,Test Connection
+settings.cloud_ai_usage_weight,클라우드 AI 활용 가중치,Cloud AI usage weight
+settings.cloud_ai_usage_weight.description,자동 라우팅에서 클라우드 AI를 얼마나 우선할지 정합니다. 클라우드 AI를 사용할 수 없으면 이 값은 무시하고 로컬 AI로 진행합니다.,"Controls how strongly auto routing prefers Cloud AI. If Cloud AI is unavailable, this value is ignored and Local AI is used."
 
-about.title,정보,About
-about.message,"{app_name}현재 캐릭터: {character_name}로컬/클라우드 AI와 캐릭터 UI를 함께 쓰는 데스크톱 AI 인터페이스입니다.이 영역은 추후 앱 소개, 크레딧, 버전 정보, 사용자 지정 안내문 공간으로 확장할 수 있습니다.","{app_name}Current character: {character_name}A desktop AI interface combining local/cloud AI with a character UI.This area can later be expanded for app info, credits, version details, or a custom user notice."
-settings.conversation_output,대화 출력 설정,Conversation Output
-settings.conversation_markdown_enabled,대화 마크다운 활성화,Enable conversation Markdown
-settings.enforce_response_language,선택된 언어 사용 강조,Emphasize selected language
-settings.emphasize_character_style,캐릭터 스타일 강조,Emphasize character style
-settings.tab.web_search,검색,Search
-settings.web_search.description,로컬 AI 응답에 사용할 외부 웹 검색 API를 설정합니다. API Key는 설정 파일에 저장하지 않습니다.,Configure external web search APIs for local AI responses. API keys are not saved in the settings file.
-settings.web_search.enabled,웹 검색 사용,Enable Web Search
 settings.web_search.auto_enabled,자동 검색 사용,Enable automatic search
-settings.web_search.provider,검색 제공자,Search Provider
-settings.web_search.provider.none,사용 안 함,Disabled
-settings.web_search.provider.tavily,Tavily,Tavily
-settings.web_search.provider.firecrawl,Firecrawl,Firecrawl
-settings.web_search.open_api_key_page,API 키 페이지 열기,Open API Key Page
 settings.web_search.base_url,Custom Search API Base URL,Custom Search API Base URL
 settings.web_search.base_url.placeholder,비워두면 제공자 기본값을 사용합니다.,Leave empty to use the provider default.
+settings.web_search.description,로컬 AI 응답에 사용할 외부 웹 검색 API를 설정합니다. API Key는 설정 파일에 저장하지 않습니다.,Configure external web search APIs for local AI responses. API keys are not saved in the settings file.
+settings.web_search.enabled,웹 검색 사용,Enable Web Search
 settings.web_search.max_results,검색 결과 수,Search result count
-settings.web_search.timeout_seconds,검색 제한 시간 (초),Search timeout (seconds)
-settings.web_search.note,수동 검색은 /search 검색어 또는 /검색 검색어로 실행합니다. 자동 검색은 최신/뉴스/가격 같은 키워드가 포함된 질문에서만 시도합니다.,"Manual search runs with /search query. Automatic search is attempted only for questions with freshness/search keywords such as latest, news, or price."
 settings.web_search.message.title,웹 검색,Web Search
-settings.user_country,사용자 국가,User Country
-settings.user_country.custom,국가/지역 직접 입력,Custom Country/Region
-settings.user_country.custom.placeholder,"예: KR, JP, US, Germany, Europe","e.g. KR, JP, US, Germany, Europe"
-settings.user_country.auto_language,언어 기준 자동,Auto from Language
-settings.user_country.kr,한국,Korea
-settings.user_country.jp,일본,Japan
-settings.user_country.us,미국,United States
-settings.user_country.eu,유럽,Europe
-settings.user_country.custom_option,직접 입력,Custom
-settings.user_country.ip_auto,IP 기반 자동,Auto from IP
-settings.user_country.detect_ip,IP로 감지,Detect by IP
-settings.user_country.detect_ip.title,국가 자동 감지,Country Detection
-settings.user_country.detect_ip.failed,IP 기반 국가 감지에 실패했습니다. {error},Failed to detect country from IP. {error}
-settings.user_country.detect_ip.empty,IP 기반 국가 정보를 찾지 못했습니다.,Could not find country information from IP.
-settings.user_country.detect_ip.completed,감지된 국가: {country},Detected country: {country}
+settings.web_search.note,수동 검색은 /search 검색어 또는 /검색 검색어로 실행합니다. 자동 검색은 최신/뉴스/가격 같은 키워드가 포함된 질문에서만 시도합니다.,"Manual search runs with /search query. Automatic search is attempted only for questions with freshness/search keywords such as latest, news, or price."
+settings.web_search.open_api_key_page,API 키 페이지 열기,Open API Key Page
+settings.web_search.provider,검색 제공자,Search Provider
+settings.web_search.provider.firecrawl,Firecrawl,Firecrawl
+settings.web_search.provider.none,사용 안 함,Disabled
+settings.web_search.provider.tavily,Tavily,Tavily
+settings.web_search.timeout_seconds,검색 제한 시간 (초),Search timeout (seconds)
+
+settings.advanced.description,고급 사용자용 설정입니다.,Advanced user settings.
+settings.avatar_embarrassed_when_occluded,가려질 때 당황 상태,Use Embarrassed State When Covered
+settings.avatar_occluded_opacity,가려질 때 투명도,Opacity When Covered
+settings.avatar_occluded_opacity.description,투명도는 10% 단위로 설정합니다. 기본값은 30%입니다.,Opacity is set in 10% increments. The default is 30%.
+settings.developer_mode,개발자 모드,Developer Mode
+settings.expand_chat_over_character_area,채팅 공간 확장,Expand Chat Area
+settings.expand_chat_over_character_area.description,채팅 공간 확장: 캐릭터 표시되는 공간까지 채팅을 표시합니다.,Expand Chat Area: display chat messages over the character display area.
+
 settings.chat_font.change,채팅 결과 폰트 변경,Change chat result font
+settings.chat_font.default,기본값,Default
 settings.chat_font.family,채팅 결과 폰트,Chat result font
 settings.chat_font.family_label,글꼴,Font
 settings.chat_font.size,채팅 결과 글자 크기,Chat result font size
 settings.chat_font.size_label,크기,Size
-settings.chat_font.default,기본값,Default
-settings.cloud_ai_usage_weight,클라우드 AI 활용 가중치,Cloud AI usage weight
-settings.cloud_ai_usage_weight.description,자동 라우팅에서 클라우드 AI를 얼마나 우선할지 정합니다. 클라우드 AI를 사용할 수 없으면 이 값은 무시하고 로컬 AI로 진행합니다.,"Controls how strongly auto routing prefers Cloud AI. If Cloud AI is unavailable, this value is ignored and Local AI is used."
-settings.enable_tray_icon,트레이/메뉴바 아이콘 사용,Enable tray/menu bar icon
+
 settings.close_button_behavior,창 닫기 버튼 동작,Close button behavior
+settings.close_button_behavior.description,창 닫기 버튼을 눌렀을 때 앱을 종료할지 트레이/메뉴바로 숨길지 선택합니다. 트레이 메뉴에서 종료를 선택하면 백엔드도 함께 종료됩니다.,Choose whether the window close button exits the app or hides it to the tray/menu bar. Choosing Quit from the tray menu exits the backend as well.
 settings.close_button_behavior.exit,앱 종료,Exit app
 settings.close_button_behavior.minimize_to_tray,트레이로 최소화,Minimize to tray
-settings.close_button_behavior.description,창 닫기 버튼을 눌렀을 때 앱을 종료할지 트레이/메뉴바로 숨길지 선택합니다. 트레이 메뉴에서 종료를 선택하면 백엔드도 함께 종료됩니다.,Choose whether the window close button exits the app or hides it to the tray/menu bar. Choosing Quit from the tray menu exits the backend as well.
-tray.show,열기,Open
-tray.open_session_window,세션 윈도우 열기,Open Session Window
+settings.enable_tray_icon,트레이/메뉴바 아이콘 사용,Enable tray/menu bar icon
+
 tray.hide,숨기기,Hide
-tray.quit,종료,Quit
 tray.minimized_message,CharAIface가 트레이/메뉴바에서 계속 실행 중입니다.,CharAIface is still running in the tray/menu bar.
+tray.open_session_window,세션 윈도우 열기,Open Session Window
+tray.quit,종료,Quit
+tray.show,열기,Open
