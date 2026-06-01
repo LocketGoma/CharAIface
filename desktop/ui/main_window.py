@@ -2448,11 +2448,17 @@ class MainWindow(QMainWindow):
 
 
     def _quit_from_tray(self) -> None:
+        self._request_application_quit()
+
+    def _request_application_quit(self) -> None:
         self._force_quit_requested = True
         self._save_current_chat_session()
+        if self._tray_icon is not None:
+            self._tray_icon.hide()
+
         app = QApplication.instance()
         if app is not None:
-            app.quit()
+            QTimer.singleShot(0, app.quit)
         else:
             self.close()
 
@@ -2490,7 +2496,5 @@ class MainWindow(QMainWindow):
                 )
             return
 
-        if self._tray_icon is not None:
-            self._tray_icon.hide()
-
-        super().closeEvent(event)
+        event.accept()
+        self._request_application_quit()
