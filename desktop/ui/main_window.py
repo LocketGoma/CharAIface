@@ -1618,7 +1618,10 @@ class MainWindow(QMainWindow):
         area_width = self.content_area.width()
         area_height = self.content_area.height()
 
-        self.bottom_area.sync_composer_height_to_left_name_area()
+        composer_preferred_height = self._composer_preferred_height(area_height)
+        self.bottom_area.sync_composer_height_to_left_name_area(
+            preferred_height=composer_preferred_height
+        )
 
         # 하단 입력 UI가 차지하는 실제 높이.
         # composer height is synchronized with the left character/name label stack.
@@ -1645,7 +1648,9 @@ class MainWindow(QMainWindow):
             area_width,
             overlay_height,
         )
-        self.bottom_area.sync_composer_height_to_left_name_area()
+        self.bottom_area.sync_composer_height_to_left_name_area(
+            preferred_height=composer_preferred_height
+        )
 
         # 메시지 영역은 입력창 좌우 폭과 맞춘다.
         character_reserved_width = 238
@@ -1688,6 +1693,9 @@ class MainWindow(QMainWindow):
         # character does not block the session list by default.
         self.bottom_area.raise_()
         self._update_avatar_occlusion_later()
+
+    def _composer_preferred_height(self, area_height: int) -> int:
+        return min(220, max(110, int(area_height * 0.16)))
 
     def _update_avatar_occlusion_later(self) -> None:
         QTimer.singleShot(0, self._update_avatar_occlusion)

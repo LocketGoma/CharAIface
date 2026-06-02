@@ -23,6 +23,7 @@ class BottomUserArea(QWidget):
         super().__init__()
 
         self.localization = localization
+        self._composer_preferred_height: int | None = None
 
         self.setObjectName("BottomOverlayArea")
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
@@ -145,8 +146,16 @@ class BottomUserArea(QWidget):
 
         return wrapper
 
-    def sync_composer_height_to_left_name_area(self) -> None:
+    def sync_composer_height_to_left_name_area(
+        self,
+        preferred_height: int | None = None,
+    ) -> None:
+        if preferred_height is not None:
+            self._composer_preferred_height = int(preferred_height)
+
         target_height = self._left_name_stack_height()
+        if self._composer_preferred_height is not None:
+            target_height = max(target_height, self._composer_preferred_height)
         self.composer.set_fixed_height(target_height)
 
     def _left_name_stack_height(self) -> int:
