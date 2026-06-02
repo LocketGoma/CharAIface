@@ -183,28 +183,72 @@ class SettingsDialog(QDialog):
         output_label = QLabel(self.localization.t("settings.conversation_output"))
         output_label.setObjectName("SettingsSectionLabel")
 
-        self.conversation_markdown_checkbox = QCheckBox(
-            self.localization.t("settings.conversation_markdown_enabled")
-        )
+        self.conversation_markdown_checkbox = QCheckBox()
         self.conversation_markdown_checkbox.setChecked(self.settings.conversation_markdown_enabled)
 
-        self.enforce_response_language_checkbox = QCheckBox(
-            self.localization.t("settings.enforce_response_language")
+        self.typewriter_speed_slider = QSlider(Qt.Orientation.Horizontal)
+        self.typewriter_speed_slider.setMinimum(0)
+        self.typewriter_speed_slider.setMaximum(10)
+        self.typewriter_speed_slider.setSingleStep(1)
+        self.typewriter_speed_slider.setPageStep(1)
+        self.typewriter_speed_slider.setTickInterval(1)
+        self.typewriter_speed_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
+        self.typewriter_speed_slider.setValue(
+            self._typewriter_speed_position_from_interval(
+                self.settings.typewriter_interval_ms
+            )
         )
+        self.typewriter_speed_label = QLabel()
+        self.typewriter_speed_label.setObjectName("TypewriterSpeedValueLabel")
+        self.typewriter_speed_slider.valueChanged.connect(
+            self._on_typewriter_speed_changed
+        )
+
+        typewriter_speed_widget = QWidget()
+        typewriter_speed_layout = QHBoxLayout(typewriter_speed_widget)
+        typewriter_speed_layout.setContentsMargins(0, 0, 0, 0)
+        typewriter_speed_layout.setSpacing(8)
+        typewriter_speed_layout.addWidget(
+            QLabel(self.localization.t("settings.typewriter_speed.slow"))
+        )
+        typewriter_speed_layout.addWidget(self.typewriter_speed_slider, 1)
+        typewriter_speed_layout.addWidget(
+            QLabel(self.localization.t("settings.typewriter_speed.fast"))
+        )
+        typewriter_speed_layout.addWidget(self.typewriter_speed_label)
+
+        self.enforce_response_language_checkbox = QCheckBox()
         self.enforce_response_language_checkbox.setChecked(self.settings.enforce_response_language)
 
-        self.emphasize_character_style_checkbox = QCheckBox(
-            self.localization.t("settings.emphasize_character_style")
-        )
+        self.emphasize_character_style_checkbox = QCheckBox()
         self.emphasize_character_style_checkbox.setChecked(self.settings.emphasize_character_style)
 
         layout.addLayout(form_layout)
         layout.addWidget(output_label)
-        layout.addWidget(self.conversation_markdown_checkbox)
-        layout.addWidget(self.enforce_response_language_checkbox)
-        layout.addWidget(self.emphasize_character_style_checkbox)
+
+        output_form_layout = QFormLayout()
+        output_form_layout.setSpacing(10)
+        output_form_layout.addRow(
+            self.localization.t("settings.typewriter_speed"),
+            typewriter_speed_widget,
+        )
+        output_form_layout.addRow(
+            self.localization.t("settings.conversation_markdown_enabled"),
+            self.conversation_markdown_checkbox,
+        )
+        output_form_layout.addRow(
+            self.localization.t("settings.enforce_response_language"),
+            self.enforce_response_language_checkbox,
+        )
+        output_form_layout.addRow(
+            self.localization.t("settings.emphasize_character_style"),
+            self.emphasize_character_style_checkbox,
+        )
+
+        layout.addLayout(output_form_layout)
         layout.addStretch()
 
+        self._on_typewriter_speed_changed(self.typewriter_speed_slider.value())
         self._update_user_country_ui()
 
         return tab
@@ -1507,6 +1551,52 @@ class SettingsDialog(QDialog):
         self.cloud_ai_usage_label.setText(f"{snapped_value}%")
         self.settings.cloud_ai_usage_weight_percent = snapped_value
 
+    def _typewriter_speed_position_from_interval(self, interval_ms: int) -> int:
+        interval = self._normalized_typewriter_interval_ms(interval_ms)
+        if interval <= 0:
+            return 10
+        return 10 - (interval // 10)
+
+    def _typewriter_interval_from_speed_position(self, position: int) -> int:
+        position = min(10, max(0, int(position)))
+        if position >= 10:
+            return 0
+        return 100 - (position * 10)
+
+    def _normalized_typewriter_interval_ms(self, interval_ms: int) -> int:
+        try:
+            interval = int(interval_ms)
+        except (TypeError, ValueError):
+            interval = AppSettings().typewriter_interval_ms
+
+        if interval <= 0:
+            return 0
+
+        interval = min(100, max(10, interval))
+        return round(interval / 10) * 10
+
+    def _on_typewriter_speed_changed(self, value: int) -> None:
+        snapped_position = min(10, max(0, int(value)))
+
+        if snapped_position != value:
+            self.typewriter_speed_slider.blockSignals(True)
+            self.typewriter_speed_slider.setValue(snapped_position)
+            self.typewriter_speed_slider.blockSignals(False)
+
+        interval_ms = self._typewriter_interval_from_speed_position(snapped_position)
+        self.typewriter_speed_label.setText(
+            self._typewriter_speed_display_text(interval_ms)
+        )
+        self.settings.typewriter_interval_ms = interval_ms
+
+    def _typewriter_speed_display_text(self, interval_ms: int) -> str:
+        if interval_ms <= 0:
+            value = self.localization.t("settings.typewriter_speed.instant")
+        else:
+            value = f"{interval_ms}ms"
+
+        return self.localization.t("settings.typewriter_speed.value", value=value)
+
     def _on_cloud_ai_provider_changed(self) -> None:
         if not hasattr(self, "cloud_ai_provider_combo"):
             return
@@ -2460,6 +2550,9 @@ class SettingsDialog(QDialog):
             or AppSettings().preferred_unit_system
         )
         self.settings.conversation_markdown_enabled = self.conversation_markdown_checkbox.isChecked()
+        self.settings.typewriter_interval_ms = self._typewriter_interval_from_speed_position(
+            self.typewriter_speed_slider.value()
+        )
         self.settings.enforce_response_language = self.enforce_response_language_checkbox.isChecked()
         self.settings.emphasize_character_style = self.emphasize_character_style_checkbox.isChecked()
 

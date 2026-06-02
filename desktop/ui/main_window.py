@@ -51,6 +51,9 @@ CHAT_RESPONSE_STATE_HANDLERS = {
     "assistant_done": "on_assistant_done",
 }
 
+CHAT_RESPONSE_GENERATING_SECONDS = 20
+CHAT_RESPONSE_LONG_WAIT_SECONDS = 60
+
 
 class MainWindow(QMainWindow):
     MIN_WINDOW_WIDTH = 600
@@ -80,6 +83,13 @@ class MainWindow(QMainWindow):
         self.chat_response_thread: QThread | None = None
         self.chat_response_worker: ChatResponseWorker | None = None
         self.active_chat_response_session_id: str | None = None
+        self._chat_response_display_metadata: dict[str, tuple[str, dict]] = {}
+        self._chat_response_started_at: datetime | None = None
+        self._chat_response_elapsed_timer = QTimer(self)
+        self._chat_response_elapsed_timer.setInterval(1000)
+        self._chat_response_elapsed_timer.timeout.connect(
+            self._update_chat_response_elapsed_status
+        )
         self.pending_response_session_id: str | None = None
         self.pending_response_widget = None
         self.initial_notice_added = False
@@ -150,6 +160,7 @@ class MainWindow(QMainWindow):
         self.chat_view = ChatView()
         self.chat_view.set_markdown_enabled(self.settings.conversation_markdown_enabled)
         self.chat_view.set_message_font(self.settings.chat_font_family, self.settings.chat_font_size)
+        self.chat_view.set_typewriter_interval_ms(self.settings.typewriter_interval_ms)
         self.chat_view.setParent(self.content_area)
 
         self.session_sidebar = SessionSidebar(parent=self.content_area)
@@ -196,6 +207,9 @@ class MainWindow(QMainWindow):
         self.bottom_area.text_changed.connect(self.character_state.on_user_text_changed)
         self.character_state.state_changed.connect(self.bottom_area.set_state)
         self.chat_view.regenerate_requested.connect(self._on_regenerate_requested)
+        self.chat_view.assistant_message_display_finished.connect(
+            self._finish_chat_response_display
+        )
 
         self.chat_view.verticalScrollBar().valueChanged.connect(
             self._update_avatar_occlusion_later
@@ -471,6 +485,7 @@ class MainWindow(QMainWindow):
         if hasattr(self, "chat_view"):
             self.chat_view.set_markdown_enabled(self.settings.conversation_markdown_enabled)
             self.chat_view.set_message_font(self.settings.chat_font_family, self.settings.chat_font_size)
+            self.chat_view.set_typewriter_interval_ms(self.settings.typewriter_interval_ms)
             self._render_current_chat_session()
 
         if self.settings.language != old_language:
@@ -576,6 +591,7 @@ class MainWindow(QMainWindow):
             self.session_sidebar.retranslate_ui()
         self.bottom_area.retranslate_ui()
         self.bottom_area.set_user_name(self.settings.user_name)
+        self._update_chat_response_elapsed_status()
         self._update_chat_view_display_names()
         if self._tray_icon is not None:
             self._setup_tray_icon()
@@ -1078,6 +1094,9 @@ class MainWindow(QMainWindow):
         self.chat_view.clear_messages()
         for message in self.chat_session.messages:
             self.chat_view.add_chat_message(message)
+        if self.current_session_id == self.active_chat_response_session_id:
+            self._show_pending_assistant_response(self.current_session_id)
+            self._update_chat_response_elapsed_status()
         self.bottom_area.raise_()
         self._update_avatar_occlusion_later()
 
@@ -1130,7 +1149,11 @@ class MainWindow(QMainWindow):
             session_id,
             show_message=bool(self.settings.developer_mode),
         )
-        self.character_state.on_assistant_done()
+        if self.current_session_id == self.active_chat_response_session_id:
+            self.character_state.on_message_sent()
+            self._update_chat_response_elapsed_status()
+        else:
+            self.character_state.on_assistant_done()
 
     def _on_sidebar_session_rename_requested(self, session_id: str) -> None:
         sessions = self.session_store.list_sessions()
@@ -1300,6 +1323,42 @@ class MainWindow(QMainWindow):
     def _pending_response_text(self) -> str:
         return self.localization.t("chat.pending_response")
 
+    def _start_chat_response_elapsed_status(self, session_id: str) -> None:
+        self._chat_response_started_at = datetime.now()
+        self.active_chat_response_session_id = session_id
+        self._chat_response_elapsed_timer.start()
+        self._update_chat_response_elapsed_status()
+
+    def _stop_chat_response_elapsed_status(self, session_id: str | None = None) -> None:
+        if session_id is not None and session_id != self.active_chat_response_session_id:
+            return
+
+        self._chat_response_elapsed_timer.stop()
+        self._chat_response_started_at = None
+
+    def _update_chat_response_elapsed_status(self) -> None:
+        if (
+            self._chat_response_started_at is None
+            or self.active_chat_response_session_id is None
+            or self.current_session_id != self.active_chat_response_session_id
+        ):
+            return
+
+        elapsed_seconds = max(
+            0,
+            int((datetime.now() - self._chat_response_started_at).total_seconds()),
+        )
+        if elapsed_seconds >= CHAT_RESPONSE_LONG_WAIT_SECONDS:
+            key = "chat.response_wait.long"
+        elif elapsed_seconds >= CHAT_RESPONSE_GENERATING_SECONDS:
+            key = "chat.response_wait.generating"
+        else:
+            key = "chat.response_wait.thinking"
+
+        self.bottom_area.set_state_text(
+            self.localization.t(key, seconds=elapsed_seconds)
+        )
+
     def _show_pending_assistant_response(self, session_id: str | None) -> None:
         if not session_id or session_id != self.current_session_id:
             return
@@ -1309,6 +1368,7 @@ class MainWindow(QMainWindow):
         self.pending_response_widget = self.chat_view.add_pending_assistant_message(
             self._pending_response_text()
         )
+        self._update_chat_response_elapsed_status()
         self._update_avatar_occlusion_later()
 
     def _clear_pending_assistant_response(self, session_id: str | None = None) -> None:
@@ -1343,7 +1403,6 @@ class MainWindow(QMainWindow):
             settings_snapshot=self.settings.model_dump(mode="json"),
         )
 
-        self.active_chat_response_session_id = request_session_id
         self.chat_response_thread = QThread(self)
         self.chat_response_worker = ChatResponseWorker(
             backend_client=self.backend_client,
@@ -1359,17 +1418,38 @@ class MainWindow(QMainWindow):
         self.chat_response_worker.failed.connect(self._quit_chat_response_thread)
         self.chat_response_thread.finished.connect(self._cleanup_chat_response_worker)
 
+        self._start_chat_response_elapsed_status(request_session_id)
         self._show_pending_assistant_response(request_session_id)
         self.chat_response_thread.start()
 
     def _on_chat_response_finished(self, session_id: str, response) -> None:
+        self._stop_chat_response_elapsed_status(session_id)
         self._clear_pending_assistant_response(session_id)
-        message_added = self._append_message_to_session(session_id, response.message)
+        metadata = getattr(response.message, "metadata", {}) or {}
+        response_state = self._chat_response_state_from_metadata(metadata)
+        animate_response = (
+            response_state == "assistant_done"
+            and session_id == self.current_session_id
+            and self.settings.typewriter_interval_ms > 0
+        )
+        if animate_response:
+            self.character_state.on_assistant_typing()
+
+        message_added = self._append_message_to_session(
+            session_id,
+            response.message,
+            animate_current=animate_response,
+        )
         if not message_added:
             print(f"[Chat] Response target session was not found: {session_id}")
 
-        metadata = getattr(response.message, "metadata", {}) or {}
-        self._apply_chat_response_state(metadata)
+        if animate_response and message_added:
+            self._chat_response_display_metadata[response.message.id] = (
+                session_id,
+                dict(metadata),
+            )
+        elif session_id == self.current_session_id:
+            self._apply_chat_response_state(metadata)
 
         self._update_avatar_occlusion_later()
 
@@ -1387,7 +1467,19 @@ class MainWindow(QMainWindow):
         )
         getattr(self.character_state, handler_name)()
 
+    def _finish_chat_response_display(self, message_id: str) -> None:
+        display_context = self._chat_response_display_metadata.pop(message_id, None)
+        if display_context is None:
+            return
+
+        session_id, metadata = display_context
+        if session_id != self.current_session_id:
+            return
+
+        self._apply_chat_response_state(metadata)
+
     def _on_chat_response_failed(self, session_id: str, failure) -> None:
+        self._stop_chat_response_elapsed_status(session_id)
         self._clear_pending_assistant_response(session_id)
         failure_payload = self._normalize_chat_failure_payload(failure)
         print(
@@ -1411,13 +1503,19 @@ class MainWindow(QMainWindow):
 
         self.active_chat_response_session_id = None
 
-    def _append_message_to_session(self, session_id: str, message) -> bool:
+    def _append_message_to_session(
+        self,
+        session_id: str,
+        message,
+        *,
+        animate_current: bool = False,
+    ) -> bool:
         if not session_id:
             return False
 
         if session_id == self.current_session_id:
             self.chat_session.append_message(message)
-            self.chat_view.add_chat_message(message)
+            self.chat_view.add_chat_message(message, animate=animate_current)
             self._save_current_chat_session()
             return True
 

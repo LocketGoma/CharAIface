@@ -23,6 +23,9 @@ from shared.schema.chat import ChatMessage, ChatRole
 
 
 PAID_MODEL_LABEL = " (유료 모델 사용) "
+TYPEWRITER_INTERVAL_MS = 25
+TYPEWRITER_MAX_INTERVAL_MS = 100
+TYPEWRITER_MAX_TICKS = 160
 
 
 class SelectableMessageLabel(QLabel):
@@ -38,6 +41,7 @@ class SelectableMessageLabel(QLabel):
 
 class ChatView(QScrollArea):
     regenerate_requested = Signal(object)
+    assistant_message_display_finished = Signal(str)
 
     def __init__(self) -> None:
         super().__init__()
@@ -51,6 +55,8 @@ class ChatView(QScrollArea):
         self._right_reserved_width = 0
         self._message_font_family = ""
         self._message_font_size = 10
+        self._typewriter_interval_ms = TYPEWRITER_INTERVAL_MS
+        self._typewriter_timers: dict[str, QTimer] = {}
 
         self.setWidgetResizable(True)
 
@@ -142,6 +148,18 @@ class ChatView(QScrollArea):
     def set_markdown_enabled(self, enabled: bool) -> None:
         self._markdown_enabled = bool(enabled)
 
+    def set_typewriter_interval_ms(self, interval_ms: int) -> None:
+        try:
+            interval = int(interval_ms)
+        except (TypeError, ValueError):
+            interval = TYPEWRITER_INTERVAL_MS
+        if interval <= 0:
+            self._typewriter_interval_ms = 0
+            return
+
+        interval = max(10, min(TYPEWRITER_MAX_INTERVAL_MS, interval))
+        self._typewriter_interval_ms = round(interval / 10) * 10
+
     def add_message(self, role: str, text: str) -> None:
         message = ChatMessage(
             role=self._normalize_role(role),
@@ -168,7 +186,7 @@ class ChatView(QScrollArea):
                 if label.objectName() in {"UserMessageBubble", "AssistantMessageBubble"}:
                     label.setMaximumWidth(max_width)
 
-    def add_chat_message(self, message: ChatMessage) -> None:
+    def add_chat_message(self, message: ChatMessage, *, animate: bool = False) -> QWidget:
         message_index = len(self._message_widgets)
 
         row = QWidget()
@@ -188,13 +206,29 @@ class ChatView(QScrollArea):
         self._apply_message_font(label)
         label.setWordWrap(True)
         label.setTextFormat(Qt.TextFormat.RichText)
-        label.setText(self._build_message_html(message))
         # Links are rendered as text only unless a future explicit safe-open policy is added.
         label.setOpenExternalLinks(False)
         label.setAlignment(
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop
         )
         label.setMaximumWidth(self._message_max_width())
+        should_animate = (
+            animate
+            and message.role == "assistant"
+            and bool(message.content)
+            and self._typewriter_interval_ms > 0
+        )
+        if should_animate:
+            label.setText(
+                self._build_message_html(
+                    message,
+                    content_override="",
+                    render_markdown=False,
+                    plain_text_only=True,
+                )
+            )
+        else:
+            label.setText(self._build_message_html(message))
 
         actions = self._create_message_actions(message, message_index, row)
 
@@ -214,6 +248,9 @@ class ChatView(QScrollArea):
         self.layout.addWidget(row)
         self._message_widgets.append(row)
         self._scroll_to_bottom_later()
+        if should_animate:
+            self._start_typewriter_animation(message, label, row)
+        return row
 
     def _create_message_actions(self, message: ChatMessage, message_index: int, row: QWidget | None = None) -> QWidget:
         actions = QWidget()
@@ -320,6 +357,7 @@ class ChatView(QScrollArea):
         return True
 
     def clear_messages(self) -> None:
+        self._stop_all_typewriter_animations()
         for widget in self._message_widgets:
             self.layout.removeWidget(widget)
             widget.deleteLater()
@@ -336,12 +374,90 @@ class ChatView(QScrollArea):
         self.container.adjustSize()
         self.verticalScrollBar().setValue(self.verticalScrollBar().maximum())
 
-    def _build_message_html(self, message: ChatMessage) -> str:
+    def _build_message_html(
+        self,
+        message: ChatMessage,
+        *,
+        content_override: str | None = None,
+        render_markdown: bool | None = None,
+        plain_text_only: bool = False,
+    ) -> str:
         display_role = escape(self._display_role(message))
-        content = self._content_to_html(message.content, self._should_render_markdown(message))
+        raw_content = message.content if content_override is None else content_override
+        should_render_markdown = (
+            self._should_render_markdown(message)
+            if render_markdown is None
+            else render_markdown
+        )
+        content = (
+            escape(raw_content).replace("\n", "<br>")
+            if plain_text_only
+            else self._content_to_html(raw_content, should_render_markdown)
+        )
 
         style = self._message_html_style()
         return f'<div style="{style}"><b>{display_role}</b><br>{content}</div>'
+
+    def _start_typewriter_animation(
+        self,
+        message: ChatMessage,
+        label: SelectableMessageLabel,
+        row: QWidget,
+    ) -> None:
+        content = message.content or ""
+        message_id = message.id
+        total_length = len(content)
+        if total_length <= 0:
+            self.assistant_message_display_finished.emit(message_id)
+            return
+
+        interval_ms = max(1, self._typewriter_interval_ms)
+        chunk_size = max(1, (total_length + TYPEWRITER_MAX_TICKS - 1) // TYPEWRITER_MAX_TICKS)
+        state = {"index": 0}
+
+        timer = QTimer(self)
+        timer.setInterval(interval_ms)
+        self._typewriter_timers[message_id] = timer
+
+        def advance() -> None:
+            if not self._is_alive_widget(row) or not self._is_alive_widget(label):
+                self._stop_typewriter_animation(message_id)
+                return
+
+            state["index"] = min(total_length, state["index"] + chunk_size)
+            partial = content[: state["index"]]
+            label.raw_text = partial
+            label.setText(
+                self._build_message_html(
+                    message,
+                    content_override=partial,
+                    render_markdown=False,
+                    plain_text_only=True,
+                )
+            )
+            self._scroll_to_bottom()
+
+            if state["index"] >= total_length:
+                self._stop_typewriter_animation(message_id)
+                label.raw_text = content
+                label.setText(self._build_message_html(message))
+                self._scroll_to_bottom_later()
+                self.assistant_message_display_finished.emit(message_id)
+
+        timer.timeout.connect(advance)
+        timer.start()
+
+    def _stop_typewriter_animation(self, message_id: str) -> None:
+        timer = self._typewriter_timers.pop(message_id, None)
+        if timer is None:
+            return
+
+        timer.stop()
+        timer.deleteLater()
+
+    def _stop_all_typewriter_animations(self) -> None:
+        for message_id in list(self._typewriter_timers):
+            self._stop_typewriter_animation(message_id)
 
     def add_pending_assistant_message(self, text: str) -> QWidget:
         message = ChatMessage(

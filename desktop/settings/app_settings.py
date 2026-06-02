@@ -53,6 +53,7 @@ class AppSettings(BaseModel):
     close_button_behavior: CloseButtonBehavior = "minimize_to_tray"
 
     conversation_markdown_enabled: bool = True
+    typewriter_interval_ms: int = 30
     enforce_response_language: bool = True
     emphasize_character_style: bool = True
 

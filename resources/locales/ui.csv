@@ -17,6 +17,9 @@ chat.initial_notice.new_session,안내 : 안녕하세요. {app_name}의 {charact
 chat.paid_model_label, (유료 모델 사용) , (Paid model used)
 chat.pending_response,응답 생성 중...,Generating response...
 chat.placeholder,메시지를 입력하세요...,Type a message...
+chat.response_wait.generating,깊은 고민 중... {seconds}초,Deep in thought... {seconds}s
+chat.response_wait.long,생각이 길어지고 있습니다... {seconds}초,Still thinking... {seconds}s
+chat.response_wait.thinking,생각 중... {seconds}초,Thinking... {seconds}s
 chat.send,전송,Send
 
 character.default_missing,기본 캐릭터가 없습니다!,Default character is missing!
@@ -129,6 +132,11 @@ settings.conversation_markdown_enabled,대화 마크다운 활성화,Enable conv
 settings.conversation_output,대화 출력 설정,Conversation Output
 settings.emphasize_character_style,캐릭터 스타일 강조,Emphasize character style
 settings.enforce_response_language,선택된 언어 사용 강조,Emphasize selected language
+settings.typewriter_speed,문자 입력 속도,Typing Speed
+settings.typewriter_speed.fast,빠름,Fast
+settings.typewriter_speed.instant,즉시생성,Instant
+settings.typewriter_speed.slow,느림,Slow
+settings.typewriter_speed.value,{value},{value}
 
 settings.character,캐릭터,Character
 settings.character.builtin,기본 캐릭터,Built-in Character
