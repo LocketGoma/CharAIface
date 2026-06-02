@@ -1,0 +1,68 @@
+{
+  "auto_search_enabled_settings": {
+    "web_search_auto_enabled": true
+  },
+  "auto_search_disabled_settings": {
+    "web_search_auto_enabled": false
+  },
+  "auto_search_trigger_examples": [
+    "오늘 서울 날씨 알려줘",
+    "오늘 서울 날씨 어때?",
+    "엔비디아 주가 최신으로 알려줘",
+    "이번 주 게임업계 뉴스 찾아줘",
+    "OpenAI Codex 최신 변경점 검색해줘",
+    "지금 환율 얼마야",
+    "What is the latest OpenAI Codex update?"
+  ],
+  "auto_search_non_trigger_examples": [
+    "오늘 기분이 안 좋다",
+    "내일 할 일 정리해줘",
+    "최근에 내가 말한 설정 정리해줘",
+    "가격이 비싸게 느껴지는 이유를 설명해줘",
+    "Explain why premium pricing feels expensive."
+  ],
+  "auto_search_disabled_example": "오늘 서울 날씨 알려줘",
+  "unit_prompt_cases": [
+    {
+      "settings": {
+        "preferred_unit_system": "metric"
+      },
+      "language": "ko",
+      "expected_terms": [
+        "섭씨",
+        "미터법",
+        "임의 변환하지 마라",
+        "숫자만 유지한 채 °C로 바꾸지 말고"
+      ]
+    },
+    {
+      "settings": {
+        "preferred_unit_system": "imperial"
+      },
+      "language": "en",
+      "expected_terms": [
+        "Fahrenheit",
+        "imperial",
+        "do not force a conversion",
+        "do not keep the number and only relabel"
+      ]
+    }
+  ],
+  "weather_query_cases": [
+    {
+      "query": "이번주 서울 날씨",
+      "original_text": "이번주 서울 날씨",
+      "config": {
+        "country_code": "KR",
+        "location": "Republic of Korea"
+      },
+      "settings": {
+        "preferred_unit_system": "metric"
+      },
+      "expected_terms": [
+        "대한민국",
+        "섭씨 celsius"
+      ]
+    }
+  ]
+}

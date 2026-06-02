@@ -2,6 +2,11 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from desktop.core.frontend_helper import (
+    default_web_search_api_key_env,
+    default_web_search_credential_id,
+)
+
 
 LocalAIProvider = Literal["ollama"]
 RuntimeInstallPolicy = Literal["never", "ask"]
@@ -11,6 +16,7 @@ CloseButtonBehavior = Literal["exit", "minimize_to_tray"]
 CloudAIAuthMode = Literal["secure_store", "env_var"]
 WebSearchAuthMode = Literal["secure_store", "env_var"]
 WebSearchProvider = Literal["none", "tavily", "firecrawl"]
+DEFAULT_WEB_SEARCH_PROVIDER: WebSearchProvider = "tavily"
 UserCountryPreset = Literal["auto_language", "kr", "jp", "us", "eu", "custom", "ip_auto"]
 PreferredUnitSystem = Literal["metric", "imperial"]
 CloudAIProvider = Literal[
@@ -112,11 +118,18 @@ class AppSettings(BaseModel):
     # Web search / local AI tool settings
     web_search_enabled: bool = False
     web_search_auto_enabled: bool = False
-    web_search_provider: WebSearchProvider = "tavily"
+    web_search_provider: WebSearchProvider = DEFAULT_WEB_SEARCH_PROVIDER
     web_search_auth_mode: WebSearchAuthMode = "secure_store"
-    # TODO: Keep this schema default in sync with desktop.core.frontend_helper.WEB_SEARCH_PROVIDER_DEFAULTS.
-    web_search_credential_id: str = "CharAIface/tavily/api_key"
-    web_search_api_key_env: str = "TAVILY_API_KEY"
+    web_search_credential_id: str = Field(
+        default_factory=lambda data: default_web_search_credential_id(
+            str(data.get("web_search_provider") or DEFAULT_WEB_SEARCH_PROVIDER)
+        )
+    )
+    web_search_api_key_env: str = Field(
+        default_factory=lambda data: default_web_search_api_key_env(
+            str(data.get("web_search_provider") or DEFAULT_WEB_SEARCH_PROVIDER)
+        )
+    )
     web_search_base_url: str = ""
     web_search_max_results: int = 5
     web_search_timeout_seconds: int = 20

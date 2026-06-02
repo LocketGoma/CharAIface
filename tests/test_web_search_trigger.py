@@ -1,94 +1,69 @@
-from backend.app.services.chat_service import ChatService
+import json
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
+
+from backend.app.services.web_search_context import WebSearchContextBuilder
 
 
-def _auto_search_enabled_settings() -> dict[str, object]:
-    return {
-        "web_search_auto_enabled": True,
-    }
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+FIXTURE_PATH = PROJECT_ROOT / "resources" / "data" / "search_context" / "web_search_context_cases.json"
+
+
+def _web_search_context() -> WebSearchContextBuilder:
+    return WebSearchContextBuilder(PROJECT_ROOT)
+
+
+def _fixture() -> dict[str, Any]:
+    return json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
 
 
 def test_auto_web_search_triggers_for_current_external_requests() -> None:
-    service = ChatService()
-    settings = _auto_search_enabled_settings()
+    context = _web_search_context()
+    cases = _fixture()
 
-    trigger_examples = [
-        "오늘 서울 날씨 알려줘",
-        "오늘 서울 날씨 어때?",
-        "엔비디아 주가 최신으로 알려줘",
-        "이번 주 게임업계 뉴스 찾아줘",
-        "OpenAI Codex 최신 변경점 검색해줘",
-        "지금 환율 얼마야",
-        "What is the latest OpenAI Codex update?",
-    ]
-
-    for text in trigger_examples:
-        assert service._should_auto_web_search(text, settings), text
+    for text in cases["auto_search_trigger_examples"]:
+        assert context.should_auto_search(text, cases["auto_search_enabled_settings"]), text
 
 
 def test_auto_web_search_avoids_personal_or_explanatory_requests() -> None:
-    service = ChatService()
-    settings = _auto_search_enabled_settings()
+    context = _web_search_context()
+    cases = _fixture()
 
-    non_trigger_examples = [
-        "오늘 기분이 안 좋다",
-        "내일 할 일 정리해줘",
-        "최근에 내가 말한 설정 정리해줘",
-        "가격이 비싸게 느껴지는 이유를 설명해줘",
-        "Explain why premium pricing feels expensive.",
-    ]
-
-    for text in non_trigger_examples:
-        assert not service._should_auto_web_search(text, settings), text
+    for text in cases["auto_search_non_trigger_examples"]:
+        assert not context.should_auto_search(text, cases["auto_search_enabled_settings"]), text
 
 
 def test_auto_web_search_respects_auto_setting() -> None:
-    service = ChatService()
+    context = _web_search_context()
+    cases = _fixture()
 
-    assert not service._should_auto_web_search(
-        "오늘 서울 날씨 알려줘",
-        {"web_search_auto_enabled": False},
+    assert not context.should_auto_search(
+        cases["auto_search_disabled_example"],
+        cases["auto_search_disabled_settings"],
     )
 
 
-def test_web_search_unit_preference_prompt_uses_metric_without_forced_conversion() -> None:
-    service = ChatService()
+def test_web_search_unit_preference_prompts_include_required_terms() -> None:
+    context = _web_search_context()
+    cases = _fixture()
 
-    prompt = service._web_search_unit_preference_prompt(
-        {"preferred_unit_system": "metric"},
-        "ko",
-    )
-
-    assert "섭씨" in prompt
-    assert "미터법" in prompt
-    assert "임의 변환하지 마라" in prompt
-    assert "숫자만 유지한 채 °C로 바꾸지 말고" in prompt
+    for case in cases["unit_prompt_cases"]:
+        prompt = context.unit_preference_prompt(case["settings"], case["language"])
+        for expected_term in case["expected_terms"]:
+            assert expected_term in prompt
 
 
-def test_web_search_unit_preference_prompt_uses_imperial_without_forced_conversion() -> None:
-    service = ChatService()
+def test_weather_search_query_adds_unit_hints() -> None:
+    context = _web_search_context()
+    cases = _fixture()
 
-    prompt = service._web_search_unit_preference_prompt(
-        {"preferred_unit_system": "imperial"},
-        "en",
-    )
-
-    assert "Fahrenheit" in prompt
-    assert "imperial" in prompt
-    assert "do not force a conversion" in prompt
-    assert "do not keep the number and only relabel" in prompt
-
-
-def test_weather_search_query_adds_metric_unit_hint() -> None:
-    service = ChatService()
-    config = type("Config", (), {"country_code": "KR", "location": "Republic of Korea"})()
-
-    query = service._normalize_web_search_query_for_region(
-        query="이번주 서울 날씨",
-        original_text="이번주 서울 날씨",
-        config=config,
-        request=None,  # type: ignore[arg-type]
-        settings={"preferred_unit_system": "metric"},
-    )
-
-    assert "대한민국" in query
-    assert "섭씨 celsius" in query
+    for case in cases["weather_query_cases"]:
+        query = context.normalize_query_for_region(
+            query=case["query"],
+            original_text=case["original_text"],
+            config=SimpleNamespace(**case["config"]),
+            settings=case["settings"],
+        )
+        for expected_term in case["expected_terms"]:
+            assert expected_term in query
