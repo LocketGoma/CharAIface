@@ -1,12 +1,12 @@
 from PySide6.QtCore import QObject, Signal
 
-from desktop.client.backend_http_client import BackendHttpClient
+from desktop.client.backend_http_client import BackendHttpClient, ChatRequestError
 from shared.schema.chat import ChatRequest, ChatResponse
 
 
 class ChatResponseWorker(QObject):
     finished = Signal(str, object)
-    failed = Signal(str, str)
+    failed = Signal(str, object)
 
     def __init__(
         self,
@@ -22,12 +22,28 @@ class ChatResponseWorker(QObject):
     def run(self) -> None:
         try:
             response: ChatResponse | None = self.backend_client.chat(self.request)
+        except ChatRequestError as error:
+            self.failed.emit(self.session_id, error.failure.to_dict())
+            return
         except Exception as error:
-            self.failed.emit(self.session_id, str(error))
+            self.failed.emit(
+                self.session_id,
+                {
+                    "error_code": "unknown_error",
+                    "error_detail": str(error),
+                    "exception_type": type(error).__name__,
+                },
+            )
             return
 
         if response is None:
-            self.failed.emit(self.session_id, "backend_chat_request_failed")
+            self.failed.emit(
+                self.session_id,
+                {
+                    "error_code": "backend_chat_request_failed",
+                    "error_detail": "Backend chat request returned no response.",
+                },
+            )
             return
 
         self.finished.emit(self.session_id, response)

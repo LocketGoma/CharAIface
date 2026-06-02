@@ -2,26 +2,6 @@ import csv
 from pathlib import Path
 
 
-BUILTIN_TRANSLATIONS: dict[str, dict[str, str]] = {
-    "app.title": {
-        "ko": "CharAIface",
-        "en": "CharAIface",
-    },
-    "chat.backend_fallback": {
-        "ko": "백엔드 응답을 가져오지 못했습니다. 임시 로컬 응답입니다.",
-        "en": "Could not get a backend response. This is a temporary local response.",
-    },
-    "chat.initial_notice.model_required": {
-        "ko": "안내 : 안녕하세요! {app_name}의 {character_name} 입니다! 사용을 위해서는 로컬 AI 모델 설치가 필요합니다. 가이드를 따라주세요",
-        "en": "Notice: Hello! I'm {character_name} from {app_name}! To use the app, a local AI model must be installed. Please follow the guide.",
-    },
-    "chat.initial_notice.new_session": {
-        "ko": "안내 : 안녕하세요. {app_name}의 {character_name} 입니다! 새로운 세션이 확인되었습니다.",
-        "en": "Notice: Hello. I'm {character_name} from {app_name}! A new session has been detected.",
-    },
-}
-
-
 class LocalizationManager:
     def __init__(
         self,
@@ -70,17 +50,6 @@ class LocalizationManager:
                     language: (row.get(language) or "").strip()
                     for language in self._available_languages
                 }
-
-            for key, translations in BUILTIN_TRANSLATIONS.items():
-                if key not in table:
-                    table[key] = {}
-
-                for language, value in translations.items():
-                    if language not in self._available_languages:
-                        continue
-
-                    if not table[key].get(language):
-                        table[key][language] = value
 
             self._table = table
 

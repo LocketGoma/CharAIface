@@ -23,6 +23,7 @@ from backend.app.services.web_search_service import (
     WebSearchService,
 )
 from backend.app.services.web_search_context import WebSearchContextBuilder
+from desktop.localization.localization_manager import LocalizationManager
 from shared.schema.chat import ChatMessage, ChatRequest, ChatResponse
 
 
@@ -71,6 +72,9 @@ class ChatService:
         self.web_search_service = WebSearchService()
         self.project_root = Path(__file__).resolve().parents[3]
         self.settings_path = self.project_root / "resources" / "data" / "settings.json"
+        self.localization = LocalizationManager(
+            self.project_root / "resources" / "locales" / "ui.csv"
+        )
         self.web_search_context = WebSearchContextBuilder(self.project_root)
 
     def create_response(self, request: ChatRequest) -> ChatResponse:
@@ -360,6 +364,13 @@ class ChatService:
                 model=model,
                 messages=model_messages,
             )
+        except httpx.TimeoutException as error:
+            return self._create_local_error_response(
+                request=request,
+                model=model,
+                error_code="model_timeout",
+                error_detail=str(error) or "Local AI model generation timed out.",
+            )
         except httpx.HTTPStatusError as error:
             status_code = error.response.status_code
             detail = self._safe_response_text(error.response)
@@ -480,6 +491,14 @@ class ChatService:
                 api_key=api_key,
                 model=model,
                 messages=model_messages,
+            )
+        except httpx.TimeoutException as error:
+            return self._create_cloud_error_response(
+                request=request,
+                model=model,
+                provider=provider,
+                error_code="model_timeout",
+                error_detail=str(error) or "Cloud AI model generation timed out.",
             )
         except httpx.HTTPStatusError as error:
             status_code = error.response.status_code
@@ -1642,6 +1661,15 @@ class ChatService:
 
         return "ko"
 
+    def _localized_text(self, key: str, language: str, **kwargs) -> str:
+        language_key = "ko" if str(language or "").lower().startswith("ko") else "en"
+        previous_language = self.localization.current_language
+        try:
+            self.localization.set_language(language_key)
+            return self.localization.t(key, **kwargs)
+        finally:
+            self.localization.set_language(previous_language)
+
     def _localized_user_fallback_name(self, language: str) -> str:
         if language.startswith("ko"):
             return "사용자"
@@ -1804,16 +1832,24 @@ class ChatService:
         error_code: str,
         error_detail: str,
     ) -> ChatResponse:
-        if self._request_language(request).startswith("ko"):
+        language = self._request_language(request)
+        is_korean = language.startswith("ko")
+
+        if not request.developer_mode:
+            if error_code == "model_timeout":
+                content = self._localized_text("local_ai.error.model_timeout", language)
+            else:
+                content = self._localized_text("local_ai.error.response_failed", language)
+        elif is_korean:
             content = (
-                "로컬 AI 응답 생성에 실패했습니다.\n\n"
+                f"{self._localized_text('local_ai.error.response_failed', language)}\n\n"
                 f"- model: {model}\n"
                 f"- error_code: {error_code}\n"
                 f"- error_detail: {error_detail}"
             )
         else:
             content = (
-                "Failed to generate a local AI response.\n\n"
+                f"{self._localized_text('local_ai.error.response_failed', language)}\n\n"
                 f"- model: {model}\n"
                 f"- error_code: {error_code}\n"
                 f"- error_detail: {error_detail}"
@@ -1840,16 +1876,12 @@ class ChatService:
         error_code: str,
         error_detail: str,
     ) -> ChatResponse:
-        paid_model_unavailable = bool(model and provider != "none")
+        paid_model_unavailable = bool(model and provider != "none" and error_code != "model_timeout")
         language = self._request_language(request)
         is_korean = language.startswith("ko")
 
         if paid_model_unavailable and not request.developer_mode:
-            title = (
-                "확인 필요: 선택된 유료 모델을 사용할 수 없습니다."
-                if is_korean
-                else "Check required: the selected paid model is unavailable."
-            )
+            title = self._localized_text("cloud_ai.error.paid_model_unavailable", language)
             provider_message = self._extract_provider_error_message(error_detail)
             display_message = self._translate_provider_error_message(
                 provider_message or error_detail,
@@ -1857,16 +1889,19 @@ class ChatService:
             )
 
             if display_message:
-                label = "메시지" if is_korean else "Message"
+                label = self._localized_text("common.message_label", language)
                 content = f"{title}\n\n- {label}: {display_message}"
             else:
                 content = title
 
+        elif error_code == "model_timeout" and not request.developer_mode:
+            content = self._localized_text("cloud_ai.error.model_timeout", language)
+
         elif is_korean:
             title = (
-                "확인 필요: 선택된 유료 모델을 사용할 수 없습니다."
+                self._localized_text("cloud_ai.error.paid_model_unavailable", language)
                 if paid_model_unavailable
-                else "클라우드 AI 응답 생성에 실패했습니다."
+                else self._localized_text("cloud_ai.error.response_failed", language)
             )
             content = (
                 f"{title}\n\n"
@@ -1877,9 +1912,9 @@ class ChatService:
             )
         else:
             title = (
-                "Check required: the selected paid model is unavailable."
+                self._localized_text("cloud_ai.error.paid_model_unavailable", language)
                 if paid_model_unavailable
-                else "Failed to generate a cloud AI response."
+                else self._localized_text("cloud_ai.error.response_failed", language)
             )
             content = (
                 f"{title}\n\n"

@@ -1320,10 +1320,6 @@ class MainWindow(QMainWindow):
         if session_id is None or self.pending_response_session_id == session_id:
             self.pending_response_session_id = None
 
-    def _show_fake_assistant_typing(self) -> None:
-        if self.chat_response_thread is not None:
-            self.character_state.on_assistant_typing()
-
     def _start_chat_response_worker(self) -> None:
         if self.chat_response_thread is not None:
             print("[Chat] Chat response request is already running.")
@@ -1364,7 +1360,6 @@ class MainWindow(QMainWindow):
         self.chat_response_thread.finished.connect(self._cleanup_chat_response_worker)
 
         self._show_pending_assistant_response(request_session_id)
-        QTimer.singleShot(300, self._show_fake_assistant_typing)
         self.chat_response_thread.start()
 
     def _on_chat_response_finished(self, session_id: str, response) -> None:
@@ -1392,10 +1387,14 @@ class MainWindow(QMainWindow):
         )
         getattr(self.character_state, handler_name)()
 
-    def _on_chat_response_failed(self, session_id: str, error: str) -> None:
+    def _on_chat_response_failed(self, session_id: str, failure) -> None:
         self._clear_pending_assistant_response(session_id)
-        print(f"[Chat] Backend chat response failed for session {session_id}: {error}")
-        self._add_backend_fallback_response(session_id=session_id)
+        failure_payload = self._normalize_chat_failure_payload(failure)
+        print(
+            "[Chat] Backend chat response failed for session "
+            f"{session_id}: {failure_payload.get('error_code')}: {failure_payload.get('error_detail')}"
+        )
+        self._add_backend_fallback_response(session_id=session_id, failure=failure_payload)
 
     def _quit_chat_response_thread(self, *args) -> None:  # noqa: ANN002
         if self.chat_response_thread is not None:
@@ -1441,11 +1440,67 @@ class MainWindow(QMainWindow):
         self._refresh_session_sidebar()
         return True
 
-    def _add_backend_fallback_response(self, session_id: str | None = None) -> None:
+    def _normalize_chat_failure_payload(self, failure) -> dict:
+        if isinstance(failure, dict):
+            return dict(failure)
+        return {
+            "error_code": "unknown_error",
+            "error_detail": str(failure or ""),
+        }
+
+    def _chat_failure_message(self, failure: dict) -> str:
+        error_code = str(failure.get("error_code") or "unknown_error")
+        message_key = {
+            "backend_communication_timeout": "chat.failure.backend_communication_timeout",
+            "backend_unreachable": "chat.failure.backend_unreachable",
+            "backend_http_error": "chat.failure.backend_http_error",
+            "backend_invalid_response": "chat.failure.backend_invalid_response",
+            "backend_network_error": "chat.failure.backend_unreachable",
+            "backend_chat_request_failed": "chat.failure.backend_unreachable",
+        }.get(error_code, "chat.failure.unknown")
+
+        content = self.localization.t(message_key)
+        if not self.settings.developer_mode:
+            return content
+
+        detail_lines = [
+            "",
+            self.localization.t("chat.failure.developer_details"),
+            f"- error_code: {error_code}",
+        ]
+        for key in (
+            "elapsed_seconds",
+            "timeout_seconds",
+            "backend_url",
+            "exception_type",
+            "http_status",
+            "error_detail",
+        ):
+            value = failure.get(key)
+            if value not in (None, ""):
+                detail_lines.append(f"- {key}: {value}")
+        return content + "\n" + "\n".join(detail_lines)
+
+    def _add_backend_fallback_response(
+        self,
+        session_id: str | None = None,
+        failure: dict | None = None,
+    ) -> None:
         target_session_id = session_id or self.current_session_id
+        failure_payload = failure or {
+            "error_code": "backend_chat_request_failed",
+            "error_detail": "Backend chat request failed.",
+        }
         fallback_message = ChatMessage(
             role="assistant",
-            content=self.localization.t("chat.backend_fallback"),
+            content=self._chat_failure_message(failure_payload),
+            metadata={
+                "render_markdown": bool(self.settings.conversation_markdown_enabled),
+                "source": "backend_fallback",
+                "error": True,
+                "panic": True,
+                **failure_payload,
+            },
         )
 
         if target_session_id and self._append_message_to_session(target_session_id, fallback_message):
@@ -1455,8 +1510,7 @@ class MainWindow(QMainWindow):
             self.chat_view.add_chat_message(fallback_message)
             self._save_current_chat_session()
 
-        self.character_state.on_error()
-        QTimer.singleShot(3000, self.character_state.on_assistant_done)
+        self.character_state.on_panic()
         self._update_avatar_occlusion_later()
 
     def _update_content_geometry(self) -> None:

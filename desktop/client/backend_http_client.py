@@ -1,8 +1,41 @@
 import json
+import time
+from dataclasses import dataclass
+from typing import Any
 
 import httpx
 
 from shared.schema.chat import ChatRequest, ChatResponse
+
+
+@dataclass(frozen=True)
+class ChatRequestFailure:
+    error_code: str
+    error_detail: str
+    exception_type: str = ""
+    elapsed_seconds: float = 0.0
+    timeout_seconds: float = 0.0
+    backend_url: str = ""
+    http_status: int | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "error_code": self.error_code,
+            "error_detail": self.error_detail,
+            "exception_type": self.exception_type,
+            "elapsed_seconds": round(self.elapsed_seconds, 3),
+            "timeout_seconds": round(self.timeout_seconds, 3),
+            "backend_url": self.backend_url,
+        }
+        if self.http_status is not None:
+            payload["http_status"] = self.http_status
+        return payload
+
+
+class ChatRequestError(RuntimeError):
+    def __init__(self, failure: ChatRequestFailure) -> None:
+        super().__init__(failure.error_detail)
+        self.failure = failure
 
 
 class BackendHttpClient:
@@ -66,6 +99,7 @@ class BackendHttpClient:
     ) -> ChatResponse | None:
         url = f"{self.base_url}/chat"
         request_timeout = timeout_seconds if timeout_seconds is not None else max(120.0, self.timeout_seconds)
+        started_at = time.monotonic()
 
         try:
             response = httpx.post(
@@ -76,9 +110,72 @@ class BackendHttpClient:
             response.raise_for_status()
             return ChatResponse.model_validate(response.json())
 
-        except httpx.HTTPError as error:
-            print(f"[Backend] Chat request failed: {error}")
-            return None
+        except Exception as error:
+            failure = self._chat_request_failure(
+                error=error,
+                url=url,
+                timeout_seconds=float(request_timeout),
+                elapsed_seconds=time.monotonic() - started_at,
+            )
+            print(f"[Backend] Chat request failed: {failure.error_code}: {failure.error_detail}")
+            raise ChatRequestError(failure) from error
+
+    def _chat_request_failure(
+        self,
+        error: Exception,
+        url: str,
+        timeout_seconds: float,
+        elapsed_seconds: float,
+    ) -> ChatRequestFailure:
+        error_detail = str(error)
+        exception_type = type(error).__name__
+        http_status: int | None = None
+
+        if isinstance(error, httpx.TimeoutException):
+            error_code = "backend_communication_timeout"
+            if not error_detail:
+                error_detail = "Backend communication timed out."
+        elif isinstance(error, httpx.ConnectError):
+            error_code = "backend_unreachable"
+            if not error_detail:
+                error_detail = "Backend is unreachable."
+        elif isinstance(error, httpx.HTTPStatusError):
+            error_code = "backend_http_error"
+            http_status = error.response.status_code
+            detail = self._safe_response_text(error.response)
+            error_detail = f"HTTP {http_status}: {detail}".strip()
+        elif isinstance(error, httpx.HTTPError):
+            error_code = "backend_network_error"
+            if not error_detail:
+                error_detail = "Backend request failed."
+        elif isinstance(error, (ValueError, json.JSONDecodeError)):
+            error_code = "backend_invalid_response"
+            if not error_detail:
+                error_detail = "Backend response was not valid JSON."
+        else:
+            error_code = "unknown_error"
+            if not error_detail:
+                error_detail = "Unknown chat request error."
+
+        return ChatRequestFailure(
+            error_code=error_code,
+            error_detail=error_detail,
+            exception_type=exception_type,
+            elapsed_seconds=elapsed_seconds,
+            timeout_seconds=timeout_seconds,
+            backend_url=url,
+            http_status=http_status,
+        )
+
+    def _safe_response_text(self, response: httpx.Response) -> str:
+        try:
+            text = response.text.strip()
+        except Exception:
+            return ""
+
+        if len(text) > 500:
+            return text[:500] + "..."
+        return text
 
     def ollama_status(self) -> dict | None:
         url = f"{self.base_url}/local-ai/ollama/status"
@@ -261,4 +358,3 @@ class BackendHttpClient:
         except ValueError as error:
             print(f"[Backend] Cloud AI model list response was not JSON: {error}")
             return None
-
