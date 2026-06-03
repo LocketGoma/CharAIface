@@ -529,6 +529,26 @@ def build_qss(theme: ThemeDefinition) -> str:
         border: 1px solid {p.accent};
     }}
 
+    QPushButton#AttachFileButton {{
+        background-color: {p.input_bg};
+        color: {p.text_primary};
+        border: 1px solid {p.border};
+        border-radius: 8px;
+        font-weight: bold;
+    }}
+
+    QPushButton#AttachFileButton:hover {{
+        border: 1px solid {p.accent};
+    }}
+
+    QLabel#AttachmentLabel {{
+        color: {p.text_secondary};
+        background-color: {p.input_bg};
+        border: 1px solid {p.border};
+        border-radius: 8px;
+        padding: 5px 8px;
+    }}
+
     QPushButton#DialogSaveButton {{
         background-color: {p.accent};
         color: {p.accent_text};

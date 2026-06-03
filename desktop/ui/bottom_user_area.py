@@ -18,6 +18,7 @@ from desktop.ui.composer import ComposerTextEdit
 class BottomUserArea(QWidget):
     send_requested = Signal(str)
     cancel_requested = Signal()
+    file_attach_requested = Signal()
     text_changed = Signal(str)
 
     def __init__(self, localization: LocalizationManager) -> None:
@@ -53,6 +54,32 @@ class BottomUserArea(QWidget):
         self.composer.send_requested.connect(self._emit_send)
         self.composer.textChanged.connect(self._emit_text_changed)
 
+        composer_stack = QWidget()
+        composer_stack.setObjectName("ComposerStack")
+        composer_layout = QVBoxLayout(composer_stack)
+        composer_layout.setContentsMargins(0, 0, 0, 0)
+        composer_layout.setSpacing(6)
+
+        attachment_row = QWidget()
+        attachment_row.setObjectName("AttachmentRow")
+        attachment_layout = QHBoxLayout(attachment_row)
+        attachment_layout.setContentsMargins(0, 0, 0, 0)
+        attachment_layout.setSpacing(6)
+
+        self.attach_button = QPushButton("+")
+        self.attach_button.setObjectName("AttachFileButton")
+        self.attach_button.setFixedSize(34, 30)
+        self.attach_button.clicked.connect(self.file_attach_requested.emit)
+
+        self.attachment_label = QLabel()
+        self.attachment_label.setObjectName("AttachmentLabel")
+        self.attachment_label.setVisible(False)
+
+        attachment_layout.addWidget(self.attach_button)
+        attachment_layout.addWidget(self.attachment_label, stretch=1)
+        composer_layout.addWidget(attachment_row)
+        composer_layout.addWidget(self.composer)
+
         self.send_button = QPushButton()
         self.send_button.setObjectName("SendButton")
         self.send_button.setFixedHeight(44)
@@ -64,7 +91,7 @@ class BottomUserArea(QWidget):
             alignment=Qt.AlignmentFlag.AlignBottom,
         )
         root_layout.addWidget(
-            self.composer,
+            composer_stack,
             stretch=1,
             alignment=Qt.AlignmentFlag.AlignBottom,
         )
@@ -192,10 +219,12 @@ class BottomUserArea(QWidget):
         return character_info_height + spacing + user_name_height
 
     def recommended_input_area_height(self) -> int:
-        return self.composer.height() + 40
+        attachment_height = 36 if self.attachment_label.isVisible() else 0
+        return self.composer.height() + attachment_height + 46
 
     def retranslate_ui(self) -> None:
         self._update_send_button_text()
+        self.attach_button.setToolTip(self.localization.t("chat.file.attach.button"))
         self.composer.set_placeholder_text(self.localization.t("chat.placeholder"))
         self.set_state("idle")
 
@@ -233,7 +262,7 @@ class BottomUserArea(QWidget):
 
         text = self.composer.toPlainText().strip()
 
-        if not text:
+        if not text and not self.attachment_label.isVisible():
             return
 
         self.composer.blockSignals(True)
@@ -245,6 +274,11 @@ class BottomUserArea(QWidget):
     def set_response_pending(self, is_pending: bool) -> None:
         self._response_pending = is_pending
         self._update_send_button_text()
+
+    def set_attached_file_name(self, file_name: str | None) -> None:
+        label = str(file_name or "").strip()
+        self.attachment_label.setText(label)
+        self.attachment_label.setVisible(bool(label))
 
     def _update_send_button_text(self) -> None:
         key = "chat.stop_generating" if self._response_pending else "chat.send"

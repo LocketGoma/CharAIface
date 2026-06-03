@@ -33,9 +33,16 @@ from desktop.core.chat_exporter import (
     default_chat_export_filename,
     export_chat_session,
     export_text_content,
+    extract_csv_like_content,
 )
 from desktop.core.character_state import CharacterStateController
 from desktop.core.export_filename_parser import parse_manual_export_filename
+from desktop.core.file_reader import (
+    FileReadError,
+    FileReadResult,
+    build_file_context_message,
+    read_file_for_chat,
+)
 from desktop.core.system_status import get_process_status, get_system_overview
 from desktop.localization.localization_manager import LocalizationManager
 from desktop.settings.app_settings import AppSettings
@@ -112,6 +119,7 @@ class MainWindow(QMainWindow):
             project_root / "resources" / "data" / "chat_sessions"
         )
         self.chat_session = ChatSession()
+        self.pending_file_attachment: FileReadResult | None = None
         self.current_session_id: str | None = None
         self.current_session_title: str = ""
         self.backend_client = BackendHttpClient()
@@ -223,6 +231,9 @@ class MainWindow(QMainWindow):
         self.bottom_area.send_requested.connect(self.on_send_requested)
         self.bottom_area.cancel_requested.connect(
             self._on_chat_response_cancel_requested
+        )
+        self.bottom_area.file_attach_requested.connect(
+            self._on_file_attach_requested
         )
         self.bottom_area.text_changed.connect(self.character_state.on_user_text_changed)
         self.character_state.state_changed.connect(self.bottom_area.set_state)
@@ -647,6 +658,41 @@ class MainWindow(QMainWindow):
             assistant_name=assistant_name,
         )
 
+    def _on_file_attach_requested(self) -> None:
+        selected_path, _selected_filter = QFileDialog.getOpenFileName(
+            self,
+            self.localization.t("chat.file.attach.title"),
+            str(Path.home() / "Documents"),
+            "Text and code files (*.txt *.md *.csv *.py *.h *.hpp *.c *.cpp *.cc *.js *.ts *.tsx *.jsx *.json *.yaml *.yml *.toml *.ini *.cfg *.conf *.sh *.sql *.html *.css *.xml);;All files (*)",
+        )
+        if not selected_path:
+            return
+
+        try:
+            attachment = read_file_for_chat(selected_path)
+        except FileReadError as error:
+            QMessageBox.warning(
+                self,
+                self.localization.t("chat.file.attach.title"),
+                self.localization.t("chat.file.attach.failed", error=str(error)),
+            )
+            return
+
+        self.pending_file_attachment = attachment
+        self.bottom_area.set_attached_file_name(
+            self.localization.t(
+                "chat.file.attached",
+                name=attachment.name,
+            )
+        )
+        self._update_content_geometry()
+
+    def _clear_pending_file_attachment(self) -> None:
+        self.pending_file_attachment = None
+        if hasattr(self, "bottom_area"):
+            self.bottom_area.set_attached_file_name(None)
+            self._update_content_geometry()
+
     def _on_export_chat_requested(self, session_id: str | None = None) -> None:
         payload = None
         if session_id:
@@ -892,7 +938,12 @@ class MainWindow(QMainWindow):
         self._start_chat_response_worker()
 
     def on_send_requested(self, text: str) -> None:
-        command_text = text.strip()
+        if not text.strip() and self.pending_file_attachment is not None:
+            text = self.localization.t("chat.file.default_prompt")
+
+        visible_text = self._message_text_with_file_attachment_prefix(text)
+
+        command_text = visible_text.strip()
         normalized_text = command_text.lower()
 
         if normalized_text.startswith("/"):
@@ -902,7 +953,7 @@ class MainWindow(QMainWindow):
         if self._is_manual_message_export_request(command_text):
             self.bottom_area.raise_()
             self.character_state.on_message_sent()
-            self._add_user_message(text)
+            self._add_user_message(visible_text)
             self._update_avatar_occlusion_later()
             self._handle_manual_message_export_request(command_text)
             return
@@ -913,10 +964,21 @@ class MainWindow(QMainWindow):
 
         self.bottom_area.raise_()
         self.character_state.on_message_sent()
-        self._add_user_message(text)
+        self._add_user_message(visible_text)
         self._update_avatar_occlusion_later()
 
         self._start_chat_response_worker()
+
+    def _message_text_with_file_attachment_prefix(self, text: str) -> str:
+        attachment = self.pending_file_attachment
+        if attachment is None:
+            return text
+
+        prefix = self.localization.t("chat.file.message_prefix", name=attachment.name)
+        stripped_text = text.strip()
+        if not stripped_text:
+            return prefix
+        return f"{prefix}\n{stripped_text}"
 
     def _handle_manual_message_export_request(self, text: str) -> bool:
         if not self._is_manual_message_export_request(text):
@@ -939,11 +1001,12 @@ class MainWindow(QMainWindow):
             suffix = export_filename.suffix
             export_title = export_filename.stem
         export_path = self._message_export_path(export_title, suffix, export_filename)
+        export_content = self._manual_export_content(text, target_message.content, suffix)
 
         try:
             export_text_content(
                 export_path,
-                target_message.content,
+                export_content,
                 title=export_title,
             )
         except ChatExportError as error:
@@ -979,9 +1042,38 @@ class MainWindow(QMainWindow):
         self._finish_local_command()
         return True
 
+    def _manual_export_content(self, request_text: str, content: str, suffix: str) -> str:
+        if suffix != ".csv":
+            return content
+
+        normalized = request_text.strip().lower()
+        focused_csv_requested = any(
+            phrase in normalized
+            for phrase in (
+                "csv 데이터",
+                "csv data",
+                "데이터만",
+                "표만",
+                "테이블만",
+                "전체 답변",
+                "whole answer",
+                "full answer",
+                "data only",
+                "table only",
+            )
+        )
+        if not focused_csv_requested:
+            return content
+
+        csv_content = extract_csv_like_content(content)
+        return csv_content or content
+
     def _is_manual_message_export_request(self, text: str) -> bool:
         normalized = text.strip().lower()
         if not normalized:
+            return False
+
+        if self._should_let_model_handle_export_request(normalized):
             return False
 
         strong_export_words = (
@@ -1034,7 +1126,76 @@ class MainWindow(QMainWindow):
         has_strong_export = any(word in normalized for word in strong_export_words)
         has_weak_action = any(word in normalized for word in weak_action_words)
 
-        return (has_strong_export and has_target) or (has_format and has_weak_action)
+        has_export_shape = (has_strong_export and has_target) or (has_format and has_weak_action)
+        if not has_export_shape:
+            return False
+
+        if self._has_existing_answer_export_target(normalized):
+            return True
+
+        if self._manual_export_filename(text, self._manual_export_suffix(text)) is not None:
+            return True
+
+        return False
+
+    def _should_let_model_handle_export_request(self, normalized: str) -> bool:
+        model_task_phrases = (
+            "통계를 만들",
+            "통계 만들",
+            "분석하고",
+            "분석해서",
+            "분석해",
+            "계산하고",
+            "계산해서",
+            "계산해",
+            "요약",
+            "정리",
+            "추출",
+            "만들고",
+            "작성",
+            "생성",
+            "이 데이터",
+            "이 파일",
+            "첨부",
+            "attached file",
+            "this file",
+            "this data",
+            "analyze",
+            "calculate",
+            "summarize",
+            "create",
+            "generate",
+            "make",
+        )
+        if any(phrase in normalized for phrase in model_task_phrases):
+            return not self._has_existing_answer_export_target(normalized)
+
+        return False
+
+    def _has_existing_answer_export_target(self, normalized: str) -> bool:
+        existing_answer_phrases = (
+            "최근 답변",
+            "방금 답변",
+            "마지막 답변",
+            "이전 답변",
+            "답변의",
+            "답변에서",
+            "전체 답변",
+            "전체답변",
+            "csv 데이터",
+            "데이터만",
+            "표만",
+            "테이블만",
+            "latest answer",
+            "last answer",
+            "previous answer",
+            "answer only",
+            "whole answer",
+            "full answer",
+            "data only",
+            "table only",
+        )
+        return any(phrase in normalized for phrase in existing_answer_phrases)
 
     def _manual_export_suffix(self, text: str) -> str:
         normalized = text.strip().lower()
@@ -1716,7 +1877,7 @@ class MainWindow(QMainWindow):
             return
 
         request = ChatRequest(
-            messages=self.chat_session.messages,
+            messages=self._chat_request_messages_with_pending_file(),
             character_id=self.settings.selected_character_id,
             user_name=self.settings.user_name,
             developer_mode=self.settings.developer_mode,
@@ -1752,7 +1913,103 @@ class MainWindow(QMainWindow):
         self._start_chat_response_elapsed_status(request_session_id, request_id)
         self._show_pending_assistant_response(request_session_id)
         self.bottom_area.set_response_pending(True)
+        self._clear_pending_file_attachment()
         chat_response_thread.start()
+
+    def _chat_request_messages_with_pending_file(self) -> list[ChatMessage]:
+        messages = self.chat_session.messages
+        attachment = self.pending_file_attachment
+        if attachment is None:
+            return messages
+
+        if messages and messages[-1].role == "user":
+            latest_user_message = messages[-1]
+            request_metadata = {
+                **(latest_user_message.metadata or {}),
+                "transient_file_context": True,
+                "transient_original_user_content": latest_user_message.content,
+                "file_name": attachment.name,
+                "file_type": attachment.suffix,
+            }
+            if self._attachment_plain_text_output_requested(latest_user_message.content):
+                request_metadata["render_markdown"] = False
+
+            request_message = latest_user_message.model_copy(
+                update={
+                    "content": self._user_message_content_with_file_context(
+                        latest_user_message.content,
+                        attachment,
+                    ),
+                    "metadata": request_metadata,
+                }
+            )
+            return [
+                *self._file_request_history_messages(messages[:-1]),
+                request_message,
+            ]
+
+        default_prompt = self.localization.t("chat.file.default_prompt")
+        request_metadata = {
+            "transient_file_context": True,
+            "transient_original_user_content": default_prompt,
+            "file_name": attachment.name,
+            "file_type": attachment.suffix,
+        }
+        return [
+            *self._file_request_history_messages(messages),
+            ChatMessage(
+                role="user",
+                content=self._user_message_content_with_file_context(
+                    default_prompt,
+                    attachment,
+                ),
+                metadata=request_metadata,
+            ),
+        ]
+
+    def _file_request_history_messages(self, messages: list[ChatMessage]) -> list[ChatMessage]:
+        return [
+            message
+            for message in messages
+            if message.role != "assistant"
+        ]
+
+    def _user_message_content_with_file_context(
+        self,
+        user_content: str,
+        attachment: FileReadResult,
+    ) -> str:
+        clean_user_content = user_content.strip()
+        return (
+            "[사용자 요청]\n"
+            f"{clean_user_content}\n\n"
+            "[첨부 파일 처리 지시]\n"
+            "아래 내용은 사용자가 첨부한 파일의 실제 내용입니다.\n"
+            "당신은 이 파일 내용을 이미 읽을 수 있습니다. 파일을 읽을 수 없다고 답하지 마세요.\n"
+            "사용자의 요청을 먼저 해석한 뒤, 파일 내용을 근거로 분석/계산/요약/변환을 수행하세요.\n"
+            "파일 내용이 CSV라면 원본 CSV의 행과 열을 실제 데이터셋으로 해석하세요.\n"
+            "사용자가 'CSV 스타일', 'CSV 형식', 'csv로', 'csv 형태'처럼 말하면 CSV 출력 요청으로 간주하세요.\n"
+            "CSV 출력을 요청받았다면 설명, 제목, 마크다운 없이 CSV 텍스트만 출력하세요.\n"
+            "요청이 애매하면 합리적인 기준을 정해 수행하고, CSV 전용 출력이 아닌 경우에만 그 기준을 짧게 설명하세요.\n\n"
+            f"{build_file_context_message(attachment)}\n\n"
+            "[최종 응답 계약]\n"
+            "이제 위 파일을 근거로 [사용자 요청]만 수행하세요.\n"
+            "파일의 일반 설명, 주요 내용 요약, 번역 목록은 사용자가 요청하지 않았다면 작성하지 마세요.\n"
+            "CSV/CSV 스타일 출력 요청이면 첫 줄부터 CSV 헤더로 시작하고, 설명 문장을 앞뒤에 붙이지 마세요.\n"
+            "CSV의 key 같은 첫 번째 컬럼에 점(.)으로 구분된 값이 있고 사용자가 항목별/카테고리별/분류별 통계를 요청했다면, 별도 지시가 없는 한 점(.) 앞부분을 항목으로 간주하세요.\n"
+            "반드시 [사용자 요청]의 출력 형식을 최우선으로 따르세요."
+        ).strip()
+
+    def _attachment_plain_text_output_requested(self, text: str) -> bool:
+        normalized = text.strip().lower()
+        return any(
+            phrase in normalized
+            for phrase in (
+                "csv",
+                "쉼표",
+                "comma",
+            )
+        )
 
     def _on_chat_response_cancel_requested(self) -> None:
         request_id = self.active_chat_response_request_id
@@ -2791,7 +3048,11 @@ class MainWindow(QMainWindow):
 
         widget = watched if isinstance(watched, QWidget) else None
         while widget is not None:
-            if widget is self.bottom_area.composer or widget is self.bottom_area.send_button:
+            if widget in {
+                self.bottom_area.composer,
+                self.bottom_area.send_button,
+                self.bottom_area.attach_button,
+            }:
                 return True
             if widget is self.bottom_area:
                 return False

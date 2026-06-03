@@ -1008,7 +1008,10 @@ class ChatService:
         request: ChatRequest,
         settings: dict[str, Any],
     ) -> dict[str, Any]:
+        metadata = getattr(latest_user_message, "metadata", {}) or {}
         text = latest_user_message.content or ""
+        if metadata.get("transient_file_context"):
+            text = str(metadata.get("transient_original_user_content") or "").strip() or text
         manual_query = self.web_search_context.manual_query(text)
         manual_requested = manual_query is not None
 

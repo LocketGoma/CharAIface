@@ -1,6 +1,7 @@
 from datetime import datetime
 import csv
 from html import escape
+from io import StringIO
 from pathlib import Path
 import re
 
@@ -98,6 +99,36 @@ def export_text_content(
     _write_text_pdf(export_path, content, title=title)
 
 
+def extract_csv_like_content(content: str) -> str | None:
+    csv_block = _extract_fenced_code_block(content, language="csv")
+    if csv_block:
+        return csv_block
+
+    rows = _extract_markdown_table_rows(content)
+    if rows:
+        lines: list[str] = []
+        for row in rows:
+            output = StringIO()
+            csv.writer(output).writerow(row)
+            lines.append(output.getvalue().rstrip("\r\n"))
+        return "\n".join(lines)
+
+    return None
+
+
+def _extract_fenced_code_block(content: str, *, language: str) -> str | None:
+    pattern = re.compile(
+        rf"```[ \t]*{re.escape(language)}[^\n`]*\n(.*?)```",
+        re.IGNORECASE | re.DOTALL,
+    )
+    match = pattern.search(content)
+    if not match:
+        return None
+
+    block = match.group(1).strip()
+    return block or None
+
+
 def _write_session_csv(
     path: Path,
     messages: list[ChatMessage],
@@ -120,11 +151,36 @@ def _write_session_csv(
 def _write_text_csv(path: Path, content: str) -> None:
     rows = _extract_markdown_table_rows(content)
     if not rows:
+        rows = _parse_csv_content_rows(content)
+    if not rows:
         rows = [["content"], [content]]
 
     with path.open("w", encoding="utf-8-sig", newline="") as file:
         writer = csv.writer(file)
         writer.writerows(rows)
+
+
+def _parse_csv_content_rows(content: str) -> list[list[str]]:
+    try:
+        rows = list(csv.reader(content.splitlines()))
+    except csv.Error:
+        return []
+
+    rows = [row for row in rows if any(str(cell).strip() for cell in row)]
+    if len(rows) < 2:
+        return []
+    column_count = len(rows[0])
+    if column_count < 2:
+        return []
+    return [_normalize_loose_csv_row(row, column_count) for row in rows]
+
+
+def _normalize_loose_csv_row(row: list[str], column_count: int) -> list[str]:
+    row = [str(cell).strip() for cell in row]
+    if len(row) > column_count:
+        leading_count = len(row) - column_count + 1
+        return [", ".join(row[:leading_count]), *row[leading_count:]]
+    return row + [""] * (column_count - len(row))
 
 
 def _extract_markdown_table_rows(content: str) -> list[list[str]]:
