@@ -237,3 +237,4 @@ resources/data/chat_sessions/session_index.json
 *.icns
 *.ico
 **/__init__.py
+resources/data/exports
