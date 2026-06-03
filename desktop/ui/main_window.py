@@ -2163,10 +2163,12 @@ class MainWindow(QMainWindow):
         )
 
         bottom_overlay_top = max(0, area_height - overlay_height)
+        scroll_bar_width = self.chat_view.verticalScrollBar().sizeHint().width()
+        bottom_overlay_width = max(1, area_width - scroll_bar_width)
         self.bottom_area.setGeometry(
             0,
             bottom_overlay_top,
-            area_width,
+            bottom_overlay_width,
             overlay_height,
         )
         self.bottom_area.sync_composer_height_to_left_name_area(

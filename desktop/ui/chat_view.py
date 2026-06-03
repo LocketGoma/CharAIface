@@ -2,7 +2,7 @@ from html import escape
 from pathlib import Path
 import re
 
-from PySide6.QtCore import QPoint, Qt, QTimer, QUrl, Signal
+from PySide6.QtCore import QPoint, QSize, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices, QFont, QGuiApplication
 
 try:
@@ -43,6 +43,29 @@ class SelectableMessageLabel(QLabel):
         self.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
 
 
+class ChatContainer(QWidget):
+    def hasHeightForWidth(self) -> bool:
+        return False
+
+    def heightForWidth(self, width: int) -> int:
+        return self.sizeHint().height()
+
+    def sizeHint(self) -> QSize:
+        layout = self.layout()
+        if layout is None:
+            return super().sizeHint()
+
+        hint = layout.sizeHint()
+        return QSize(max(self.width(), hint.width()), hint.height())
+
+    def minimumSizeHint(self) -> QSize:
+        layout = self.layout()
+        if layout is None:
+            return super().minimumSizeHint()
+
+        return layout.minimumSize()
+
+
 class ChatView(QScrollArea):
     regenerate_requested = Signal(object)
     cancel_response_requested = Signal()
@@ -68,7 +91,7 @@ class ChatView(QScrollArea):
 
         self.setWidgetResizable(True)
 
-        self.container = QWidget()
+        self.container = ChatContainer()
         self.container.setObjectName("ChatContainer")
 
         self.layout = QVBoxLayout(self.container)
