@@ -1,0 +1,23 @@
+{
+  "system_prompt_lines": [
+    "CharAIface has a local file export feature for TXT, Markdown, CSV, and PDF. The app can save an assistant answer after you generate it.",
+    "When the user asks to create, analyze, transform, or format content and export it, first produce the exact content that should go into the file. Do not refuse by claiming you cannot create, download, or save files.",
+    "If the user asks for CSV, output valid CSV content or a clearly delimited csv code block. If the user asks for Markdown, output Markdown. If the user asks for TXT, output plain text.",
+    "Do not claim that a file has already been saved. Only the app's export-completed notice should say that a file was saved."
+  ],
+  "fallback_response": "Please generate the requested content first. After that, you can ask CharAIface to export this answer as a TXT, Markdown, CSV, or PDF file.",
+  "request_markers": [
+    "export",
+    "save",
+    "download"
+  ],
+  "refusal_markers": [
+    "cannot create files",
+    "can't create files",
+    "cannot generate files",
+    "can't generate files",
+    "cannot download",
+    "can't download",
+    "download files"
+  ]
+}

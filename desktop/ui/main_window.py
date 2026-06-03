@@ -41,7 +41,13 @@ from desktop.core.file_reader import (
     FileReadError,
     FileReadResult,
     build_file_context_message,
+    build_inline_csv_context_message,
     read_file_for_chat,
+)
+from desktop.core.manual_export_parser import (
+    is_manual_message_export_request,
+    manual_export_suffix,
+    should_extract_csv_like_content,
 )
 from desktop.core.system_status import get_process_status, get_system_overview
 from desktop.localization.localization_manager import LocalizationManager
@@ -822,10 +828,9 @@ class MainWindow(QMainWindow):
         self.initial_notice_added = True
 
     def _add_user_message(self, content: str) -> None:
-        render_markdown = self._should_use_markdown_for_request(content)
         message = self.chat_session.add_user_message(
             content,
-            metadata={"render_markdown": render_markdown},
+            metadata={"render_markdown": False},
         )
         self.chat_view.add_chat_message(message)
         self._save_current_chat_session()
@@ -844,16 +849,6 @@ class MainWindow(QMainWindow):
         message = self.chat_session.add_assistant_message(content, metadata=message_metadata)
         self.chat_view.add_chat_message(message)
         self._save_current_chat_session()
-
-    def _should_use_markdown_for_request(self, text: str) -> bool:
-        if not self.settings.conversation_markdown_enabled:
-            return False
-
-        stripped = (text or "").strip()
-        if stripped.startswith("/"):
-            return False
-
-        return True
 
     def _finish_local_command(self) -> None:
         # Local slash commands do not enter the normal ChatResponseWorker finish path.
@@ -950,7 +945,10 @@ class MainWindow(QMainWindow):
             if self._handle_command(command_text):
                 return
 
-        if self._is_manual_message_export_request(command_text):
+        if (
+            self.pending_file_attachment is None
+            and self._is_manual_message_export_request(command_text)
+        ):
             self.bottom_area.raise_()
             self.character_state.on_message_sent()
             self._add_user_message(visible_text)
@@ -1046,177 +1044,36 @@ class MainWindow(QMainWindow):
         if suffix != ".csv":
             return content
 
-        normalized = request_text.strip().lower()
-        focused_csv_requested = any(
-            phrase in normalized
-            for phrase in (
-                "csv 데이터",
-                "csv data",
-                "데이터만",
-                "표만",
-                "테이블만",
-                "전체 답변",
-                "whole answer",
-                "full answer",
-                "data only",
-                "table only",
-            )
-        )
-        if not focused_csv_requested:
+        if not should_extract_csv_like_content(
+            request_text,
+            language=self._manual_export_language(),
+        ):
             return content
 
         csv_content = extract_csv_like_content(content)
         return csv_content or content
 
     def _is_manual_message_export_request(self, text: str) -> bool:
-        normalized = text.strip().lower()
-        if not normalized:
-            return False
-
-        if self._should_let_model_handle_export_request(normalized):
-            return False
-
-        strong_export_words = (
-            "내보내",
-            "저장해",
-            "저장 해",
-            "저장",
-            "파일로",
-            "파일로 만들어",
-            "export",
-            "save",
-            "뽑아",
+        language = self._manual_export_language()
+        suffix = self._manual_export_suffix(text)
+        return is_manual_message_export_request(
+            text,
+            language=language,
+            has_filename=self._manual_export_filename(text, suffix) is not None,
         )
-        weak_action_words = (
-            "해줘",
-            "해 달",
-            "해달",
-            "만들어",
-        )
-        target_words = (
-            "답변",
-            "응답",
-            "텍스트",
-            "파일",
-            "마크다운",
-            "markdown",
-            ".md",
-            "pdf",
-            ".pdf",
-            "txt",
-            ".txt",
-            "csv",
-            ".csv",
-        )
-        format_words = (
-            "마크다운",
-            "markdown",
-            ".md",
-            "pdf",
-            ".pdf",
-            "txt",
-            ".txt",
-            "csv",
-            ".csv",
-            "텍스트파일",
-            "텍스트 파일",
-        )
-        has_target = any(word in normalized for word in target_words)
-        has_format = any(word in normalized for word in format_words)
-        has_strong_export = any(word in normalized for word in strong_export_words)
-        has_weak_action = any(word in normalized for word in weak_action_words)
-
-        has_export_shape = (has_strong_export and has_target) or (has_format and has_weak_action)
-        if not has_export_shape:
-            return False
-
-        if self._has_existing_answer_export_target(normalized):
-            return True
-
-        if self._manual_export_filename(text, self._manual_export_suffix(text)) is not None:
-            return True
-
-        return False
-
-    def _should_let_model_handle_export_request(self, normalized: str) -> bool:
-        model_task_phrases = (
-            "통계를 만들",
-            "통계 만들",
-            "분석하고",
-            "분석해서",
-            "분석해",
-            "계산하고",
-            "계산해서",
-            "계산해",
-            "요약",
-            "정리",
-            "추출",
-            "만들고",
-            "작성",
-            "생성",
-            "이 데이터",
-            "이 파일",
-            "첨부",
-            "attached file",
-            "this file",
-            "this data",
-            "analyze",
-            "calculate",
-            "summarize",
-            "create",
-            "generate",
-            "make",
-        )
-        if any(phrase in normalized for phrase in model_task_phrases):
-            return not self._has_existing_answer_export_target(normalized)
-
-        return False
-
-    def _has_existing_answer_export_target(self, normalized: str) -> bool:
-        existing_answer_phrases = (
-            "최근 답변",
-            "방금 답변",
-            "마지막 답변",
-            "이전 답변",
-            "답변의",
-            "답변에서",
-            "전체 답변",
-            "전체답변",
-            "csv 데이터",
-            "데이터만",
-            "표만",
-            "테이블만",
-            "latest answer",
-            "last answer",
-            "previous answer",
-            "answer only",
-            "whole answer",
-            "full answer",
-            "data only",
-            "table only",
-        )
-        return any(phrase in normalized for phrase in existing_answer_phrases)
 
     def _manual_export_suffix(self, text: str) -> str:
-        normalized = text.strip().lower()
-        if "pdf" in normalized or ".pdf" in normalized:
-            return ".pdf"
-        if "csv" in normalized or ".csv" in normalized:
-            return ".csv"
-        if (
-            "마크다운" in normalized
-            or "markdown" in normalized
-            or ".md" in normalized
-        ):
-            return ".md"
-        return ".txt"
+        return manual_export_suffix(text, language=self._manual_export_language())
 
     def _manual_export_filename(self, text: str, fallback_suffix: str) -> Path | None:
         return parse_manual_export_filename(
             text,
-            language=getattr(self.settings, "language", "en"),
+            language=self._manual_export_language(),
             fallback_suffix=fallback_suffix,
         )
+
+    def _manual_export_language(self) -> str:
+        return getattr(self.settings, "language", "en")
 
     def _latest_exportable_assistant_message(self) -> ChatMessage | None:
         for message in reversed(self.chat_session.messages):
@@ -1877,7 +1734,7 @@ class MainWindow(QMainWindow):
             return
 
         request = ChatRequest(
-            messages=self._chat_request_messages_with_pending_file(),
+            messages=self._chat_request_messages_for_model(),
             character_id=self.settings.selected_character_id,
             user_name=self.settings.user_name,
             developer_mode=self.settings.developer_mode,
@@ -1916,6 +1773,11 @@ class MainWindow(QMainWindow):
         self._clear_pending_file_attachment()
         chat_response_thread.start()
 
+    def _chat_request_messages_for_model(self) -> list[ChatMessage]:
+        if self.pending_file_attachment is not None:
+            return self._chat_request_messages_with_pending_file()
+        return self._chat_request_messages_with_inline_data_context()
+
     def _chat_request_messages_with_pending_file(self) -> list[ChatMessage]:
         messages = self.chat_session.messages
         attachment = self.pending_file_attachment
@@ -1924,55 +1786,68 @@ class MainWindow(QMainWindow):
 
         if messages and messages[-1].role == "user":
             latest_user_message = messages[-1]
-            request_metadata = {
-                **(latest_user_message.metadata or {}),
-                "transient_file_context": True,
-                "transient_original_user_content": latest_user_message.content,
-                "file_name": attachment.name,
-                "file_type": attachment.suffix,
-            }
-            if self._attachment_plain_text_output_requested(latest_user_message.content):
-                request_metadata["render_markdown"] = False
-
             request_message = latest_user_message.model_copy(
                 update={
                     "content": self._user_message_content_with_file_context(
                         latest_user_message.content,
                         attachment,
                     ),
-                    "metadata": request_metadata,
+                    "metadata": {
+                        **(latest_user_message.metadata or {}),
+                        "transient_file_context": True,
+                        "transient_original_user_content": latest_user_message.content,
+                        "file_name": attachment.name,
+                        "file_path": str(attachment.path),
+                        "file_type": attachment.suffix,
+                    },
                 }
             )
-            return [
-                *self._file_request_history_messages(messages[:-1]),
-                request_message,
-            ]
+            return [*messages[:-1], request_message]
 
         default_prompt = self.localization.t("chat.file.default_prompt")
-        request_metadata = {
-            "transient_file_context": True,
-            "transient_original_user_content": default_prompt,
-            "file_name": attachment.name,
-            "file_type": attachment.suffix,
-        }
         return [
-            *self._file_request_history_messages(messages),
+            *messages,
             ChatMessage(
                 role="user",
                 content=self._user_message_content_with_file_context(
                     default_prompt,
                     attachment,
                 ),
-                metadata=request_metadata,
+                metadata={
+                    "transient_file_context": True,
+                    "transient_original_user_content": default_prompt,
+                    "file_name": attachment.name,
+                    "file_path": str(attachment.path),
+                    "file_type": attachment.suffix,
+                },
             ),
         ]
 
-    def _file_request_history_messages(self, messages: list[ChatMessage]) -> list[ChatMessage]:
-        return [
-            message
-            for message in messages
-            if message.role != "assistant"
-        ]
+    def _chat_request_messages_with_inline_data_context(self) -> list[ChatMessage]:
+        messages = self.chat_session.messages
+        if not messages or messages[-1].role != "user":
+            return messages
+
+        latest_user_message = messages[-1]
+        inline_context = build_inline_csv_context_message(latest_user_message.content)
+        if not inline_context:
+            return messages
+
+        request_message = latest_user_message.model_copy(
+            update={
+                "content": self._user_message_content_with_inline_data_context(
+                    latest_user_message.content,
+                    inline_context,
+                ),
+                "metadata": {
+                    **(latest_user_message.metadata or {}),
+                    "transient_inline_data_context": True,
+                    "transient_original_user_content": latest_user_message.content,
+                    "inline_data_type": "csv",
+                },
+            }
+        )
+        return [*messages[:-1], request_message]
 
     def _user_message_content_with_file_context(
         self,
@@ -1981,35 +1856,37 @@ class MainWindow(QMainWindow):
     ) -> str:
         clean_user_content = user_content.strip()
         return (
-            "[사용자 요청]\n"
+            "[User Request]\n"
             f"{clean_user_content}\n\n"
-            "[첨부 파일 처리 지시]\n"
-            "아래 내용은 사용자가 첨부한 파일의 실제 내용입니다.\n"
-            "당신은 이 파일 내용을 이미 읽을 수 있습니다. 파일을 읽을 수 없다고 답하지 마세요.\n"
-            "사용자의 요청을 먼저 해석한 뒤, 파일 내용을 근거로 분석/계산/요약/변환을 수행하세요.\n"
-            "파일 내용이 CSV라면 원본 CSV의 행과 열을 실제 데이터셋으로 해석하세요.\n"
-            "사용자가 'CSV 스타일', 'CSV 형식', 'csv로', 'csv 형태'처럼 말하면 CSV 출력 요청으로 간주하세요.\n"
-            "CSV 출력을 요청받았다면 설명, 제목, 마크다운 없이 CSV 텍스트만 출력하세요.\n"
-            "요청이 애매하면 합리적인 기준을 정해 수행하고, CSV 전용 출력이 아닌 경우에만 그 기준을 짧게 설명하세요.\n\n"
-            f"{build_file_context_message(attachment)}\n\n"
-            "[최종 응답 계약]\n"
-            "이제 위 파일을 근거로 [사용자 요청]만 수행하세요.\n"
-            "파일의 일반 설명, 주요 내용 요약, 번역 목록은 사용자가 요청하지 않았다면 작성하지 마세요.\n"
-            "CSV/CSV 스타일 출력 요청이면 첫 줄부터 CSV 헤더로 시작하고, 설명 문장을 앞뒤에 붙이지 마세요.\n"
-            "CSV의 key 같은 첫 번째 컬럼에 점(.)으로 구분된 값이 있고 사용자가 항목별/카테고리별/분류별 통계를 요청했다면, 별도 지시가 없는 한 점(.) 앞부분을 항목으로 간주하세요.\n"
-            "반드시 [사용자 요청]의 출력 형식을 최우선으로 따르세요."
+            "[Attached File Handling Hint]\n"
+            "The Machine-readable context below is deterministic helper data parsed from the original file by the app.\n"
+            "For analysis, calculation, or aggregation tasks, prefer that helper data over free-form guessing.\n"
+            "If ALL_CELL_VALUE_FREQUENCY_CSV is present and the user asks for value counts, row appearances, or row appearance probabilities, use that block directly.\n"
+            "Treat every numeric CSV cell as one independent occurrence unless the user explicitly asks for combination analysis.\n"
+            "If CELL_VALUE_FREQUENCY_CSV is present and the user asks for each number's appearance count, use that block directly.\n"
+            "For CSV output requests, return only CSV text without explanations, Markdown, or comments.\n\n"
+            "[Attached File]\n"
+            f"{build_file_context_message(attachment)}"
         ).strip()
 
-    def _attachment_plain_text_output_requested(self, text: str) -> bool:
-        normalized = text.strip().lower()
-        return any(
-            phrase in normalized
-            for phrase in (
-                "csv",
-                "쉼표",
-                "comma",
-            )
-        )
+    def _user_message_content_with_inline_data_context(
+        self,
+        user_content: str,
+        inline_context: str,
+    ) -> str:
+        clean_user_content = user_content.strip()
+        return (
+            "[User Request]\n"
+            f"{clean_user_content}\n\n"
+            "[Inline Data Handling Hint]\n"
+            "The Machine-readable context below is deterministic helper data parsed from CSV-like text in the user request by the app.\n"
+            "For analysis, calculation, or aggregation tasks, prefer that helper data over free-form guessing.\n"
+            "If ALL_CELL_VALUE_FREQUENCY_CSV is present and the user asks for value counts, row appearances, or row appearance probabilities, use that block directly.\n"
+            "Treat every numeric CSV cell as one independent occurrence unless the user explicitly asks for combination analysis.\n"
+            "For CSV output requests, return only CSV text without explanations, Markdown, or comments.\n\n"
+            "[Machine-readable Inline Data]\n"
+            f"{inline_context}"
+        ).strip()
 
     def _on_chat_response_cancel_requested(self) -> None:
         request_id = self.active_chat_response_request_id

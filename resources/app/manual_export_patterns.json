@@ -1,0 +1,201 @@
+{
+  "supported_suffixes": [".txt", ".md", ".csv", ".pdf"],
+  "common": {
+    "strong_export_markers": [
+      "export",
+      "save",
+      "download",
+      "write to file",
+      "make a file"
+    ],
+    "weak_action_markers": [
+      "please",
+      "make",
+      "create"
+    ],
+    "target_markers": [
+      "latest answer",
+      "last answer",
+      "previous answer",
+      "answer",
+      "response",
+      "text",
+      "file",
+      "markdown",
+      ".md",
+      "pdf",
+      ".pdf",
+      "txt",
+      ".txt",
+      "csv",
+      ".csv"
+    ],
+    "format_markers": [
+      "markdown",
+      ".md",
+      "pdf",
+      ".pdf",
+      "txt",
+      ".txt",
+      "csv",
+      ".csv",
+      "text file"
+    ],
+    "existing_answer_markers": [
+      "latest answer",
+      "last answer",
+      "previous answer",
+      "latest result",
+      "last result",
+      "previous result",
+      "that result",
+      "that csv result",
+      "that csv",
+      "whole answer",
+      "full answer",
+      "csv data",
+      "whole table",
+      "full table"
+    ],
+    "model_task_markers": [
+      "analyze",
+      "calculate",
+      "summarize",
+      "extract",
+      "write",
+      "create",
+      "generate",
+      "make",
+      "this file",
+      "this data",
+      "attached file"
+    ],
+    "selection_markers": [
+      "part",
+      "only",
+      "result only",
+      "data only",
+      "table only",
+      "by category",
+      "per category",
+      "count",
+      "without explanation"
+    ],
+    "csv_extract_markers": [
+      "csv data",
+      "whole table",
+      "full table",
+      "whole answer",
+      "full answer"
+    ],
+    "suffix_markers": {
+      ".pdf": ["pdf", ".pdf"],
+      ".csv": ["csv", ".csv"],
+      ".md": ["markdown", ".md"],
+      ".txt": ["txt", ".txt", "text"]
+    }
+  },
+  "localized": {
+    "ko": {
+      "strong_export_markers": [
+        "내보내",
+        "저장해",
+        "저장 해",
+        "저장",
+        "파일로",
+        "파일 로",
+        "파일로 만들어",
+        "다운로드",
+        "뽑아"
+      ],
+      "weak_action_markers": [
+        "해줘",
+        "해 달",
+        "해달",
+        "만들어"
+      ],
+      "target_markers": [
+        "최근 답변",
+        "방금 답변",
+        "마지막 답변",
+        "이전 답변",
+        "답변",
+        "응답",
+        "텍스트",
+        "파일",
+        "마크다운"
+      ],
+      "format_markers": [
+        "마크다운",
+        "텍스트파일",
+        "텍스트 파일"
+      ],
+      "existing_answer_markers": [
+        "최근 답변",
+        "방금 답변",
+        "마지막 답변",
+        "이전 답변",
+        "최근 결과",
+        "방금 결과",
+        "마지막 결과",
+        "이전 결과",
+        "해당 결과",
+        "해당 csv 결과",
+        "해당 csv",
+        "전체 답변",
+        "전체답변",
+        "csv 데이터",
+        "표 전체",
+        "테이블 전체"
+      ],
+      "model_task_markers": [
+        "통계를 만들",
+        "통계 만들",
+        "통계내",
+        "통계 내",
+        "분석하고",
+        "분석해서",
+        "분석해",
+        "계산하고",
+        "계산해서",
+        "계산해",
+        "요약",
+        "정리",
+        "추출",
+        "작성",
+        "생성",
+        "만들고",
+        "만들어",
+        "이 데이터",
+        "이 파일",
+        "첨부"
+      ],
+      "selection_markers": [
+        "부분",
+        "일부",
+        "만",
+        "결과만",
+        "데이터만",
+        "표만",
+        "테이블만",
+        "항목별",
+        "카테고리별",
+        "분류별",
+        "개수",
+        "내용은 빼고",
+        "설명은 빼고"
+      ],
+      "csv_extract_markers": [
+        "csv 데이터",
+        "표 전체",
+        "테이블 전체",
+        "전체 답변",
+        "전체답변"
+      ],
+      "suffix_markers": {
+        ".md": ["마크다운"],
+        ".txt": ["텍스트"]
+      }
+    }
+  }
+}

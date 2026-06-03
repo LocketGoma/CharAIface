@@ -576,6 +576,9 @@ class ChatView(QScrollArea):
     def _should_render_markdown(self, message: ChatMessage) -> bool:
         metadata = message.metadata or {}
 
+        if message.role == "user":
+            return False
+
         if metadata.get("render_markdown") is False:
             return False
 

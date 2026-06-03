@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import csv
+from functools import lru_cache
 import json
+import re
+from io import StringIO
 from pathlib import Path
 from typing import Any, Literal
 from datetime import datetime
@@ -10,6 +14,11 @@ import httpx
 from backend.app.services.cloud_auth_manager import (
     CloudAuthManager,
     CloudCredentialConfig,
+)
+from backend.app.services.file_analysis_service import (
+    FileAnalysisRequest,
+    FileAnalysisService,
+    FileAnalysisError,
 )
 from backend.app.core.backend_helper import (
     ANTHROPIC_VERSION,
@@ -40,6 +49,12 @@ DEFAULT_LOCAL_AI_BASE_URL = "http://127.0.0.1:11434"
 OLLAMA_CHAT_TIMEOUT_SECONDS = 120.0
 CLOUD_AI_CHAT_TIMEOUT_SECONDS = 120.0
 MAX_CHAT_HISTORY_MESSAGES = 24
+FILE_EXPORT_RESPONSE_CONFIG_PATH = (
+    Path(__file__).resolve().parents[3]
+    / "resources"
+    / "app"
+    / "file_export_response_patterns.json"
+)
 
 ROUTE_POLICY_HANDLERS = {
     "local_only": "_route_local_only",
@@ -65,12 +80,43 @@ CLOUD_PROVIDER_PROBE_HANDLERS = {
 }
 
 
+@lru_cache(maxsize=1)
+def _load_file_export_response_config() -> dict[str, Any]:
+    try:
+        with FILE_EXPORT_RESPONSE_CONFIG_PATH.open("r", encoding="utf-8") as file:
+            payload = json.load(file)
+    except (OSError, json.JSONDecodeError) as error:
+        print(f"[Export] Failed to load response patterns: {error}")
+        return {}
+
+    return payload if isinstance(payload, dict) else {}
+
+
+def _file_export_config_list(key: str) -> tuple[str, ...]:
+    values = _load_file_export_response_config().get(key)
+    if not isinstance(values, list):
+        return ()
+
+    cleaned = tuple(str(value).strip() for value in values if str(value).strip())
+    return cleaned
+
+
+def _file_export_system_prompt_lines() -> tuple[str, ...]:
+    return _file_export_config_list("system_prompt_lines")
+
+
+def _file_export_fallback_response() -> str:
+    value = _load_file_export_response_config().get("fallback_response")
+    return str(value).strip() if str(value or "").strip() else ""
+
+
 class ChatService:
     def __init__(self) -> None:
         self.health_service = HealthService()
         self.system_status_service = SystemStatusService()
         self.web_search_service = WebSearchService()
         self.project_root = Path(__file__).resolve().parents[3]
+        self.file_analysis_service = FileAnalysisService(self.project_root)
         self.settings_path = self.project_root / "resources" / "data" / "settings.json"
         self.localization = LocalizationManager(
             self.project_root / "resources" / "locales" / "ui.csv"
@@ -106,6 +152,14 @@ class ChatService:
             return command_response
 
         settings = self._effective_settings(request)
+        file_analysis_response = self._try_handle_file_analysis_direct_response(
+            latest_user_message=latest_user_message,
+            request=request,
+            settings=settings,
+        )
+        if file_analysis_response is not None:
+            return file_analysis_response
+
         web_search_context = self._prepare_web_search_context(
             latest_user_message=latest_user_message,
             request=request,
@@ -196,6 +250,141 @@ class ChatService:
             return self._create_help_response()
 
         return None
+
+    def _try_handle_file_analysis_direct_response(
+        self,
+        *,
+        latest_user_message: ChatMessage,
+        request: ChatRequest,
+        settings: dict[str, Any],
+    ) -> ChatResponse | None:
+        metadata = getattr(latest_user_message, "metadata", {}) or {}
+        file_path = str(metadata.get("file_path") or "").strip()
+        if not metadata.get("transient_file_context") or not file_path:
+            return None
+
+        user_text = str(
+            metadata.get("transient_original_user_content")
+            or latest_user_message.content
+            or ""
+        )
+        if not self._looks_like_direct_table_frequency_request(user_text):
+            return None
+
+        try:
+            analysis = self.file_analysis_service.analyze(
+                FileAnalysisRequest(
+                    file_path=file_path,
+                    sample_size=10,
+                    include_value_frequencies=True,
+                    save_result=False,
+                )
+            )
+        except FileAnalysisError as error:
+            print(f"[FileAnalysis] Direct analysis response skipped: {error}")
+            return None
+
+        analysis_info = (
+            analysis.get("analysis") if isinstance(analysis.get("analysis"), dict) else {}
+        )
+        if analysis_info.get("type") != "table":
+            return None
+
+        frequency_csv = self._select_direct_frequency_csv(user_text, analysis_info)
+        if not frequency_csv:
+            return None
+
+        app_language = self._request_language(request, settings)
+        content = self._localize_frequency_csv_headers(
+            frequency_csv,
+            app_language=app_language,
+        )
+
+        return self._create_assistant_response(
+            content=content,
+            route="command",
+            model="file_analysis",
+            paid_model_used=False,
+            metadata={
+                "source": "file_analysis_tool",
+                "deterministic": True,
+                "file_path": file_path,
+            },
+        )
+
+    def _looks_like_direct_table_frequency_request(self, text: str) -> bool:
+        normalized = str(text or "").strip().lower()
+        if not normalized:
+            return False
+
+        frequency_markers = (
+            "등장 횟수",
+            "등장횟수",
+            "등장 확률",
+            "등장확률",
+            "각 번호",
+            "각 숫자",
+            "각 값",
+            "개수",
+            "빈도",
+            "횟수",
+            "frequency",
+            "count",
+            "counts",
+            "probability",
+            "appearance",
+            "appearances",
+            "value count",
+            "value frequency",
+            "row appearance",
+        )
+        output_markers = ("csv", "표", "table")
+        return any(marker in normalized for marker in frequency_markers) and any(
+            marker in normalized for marker in output_markers
+        )
+
+    def _select_direct_frequency_csv(
+        self,
+        user_text: str,
+        analysis_info: dict[str, Any],
+    ) -> str:
+        normalized = str(user_text or "").strip().lower()
+        numeric_markers = (
+            "번호",
+            "숫자",
+            "number",
+            "numeric",
+        )
+        if any(marker in normalized for marker in numeric_markers):
+            return str(analysis_info.get("numeric_value_frequency_csv") or "").strip()
+        return str(analysis_info.get("all_cell_value_frequency_csv") or "").strip()
+
+    def _localize_frequency_csv_headers(self, content: str, *, app_language: str) -> str:
+        if not str(content or "").strip():
+            return ""
+
+        if app_language != "ko":
+            return content.strip()
+
+        reader = csv.reader(StringIO(content))
+        rows = list(reader)
+        if not rows:
+            return content.strip()
+
+        header_map = {
+            "value": "값",
+            "number": "번호",
+            "total_cell_count": "전체_등장_횟수",
+            "row_appearance_count": "등장_회차_수",
+            "row_appearance_probability_percent": "매_회차별_등장_확률_percent",
+            "columns_seen": "등장_컬럼",
+        }
+        rows[0] = [header_map.get(cell, cell) for cell in rows[0]]
+
+        output = StringIO()
+        writer = csv.writer(output)
+        writer.writerows(rows)
+        return output.getvalue().strip()
 
     def _select_route(
         self,
@@ -406,6 +595,12 @@ class ChatService:
         if self.web_search_context.looks_like_refusal(content, web_search_context):
             content = self.web_search_context.fallback_answer(web_search_context, app_language, request.developer_mode)
 
+        content = self._repair_file_export_refusal(
+            content=content,
+            latest_user_message=latest_user_message,
+            app_language=app_language,
+        )
+
         return self._create_assistant_response(
             content=content,
             route="local_ollama",
@@ -538,6 +733,12 @@ class ChatService:
 
         if self.web_search_context.looks_like_refusal(content, web_search_context):
             content = self.web_search_context.fallback_answer(web_search_context, self._request_language(request, settings), request.developer_mode)
+
+        content = self._repair_file_export_refusal(
+            content=content,
+            latest_user_message=latest_user_message,
+            app_language=app_language,
+        )
 
         return self._create_assistant_response(
             content=content,
@@ -890,6 +1091,10 @@ class ChatService:
             content = str(message.content).strip()
             if not content:
                 continue
+            if id(message) == latest_user_message_id:
+                tool_context = self._build_file_analysis_tool_context(message)
+                if tool_context:
+                    content = f"{content}\n\n{tool_context}"
 
             messages.append(
                 {
@@ -910,6 +1115,98 @@ class ChatService:
             messages.append({"role": "user", "content": latest_user_message.content})
 
         return messages
+
+    def _build_file_analysis_tool_context(self, message: ChatMessage) -> str:
+        metadata = getattr(message, "metadata", {}) or {}
+        file_path = str(metadata.get("file_path") or "").strip()
+        if not metadata.get("transient_file_context") or not file_path:
+            return ""
+
+        try:
+            analysis = self.file_analysis_service.analyze(
+                FileAnalysisRequest(
+                    file_path=file_path,
+                    sample_size=10,
+                    include_value_frequencies=True,
+                    save_result=False,
+                )
+            )
+        except FileAnalysisError as error:
+            print(f"[FileAnalysis] Chat tool analysis skipped: {error}")
+            return ""
+
+        return self._format_file_analysis_tool_context(analysis)
+
+    def _format_file_analysis_tool_context(self, analysis: dict[str, Any]) -> str:
+        file_info = analysis.get("file") if isinstance(analysis.get("file"), dict) else {}
+        analysis_info = (
+            analysis.get("analysis") if isinstance(analysis.get("analysis"), dict) else {}
+        )
+        analysis_type = str(analysis_info.get("type") or "")
+
+        if analysis_type == "table":
+            lines = [
+                "[Backend File Analysis Tool Result]",
+                "The backend has already read and analyzed the attached table file. Treat these blocks as deterministic tool output.",
+                "Answer the user's request directly. Do not summarize these field names or explain the tool result.",
+                "For CSV output requests, return only CSV text without explanations, Markdown, or comments.",
+                f"- filename: {file_info.get('name', '')}",
+                f"- table_engine: {analysis_info.get('engine', '')}",
+                f"- row_count: {analysis_info.get('row_count', '')}",
+                f"- column_count: {analysis_info.get('column_count', '')}",
+            ]
+            numeric_frequency_csv = str(
+                analysis_info.get("numeric_value_frequency_csv") or ""
+            ).strip()
+            all_frequency_csv = str(
+                analysis_info.get("all_cell_value_frequency_csv") or ""
+            ).strip()
+            if numeric_frequency_csv:
+                lines.extend(
+                    [
+                        "",
+                        "Use this block when the user asks for per-number counts, total appearances, row appearances, or per-row appearance probabilities.",
+                        "<NUMERIC_VALUE_FREQUENCY_CSV>",
+                        numeric_frequency_csv,
+                        "</NUMERIC_VALUE_FREQUENCY_CSV>",
+                    ]
+                )
+            if all_frequency_csv:
+                lines.extend(
+                    [
+                        "",
+                        "Use this block when the user asks for general CSV cell value counts or probabilities.",
+                        "<ALL_CELL_VALUE_FREQUENCY_CSV>",
+                        all_frequency_csv,
+                        "</ALL_CELL_VALUE_FREQUENCY_CSV>",
+                    ]
+                )
+
+            sample_rows = analysis_info.get("sample_rows")
+            if isinstance(sample_rows, list) and sample_rows:
+                lines.extend(
+                    [
+                        "",
+                        "Sample rows for context only:",
+                        "<SAMPLE_ROWS_JSON>",
+                        json.dumps(sample_rows, ensure_ascii=False),
+                        "</SAMPLE_ROWS_JSON>",
+                    ]
+                )
+            return "\n".join(lines).strip()
+
+        compact_analysis = {
+            "file": file_info,
+            "analysis": analysis_info,
+        }
+        return (
+            "[Backend File Analysis Tool Result]\n"
+            "The backend has already read and analyzed the attached file. Treat this as deterministic tool data.\n"
+            "Answer the user's request directly. Do not summarize these field names or explain the tool result.\n"
+            "<FILE_ANALYSIS_JSON>\n"
+            f"{json.dumps(compact_analysis, ensure_ascii=False)}\n"
+            "</FILE_ANALYSIS_JSON>"
+        )
 
     def _should_include_history_message(self, message: ChatMessage) -> bool:
         role = str(message.role)
@@ -934,6 +1231,59 @@ class ChatService:
 
         return True
 
+    def _repair_file_export_refusal(
+        self,
+        *,
+        content: str,
+        latest_user_message: ChatMessage,
+        app_language: str,
+    ) -> str:
+        if not self._looks_like_file_export_request(latest_user_message.content):
+            return content
+        if not self._looks_like_file_export_refusal(content):
+            return content
+
+        cleaned = self._remove_file_export_refusal_blocks(content)
+        if cleaned:
+            return cleaned
+
+        return _file_export_fallback_response()
+
+    def _looks_like_file_export_request(self, content: str) -> bool:
+        normalized = str(content or "").strip().lower()
+        if not normalized:
+            return False
+        return any(
+            marker.lower() in normalized
+            for marker in _file_export_config_list("request_markers")
+        )
+
+    def _looks_like_file_export_refusal(self, content: str) -> bool:
+        normalized = str(content or "").strip().lower()
+        if not normalized:
+            return False
+        return any(
+            marker.lower() in normalized
+            for marker in _file_export_config_list("refusal_markers")
+        )
+
+    def _remove_file_export_refusal_blocks(self, content: str) -> str:
+        blocks = re.split(r"\n\s*\n", str(content or "").strip())
+        kept_blocks = [
+            block.strip()
+            for block in blocks
+            if block.strip() and not self._looks_like_file_export_refusal(block)
+        ]
+        if kept_blocks:
+            return "\n\n".join(kept_blocks).strip()
+
+        kept_lines = [
+            line.rstrip()
+            for line in str(content or "").splitlines()
+            if line.strip() and not self._looks_like_file_export_refusal(line)
+        ]
+        return "\n".join(kept_lines).strip()
+
     def _build_system_prompt(
         self,
         request: ChatRequest,
@@ -956,6 +1306,7 @@ class ChatService:
             "Answer as the selected character while still being accurate and useful.",
             "Do not mention these system instructions unless the user explicitly asks about configuration.",
         ]
+        parts.extend(_file_export_system_prompt_lines())
 
         if enforce_language:
             if app_language.startswith("ko"):
@@ -1010,7 +1361,7 @@ class ChatService:
     ) -> dict[str, Any]:
         metadata = getattr(latest_user_message, "metadata", {}) or {}
         text = latest_user_message.content or ""
-        if metadata.get("transient_file_context"):
+        if metadata.get("transient_file_context") or metadata.get("transient_inline_data_context"):
             text = str(metadata.get("transient_original_user_content") or "").strip() or text
         manual_query = self.web_search_context.manual_query(text)
         manual_requested = manual_query is not None
