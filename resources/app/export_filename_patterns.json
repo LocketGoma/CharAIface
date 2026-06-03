@@ -1,0 +1,34 @@
+{
+  "supported_suffixes": [".txt", ".md", ".csv", ".pdf"],
+  "common": {
+    "trailing_cleanup_patterns": [
+      "\\s+\\.(txt|md|csv|pdf)$"
+    ],
+    "blank_values": ["txt", "md", "csv", "pdf"]
+  },
+  "languages": {
+    "ko": {
+      "candidate_patterns": [
+        "[\"“”'「」]([^\"“”'「」\\n]+)[\"“”'「」]\\s*(?:라는|이라고|이란)?\\s*(?:이름|파일명|제목|으로|로)",
+        "(?:파일명|파일 이름|이름|제목)(?:(?:\\s*(?:은|는|을|를|:)\\s*)|\\s+)[\"“”'「」]?(.+?)[\"“”'「」]?\\s*(?:으로|로)\\s*(?:적당히\\s*)?(?:지어줘|정해줘|만들어줘|해줘|해달라|해달)",
+        "(?:파일명|파일 이름|이름|제목)(?:(?:\\s*(?:은|는|을|를|:)\\s*)|\\s+)[\"“”'「」]?(.+?)[\"“”'「」]?(?:\\s+(?:txt|md|csv|pdf|마크다운)(?:로|으로)?|\\s+(?:파일|문서|로|으로|라고|라는|내보내기|내보내줘|저장해줘|해줘|해달라|해달|만들어줘)|$)"
+      ],
+      "trailing_cleanup_patterns": [
+        "\\s*(?:파일|문서|로|으로|라고|라는|내보내기|내보내줘|저장해줘|해줘|해달라|해달|만들어줘|지어줘|정해줘|적당히)\\s*$",
+        "\\s+(?:txt|md|csv|pdf|마크다운)$"
+      ]
+    },
+    "en": {
+      "candidate_patterns": [
+        "[\"“”'「」]([^\"“”'「」\\n]+)[\"“”'「」]\\s*(?:as\\s+)?(?:name|filename|file name|title)",
+        "(?:filename|file name|name|title)\\s*(?:is|:)?\\s*[\"“”'「」]?(.+?)[\"“”'「」]?(?:\\s+(?:as|in|to)\\s+(?:txt|md|csv|pdf|markdown)|\\s+(?:file|document|export|save|create|make|please)|$)",
+        "(?:save|export|create|make)(?:\\s+it)?\\s+as\\s+[\"“”'「」]?(.+?)[\"“”'「」]?(?:\\s+(?:file|document|please)|$)"
+      ],
+      "trailing_cleanup_patterns": [
+        "^\\s*(?:export|save|create|make)(?:\\s+it)?\\s+as\\s+",
+        "\\s*(?:file|document|export|save|create|make|please)\\s*$",
+        "\\s+(?:txt|md|csv|pdf|markdown)$"
+      ]
+    }
+  }
+}

@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 
 class SessionListItemWidget(QFrame):
     selected = Signal(str)
+    export_requested = Signal(str)
     rename_requested = Signal(str)
     delete_requested = Signal(str)
 
@@ -78,10 +79,13 @@ class SessionListItemWidget(QFrame):
 
     def _show_menu(self) -> None:
         menu = QMenu(self)
+        export_action = menu.addAction("세션 내보내기")
         rename_action = menu.addAction("세션 명칭 변경")
         delete_action = menu.addAction("세션 삭제")
         action = menu.exec(self.menu_button.mapToGlobal(self.menu_button.rect().bottomLeft()))
-        if action == rename_action:
+        if action == export_action:
+            self.export_requested.emit(self.session_id)
+        elif action == rename_action:
             self.rename_requested.emit(self.session_id)
         elif action == delete_action:
             self.delete_requested.emit(self.session_id)
@@ -91,6 +95,7 @@ class SessionSidebar(QFrame):
     new_session_requested = Signal()
     refresh_requested = Signal()
     session_selected = Signal(str)
+    session_export_requested = Signal(str)
     session_rename_requested = Signal(str)
     session_delete_requested = Signal(str)
     collapsed_changed = Signal(bool)
@@ -247,6 +252,7 @@ class SessionSidebar(QFrame):
                 is_current=is_current,
             )
             widget.selected.connect(self._emit_session_selected)
+            widget.export_requested.connect(self.session_export_requested.emit)
             widget.rename_requested.connect(self.session_rename_requested.emit)
             widget.delete_requested.connect(self.session_delete_requested.emit)
 

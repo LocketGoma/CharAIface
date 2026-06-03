@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QMainWindow,
     QInputDialog,
+    QFileDialog,
     QMessageBox,
     QPushButton,
     QMenu,
@@ -27,7 +28,14 @@ from PySide6.QtWidgets import (
 
 from desktop.characters.character_pack import CharacterPack
 from desktop.characters.character_registry import CharacterRegistry
+from desktop.core.chat_exporter import (
+    ChatExportError,
+    default_chat_export_filename,
+    export_chat_session,
+    export_text_content,
+)
 from desktop.core.character_state import CharacterStateController
+from desktop.core.export_filename_parser import parse_manual_export_filename
 from desktop.core.system_status import get_process_status, get_system_overview
 from desktop.localization.localization_manager import LocalizationManager
 from desktop.settings.app_settings import AppSettings
@@ -178,6 +186,9 @@ class MainWindow(QMainWindow):
         )
         self.session_sidebar.session_selected.connect(
             self._on_sidebar_session_selected
+        )
+        self.session_sidebar.session_export_requested.connect(
+            self._on_export_chat_requested
         )
         self.session_sidebar.session_rename_requested.connect(
             self._on_sidebar_session_rename_requested
@@ -636,6 +647,97 @@ class MainWindow(QMainWindow):
             assistant_name=assistant_name,
         )
 
+    def _on_export_chat_requested(self, session_id: str | None = None) -> None:
+        payload = None
+        if session_id:
+            payload = self.session_store.load_session(session_id)
+            if payload is None:
+                QMessageBox.warning(
+                    self,
+                    self.localization.t("chat.export.title"),
+                    self.localization.t("chat.export.session_missing"),
+                )
+                return
+
+        messages = (
+            list(payload.get("messages") or [])
+            if payload is not None
+            else self.chat_session.messages
+        )
+        if not messages:
+            QMessageBox.information(
+                self,
+                self.localization.t("chat.export.title"),
+                self.localization.t("chat.export.empty"),
+            )
+            return
+
+        export_title = (
+            str(payload.get("title") or "").strip()
+            if payload is not None
+            else self.current_session_title
+        ) or self.localization.t("chat.export.default_title")
+        default_name = default_chat_export_filename(export_title)
+        default_path = str(Path.home() / "Documents" / f"{default_name}.md")
+        selected_path, selected_filter = QFileDialog.getSaveFileName(
+            self,
+            self.localization.t("chat.export.title"),
+            default_path,
+            "Markdown (*.md);;Text (*.txt);;CSV (*.csv);;PDF (*.pdf)",
+        )
+
+        if not selected_path:
+            return
+
+        export_path = self._export_path_with_suffix(selected_path, selected_filter)
+
+        try:
+            export_chat_session(
+                export_path,
+                messages,
+                title=export_title,
+                role_labels={
+                    "system": self.localization.t("chat.export.role.system"),
+                    "user": self.settings.user_name
+                    or self.localization.t("chat.export.role.user"),
+                    "assistant": self._character_display_name(),
+                    "tool": self.localization.t("chat.export.role.tool"),
+                },
+            )
+        except ChatExportError as error:
+            QMessageBox.warning(
+                self,
+                self.localization.t("chat.export.title"),
+                self.localization.t("chat.export.failed", error=str(error)),
+            )
+            return
+        except Exception as error:
+            QMessageBox.warning(
+                self,
+                self.localization.t("chat.export.title"),
+                self.localization.t("chat.export.failed", error=str(error)),
+            )
+            return
+
+        QMessageBox.information(
+            self,
+            self.localization.t("chat.export.title"),
+            self.localization.t("chat.export.completed", path=str(export_path)),
+        )
+
+    def _export_path_with_suffix(self, selected_path: str, selected_filter: str) -> Path:
+        export_path = Path(selected_path)
+        if export_path.suffix.lower() in {".txt", ".md", ".csv", ".pdf"}:
+            return export_path
+
+        if "*.txt" in selected_filter:
+            return export_path.with_suffix(".txt")
+        if "*.csv" in selected_filter:
+            return export_path.with_suffix(".csv")
+        if "*.pdf" in selected_filter:
+            return export_path.with_suffix(".pdf")
+        return export_path.with_suffix(".md")
+
     def _application_display_name(self) -> str:
         app_name = self.localization.t("app.title")
 
@@ -687,11 +789,13 @@ class MainWindow(QMainWindow):
         content: str,
         *,
         render_markdown: bool | None = None,
+        metadata: dict | None = None,
     ) -> None:
         if render_markdown is None:
             render_markdown = bool(self.settings.conversation_markdown_enabled)
-        metadata = {"render_markdown": bool(render_markdown)}
-        message = self.chat_session.add_assistant_message(content, metadata=metadata)
+        message_metadata = dict(metadata or {})
+        message_metadata["render_markdown"] = bool(render_markdown)
+        message = self.chat_session.add_assistant_message(content, metadata=message_metadata)
         self.chat_view.add_chat_message(message)
         self._save_current_chat_session()
 
@@ -795,6 +899,14 @@ class MainWindow(QMainWindow):
             if self._handle_command(command_text):
                 return
 
+        if self._is_manual_message_export_request(command_text):
+            self.bottom_area.raise_()
+            self.character_state.on_message_sent()
+            self._add_user_message(text)
+            self._update_avatar_occlusion_later()
+            self._handle_manual_message_export_request(command_text)
+            return
+
         if self._has_active_chat_response_request():
             self._mark_input_blocked_by_active_response()
             return
@@ -805,6 +917,172 @@ class MainWindow(QMainWindow):
         self._update_avatar_occlusion_later()
 
         self._start_chat_response_worker()
+
+    def _handle_manual_message_export_request(self, text: str) -> bool:
+        if not self._is_manual_message_export_request(text):
+            return False
+
+        target_message = self._latest_exportable_assistant_message()
+        if target_message is None:
+            self._add_assistant_message(
+                self.localization.t("chat.export.message.empty"),
+                render_markdown=False,
+                metadata={"local_export_notice": True},
+            )
+            self._finish_local_command()
+            return True
+
+        suffix = self._manual_export_suffix(text)
+        export_title = self.localization.t("chat.export.message.default_title")
+        export_filename = self._manual_export_filename(text, suffix)
+        if export_filename is not None:
+            suffix = export_filename.suffix
+            export_title = export_filename.stem
+        export_path = self._message_export_path(export_title, suffix, export_filename)
+
+        try:
+            export_text_content(
+                export_path,
+                target_message.content,
+                title=export_title,
+            )
+        except ChatExportError as error:
+            self._add_assistant_message(
+                self.localization.t("chat.export.failed", error=str(error)),
+                render_markdown=False,
+                metadata={"local_export_notice": True},
+            )
+            self._finish_local_command()
+            return True
+        except Exception as error:
+            self._add_assistant_message(
+                self.localization.t("chat.export.failed", error=str(error)),
+                render_markdown=False,
+                metadata={"local_export_notice": True},
+            )
+            self._finish_local_command()
+            return True
+
+        self._add_assistant_message(
+            self.localization.t(
+                "chat.export.message.completed",
+                format=suffix.lstrip(".").upper(),
+                path=str(export_path),
+            ),
+            render_markdown=False,
+            metadata={
+                "local_export_notice": True,
+                "local_export_path": str(export_path),
+                "local_export_link_text": self.localization.t("chat.export.open_file"),
+            },
+        )
+        self._finish_local_command()
+        return True
+
+    def _is_manual_message_export_request(self, text: str) -> bool:
+        normalized = text.strip().lower()
+        if not normalized:
+            return False
+
+        strong_export_words = (
+            "내보내",
+            "저장해",
+            "저장 해",
+            "저장",
+            "파일로",
+            "파일로 만들어",
+            "export",
+            "save",
+            "뽑아",
+        )
+        weak_action_words = (
+            "해줘",
+            "해 달",
+            "해달",
+            "만들어",
+        )
+        target_words = (
+            "답변",
+            "응답",
+            "텍스트",
+            "파일",
+            "마크다운",
+            "markdown",
+            ".md",
+            "pdf",
+            ".pdf",
+            "txt",
+            ".txt",
+            "csv",
+            ".csv",
+        )
+        format_words = (
+            "마크다운",
+            "markdown",
+            ".md",
+            "pdf",
+            ".pdf",
+            "txt",
+            ".txt",
+            "csv",
+            ".csv",
+            "텍스트파일",
+            "텍스트 파일",
+        )
+        has_target = any(word in normalized for word in target_words)
+        has_format = any(word in normalized for word in format_words)
+        has_strong_export = any(word in normalized for word in strong_export_words)
+        has_weak_action = any(word in normalized for word in weak_action_words)
+
+        return (has_strong_export and has_target) or (has_format and has_weak_action)
+
+    def _manual_export_suffix(self, text: str) -> str:
+        normalized = text.strip().lower()
+        if "pdf" in normalized or ".pdf" in normalized:
+            return ".pdf"
+        if "csv" in normalized or ".csv" in normalized:
+            return ".csv"
+        if (
+            "마크다운" in normalized
+            or "markdown" in normalized
+            or ".md" in normalized
+        ):
+            return ".md"
+        return ".txt"
+
+    def _manual_export_filename(self, text: str, fallback_suffix: str) -> Path | None:
+        return parse_manual_export_filename(
+            text,
+            language=getattr(self.settings, "language", "en"),
+            fallback_suffix=fallback_suffix,
+        )
+
+    def _latest_exportable_assistant_message(self) -> ChatMessage | None:
+        for message in reversed(self.chat_session.messages):
+            if message.role != "assistant":
+                continue
+            metadata = message.metadata or {}
+            if metadata.get("pending"):
+                continue
+            if metadata.get("local_export_notice"):
+                continue
+            if not message.content.strip():
+                continue
+            return message
+        return None
+
+    def _message_export_path(
+        self,
+        title: str,
+        suffix: str,
+        filename: Path | None = None,
+    ) -> Path:
+        export_dir = Path(__file__).resolve().parents[2] / "resources" / "data" / "exports"
+        if filename is not None:
+            return export_dir / filename.name
+
+        default_filename = default_chat_export_filename(title)
+        return export_dir / f"{default_filename}{suffix}"
 
     def _handle_command(self, command: str) -> bool:
         command_text = command.strip()
@@ -2540,17 +2818,23 @@ class MainWindow(QMainWindow):
 
         global_pos = self._event_global_pos(event)
 
-        # Session list gets priority because it is visually placed over the
-        # character column. This keeps row selection working when the avatar
-        # overlaps it.
-        if hasattr(self, "session_sidebar") and self.session_sidebar.handle_global_mouse_press(global_pos):
+        if self._route_bottom_overlay_press_to_underlay(global_pos):
             return True
 
-        # Chat action buttons may be visually under the transparent bottom
-        # overlay. Route by global coordinates only from overlay handling so a
-        # normal button click cannot be fired twice.
-        if hasattr(self, "chat_view") and self.chat_view.handle_global_action_mouse_press(global_pos):
-            return True
+        return False
+
+    def _route_bottom_overlay_press_to_underlay(self, global_pos: QPoint) -> bool:
+        # Keep the overlay fallback generic: MainWindow only decides the visual
+        # priority of underlay surfaces, while each widget decides what is
+        # clickable inside itself.
+        underlay_widgets = (
+            getattr(self, "session_sidebar", None),
+            getattr(self, "chat_view", None),
+        )
+        for widget in underlay_widgets:
+            handler = getattr(widget, "handle_global_mouse_press", None)
+            if handler is not None and handler(global_pos):
+                return True
 
         return False
 
