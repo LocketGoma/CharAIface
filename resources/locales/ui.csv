@@ -5,6 +5,9 @@ about.message,"{app_name}현재 캐릭터: {character_name}로컬/클라우드 A
 about.title,정보,About
 
 chat.backend_fallback,백엔드 응답을 가져오지 못했습니다. 임시 로컬 응답입니다.,Could not get a backend response. This is a temporary local response.
+chat.action.copy,복사,Copy
+chat.action.regenerate,새로고침,Regenerate
+chat.action.stop_thinking,생각 중단,Stop thinking
 chat.failure.backend_communication_timeout,백엔드 통신 응답 시간이 초과되었습니다. 앱 상태를 확인한 뒤 다시 시도해 주세요.,Backend communication timed out. Please check the app state and try again.
 chat.failure.backend_http_error,백엔드 요청 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.,The backend returned an error. Please try again shortly.
 chat.failure.backend_invalid_response,백엔드 응답 형식을 읽을 수 없습니다. 앱 상태를 확인해 주세요.,The backend response could not be read. Please check the app state.
@@ -20,7 +23,9 @@ chat.placeholder,메시지를 입력하세요...,Type a message...
 chat.response_wait.generating,깊은 고민 중... {seconds}초,Deep in thought... {seconds}s
 chat.response_wait.long,생각이 길어지고 있습니다... {seconds}초,Still thinking... {seconds}s
 chat.response_wait.thinking,생각 중... {seconds}초,Thinking... {seconds}s
+chat.response_cancelled,AI 응답이 중지되었습니다.,AI response was stopped.
 chat.send,전송,Send
+chat.stop_generating,생각 중단,Stop thinking
 
 character.default_missing,기본 캐릭터가 없습니다!,Default character is missing!
 

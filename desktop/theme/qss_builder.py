@@ -303,6 +303,25 @@ def build_qss(theme: ThemeDefinition) -> str:
         color: {p.text_primary};
     }}
 
+    QPushButton#ChatMessagePendingCancelButton {{
+        background-color: transparent;
+        color: {p.warning};
+        border: none;
+        border-radius: 6px;
+        padding: 2px 6px;
+        font-size: 9pt;
+        font-weight: normal;
+    }}
+
+    QPushButton#ChatMessagePendingCancelButton:hover {{
+        background-color: {p.input_bg};
+        color: {p.warning};
+    }}
+
+    QPushButton#ChatMessagePendingCancelButton:pressed {{
+        font-weight: bold;
+    }}
+
     QWidget#BottomOverlayArea {{
         background-color: transparent;
     }}
@@ -498,6 +517,16 @@ def build_qss(theme: ThemeDefinition) -> str:
 
     QPushButton#SendButton:hover {{
         border: 1px solid {p.border};
+    }}
+
+    QPushButton#SendButton[responsePending="true"] {{
+        background-color: {p.warning};
+        color: {p.window_bg};
+        border: 1px solid {p.border};
+    }}
+
+    QPushButton#SendButton[responsePending="true"]:hover {{
+        border: 1px solid {p.accent};
     }}
 
     QPushButton#DialogSaveButton {{

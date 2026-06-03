@@ -17,6 +17,7 @@ from desktop.ui.composer import ComposerTextEdit
 
 class BottomUserArea(QWidget):
     send_requested = Signal(str)
+    cancel_requested = Signal()
     text_changed = Signal(str)
 
     def __init__(self, localization: LocalizationManager) -> None:
@@ -24,6 +25,7 @@ class BottomUserArea(QWidget):
 
         self.localization = localization
         self._composer_preferred_height: int | None = None
+        self._response_pending = False
 
         self.setObjectName("BottomOverlayArea")
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
@@ -54,6 +56,7 @@ class BottomUserArea(QWidget):
         self.send_button = QPushButton()
         self.send_button.setObjectName("SendButton")
         self.send_button.setFixedHeight(44)
+        self.send_button.setMinimumWidth(104)
         self.send_button.clicked.connect(self._emit_send)
 
         root_layout.addWidget(
@@ -192,7 +195,7 @@ class BottomUserArea(QWidget):
         return self.composer.height() + 40
 
     def retranslate_ui(self) -> None:
-        self.send_button.setText(self.localization.t("chat.send"))
+        self._update_send_button_text()
         self.composer.set_placeholder_text(self.localization.t("chat.placeholder"))
         self.set_state("idle")
 
@@ -224,6 +227,10 @@ class BottomUserArea(QWidget):
         self.text_changed.emit(self.composer.toPlainText())
 
     def _emit_send(self) -> None:
+        if self._response_pending:
+            self.cancel_requested.emit()
+            return
+
         text = self.composer.toPlainText().strip()
 
         if not text:
@@ -234,6 +241,17 @@ class BottomUserArea(QWidget):
         self.composer.blockSignals(False)
 
         self.send_requested.emit(text)
+
+    def set_response_pending(self, is_pending: bool) -> None:
+        self._response_pending = is_pending
+        self._update_send_button_text()
+
+    def _update_send_button_text(self) -> None:
+        key = "chat.stop_generating" if self._response_pending else "chat.send"
+        self.send_button.setText(self.localization.t(key))
+        self.send_button.setProperty("responsePending", self._response_pending)
+        self.send_button.style().unpolish(self.send_button)
+        self.send_button.style().polish(self.send_button)
 
     def set_state(self, state: str) -> None:
         self.state_label.setText(self.localization.t(f"state.{state}"))

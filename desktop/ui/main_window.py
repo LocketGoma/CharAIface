@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 import sys
 from pathlib import Path
+from uuid import uuid4
 from shared.schema.chat import ChatMessage, ChatRequest
 from desktop.chat.chat_session import ChatSession
 from desktop.chat.session_store import ChatSessionStore
@@ -83,6 +84,11 @@ class MainWindow(QMainWindow):
         self.chat_response_thread: QThread | None = None
         self.chat_response_worker: ChatResponseWorker | None = None
         self.active_chat_response_session_id: str | None = None
+        self.active_chat_response_request_id: str | None = None
+        self.chat_response_threads: dict[str, QThread] = {}
+        self.chat_response_workers: dict[str, ChatResponseWorker] = {}
+        self.chat_response_request_sessions: dict[str, str] = {}
+        self.cancelled_chat_response_request_ids: set[str] = set()
         self._chat_response_display_metadata: dict[str, tuple[str, dict]] = {}
         self._chat_response_started_at: datetime | None = None
         self._chat_response_elapsed_timer = QTimer(self)
@@ -204,9 +210,15 @@ class MainWindow(QMainWindow):
         self._update_chat_view_display_names()
 
         self.bottom_area.send_requested.connect(self.on_send_requested)
+        self.bottom_area.cancel_requested.connect(
+            self._on_chat_response_cancel_requested
+        )
         self.bottom_area.text_changed.connect(self.character_state.on_user_text_changed)
         self.character_state.state_changed.connect(self.bottom_area.set_state)
         self.chat_view.regenerate_requested.connect(self._on_regenerate_requested)
+        self.chat_view.cancel_response_requested.connect(
+            self._on_chat_response_cancel_requested
+        )
         self.chat_view.assistant_message_display_finished.connect(
             self._finish_chat_response_display
         )
@@ -587,6 +599,11 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(self.localization.t("app.title"))
         self.title_label.setText(self.localization.t("app.title"))
         self.settings_button.setText(self.localization.t("settings.title"))
+        self.chat_view.set_action_texts(
+            copy_text=self.localization.t("chat.action.copy"),
+            regenerate_text=self.localization.t("chat.action.regenerate"),
+            cancel_response_text=self.localization.t("chat.action.stop_thinking"),
+        )
         if hasattr(self, "session_sidebar"):
             self.session_sidebar.retranslate_ui()
         self.bottom_area.retranslate_ui()
@@ -698,9 +715,21 @@ class MainWindow(QMainWindow):
         self.bottom_area.raise_()
         self._update_avatar_occlusion_later()
 
+    def _has_active_chat_response_request(self) -> bool:
+        request_id = self.active_chat_response_request_id
+        return bool(
+            request_id
+            and request_id in self.chat_response_threads
+            and request_id not in self.cancelled_chat_response_request_ids
+        )
+
+    def _mark_input_blocked_by_active_response(self) -> None:
+        self.character_state.on_embarrassed()
+        print("[Chat] Chat response request is already running.")
+
     def _on_regenerate_requested(self, message_ref) -> None:
-        if self.chat_response_thread is not None:
-            print("[Chat] Cannot regenerate while a response request is already running.")
+        if self._has_active_chat_response_request():
+            self._mark_input_blocked_by_active_response()
             return
 
         messages = self.chat_session.messages
@@ -766,8 +795,8 @@ class MainWindow(QMainWindow):
             if self._handle_command(command_text):
                 return
 
-        if self.chat_response_thread is not None:
-            print("[Chat] Chat response request is already running.")
+        if self._has_active_chat_response_request():
+            self._mark_input_blocked_by_active_response()
             return
 
         self.bottom_area.raise_()
@@ -1323,13 +1352,27 @@ class MainWindow(QMainWindow):
     def _pending_response_text(self) -> str:
         return self.localization.t("chat.pending_response")
 
-    def _start_chat_response_elapsed_status(self, session_id: str) -> None:
+    def _start_chat_response_elapsed_status(
+        self,
+        session_id: str,
+        request_id: str,
+    ) -> None:
         self._chat_response_started_at = datetime.now()
         self.active_chat_response_session_id = session_id
+        self.active_chat_response_request_id = request_id
         self._chat_response_elapsed_timer.start()
         self._update_chat_response_elapsed_status()
 
-    def _stop_chat_response_elapsed_status(self, session_id: str | None = None) -> None:
+    def _stop_chat_response_elapsed_status(
+        self,
+        session_id: str | None = None,
+        request_id: str | None = None,
+    ) -> None:
+        if (
+            request_id is not None
+            and request_id != self.active_chat_response_request_id
+        ):
+            return
         if session_id is not None and session_id != self.active_chat_response_session_id:
             return
 
@@ -1381,8 +1424,8 @@ class MainWindow(QMainWindow):
             self.pending_response_session_id = None
 
     def _start_chat_response_worker(self) -> None:
-        if self.chat_response_thread is not None:
-            print("[Chat] Chat response request is already running.")
+        if self._has_active_chat_response_request():
+            self._mark_input_blocked_by_active_response()
             return
 
         if self.current_session_id is None:
@@ -1403,28 +1446,77 @@ class MainWindow(QMainWindow):
             settings_snapshot=self.settings.model_dump(mode="json"),
         )
 
-        self.chat_response_thread = QThread(self)
-        self.chat_response_worker = ChatResponseWorker(
+        request_id = uuid4().hex
+        chat_response_thread = QThread(self)
+        chat_response_worker = ChatResponseWorker(
             backend_client=self.backend_client,
             request=request,
             session_id=request_session_id,
+            request_id=request_id,
         )
-        self.chat_response_worker.moveToThread(self.chat_response_thread)
+        chat_response_worker.moveToThread(chat_response_thread)
 
-        self.chat_response_thread.started.connect(self.chat_response_worker.run)
-        self.chat_response_worker.finished.connect(self._on_chat_response_finished)
-        self.chat_response_worker.failed.connect(self._on_chat_response_failed)
-        self.chat_response_worker.finished.connect(self._quit_chat_response_thread)
-        self.chat_response_worker.failed.connect(self._quit_chat_response_thread)
-        self.chat_response_thread.finished.connect(self._cleanup_chat_response_worker)
+        self.chat_response_threads[request_id] = chat_response_thread
+        self.chat_response_workers[request_id] = chat_response_worker
+        self.chat_response_request_sessions[request_id] = request_session_id
+        self.chat_response_thread = chat_response_thread
+        self.chat_response_worker = chat_response_worker
 
-        self._start_chat_response_elapsed_status(request_session_id)
+        chat_response_thread.started.connect(chat_response_worker.run)
+        chat_response_worker.finished.connect(self._on_chat_response_finished)
+        chat_response_worker.failed.connect(self._on_chat_response_failed)
+        chat_response_worker.finished.connect(self._quit_chat_response_thread)
+        chat_response_worker.failed.connect(self._quit_chat_response_thread)
+        chat_response_thread.finished.connect(
+            lambda request_id=request_id: self._cleanup_chat_response_worker(request_id)
+        )
+
+        self._start_chat_response_elapsed_status(request_session_id, request_id)
         self._show_pending_assistant_response(request_session_id)
-        self.chat_response_thread.start()
+        self.bottom_area.set_response_pending(True)
+        chat_response_thread.start()
 
-    def _on_chat_response_finished(self, session_id: str, response) -> None:
-        self._stop_chat_response_elapsed_status(session_id)
+    def _on_chat_response_cancel_requested(self) -> None:
+        request_id = self.active_chat_response_request_id
+        session_id = self.active_chat_response_session_id
+        if not request_id or request_id not in self.chat_response_threads:
+            self.character_state.on_embarrassed()
+            self.bottom_area.set_response_pending(False)
+            return
+
+        self.cancelled_chat_response_request_ids.add(request_id)
+        self._stop_chat_response_elapsed_status(session_id, request_id)
         self._clear_pending_assistant_response(session_id)
+        self.active_chat_response_request_id = None
+        self.active_chat_response_session_id = None
+        self.bottom_area.set_response_pending(False)
+        if session_id == self.current_session_id:
+            self._add_assistant_message(
+                self.localization.t("chat.response_cancelled"),
+                render_markdown=False,
+            )
+        self.character_state.on_assistant_done()
+        self._update_avatar_occlusion_later()
+
+    def _is_stale_chat_response_request(
+        self,
+        session_id: str,
+        request_id: str,
+    ) -> bool:
+        if request_id in self.cancelled_chat_response_request_ids:
+            return True
+        if request_id != self.active_chat_response_request_id:
+            return True
+        return session_id != self.active_chat_response_session_id
+
+    def _on_chat_response_finished(self, session_id: str, request_id: str, response) -> None:
+        if self._is_stale_chat_response_request(session_id, request_id):
+            print(f"[Chat] Ignored stale chat response request: {request_id}")
+            return
+
+        self._stop_chat_response_elapsed_status(session_id, request_id)
+        self._clear_pending_assistant_response(session_id)
+        self.bottom_area.set_response_pending(False)
         metadata = getattr(response.message, "metadata", {}) or {}
         response_state = self._chat_response_state_from_metadata(metadata)
         animate_response = (
@@ -1478,9 +1570,14 @@ class MainWindow(QMainWindow):
 
         self._apply_chat_response_state(metadata)
 
-    def _on_chat_response_failed(self, session_id: str, failure) -> None:
-        self._stop_chat_response_elapsed_status(session_id)
+    def _on_chat_response_failed(self, session_id: str, request_id: str, failure) -> None:
+        if self._is_stale_chat_response_request(session_id, request_id):
+            print(f"[Chat] Ignored stale chat response failure: {request_id}")
+            return
+
+        self._stop_chat_response_elapsed_status(session_id, request_id)
         self._clear_pending_assistant_response(session_id)
+        self.bottom_area.set_response_pending(False)
         failure_payload = self._normalize_chat_failure_payload(failure)
         print(
             "[Chat] Backend chat response failed for session "
@@ -1488,20 +1585,32 @@ class MainWindow(QMainWindow):
         )
         self._add_backend_fallback_response(session_id=session_id, failure=failure_payload)
 
-    def _quit_chat_response_thread(self, *args) -> None:  # noqa: ANN002
-        if self.chat_response_thread is not None:
-            self.chat_response_thread.quit()
+    def _quit_chat_response_thread(self, session_id: str, request_id: str, *args) -> None:  # noqa: ANN002
+        thread = self.chat_response_threads.get(request_id)
+        if thread is not None:
+            thread.quit()
 
-    def _cleanup_chat_response_worker(self) -> None:
-        if self.chat_response_worker is not None:
-            self.chat_response_worker.deleteLater()
+    def _cleanup_chat_response_worker(self, request_id: str) -> None:
+        worker = self.chat_response_workers.pop(request_id, None)
+        if worker is not None:
+            worker.deleteLater()
+
+        thread = self.chat_response_threads.pop(request_id, None)
+        if thread is not None:
+            thread.deleteLater()
+
+        self.chat_response_request_sessions.pop(request_id, None)
+        self.cancelled_chat_response_request_ids.discard(request_id)
+
+        if request_id == self.active_chat_response_request_id:
+            self.active_chat_response_request_id = None
+            self.active_chat_response_session_id = None
+            self.bottom_area.set_response_pending(False)
+
+        if worker is self.chat_response_worker:
             self.chat_response_worker = None
-
-        if self.chat_response_thread is not None:
-            self.chat_response_thread.deleteLater()
+        if thread is self.chat_response_thread:
             self.chat_response_thread = None
-
-        self.active_chat_response_session_id = None
 
     def _append_message_to_session(
         self,
@@ -2437,7 +2546,7 @@ class MainWindow(QMainWindow):
         if hasattr(self, "session_sidebar") and self.session_sidebar.handle_global_mouse_press(global_pos):
             return True
 
-        # Copy/regenerate buttons may be visually under the transparent bottom
+        # Chat action buttons may be visually under the transparent bottom
         # overlay. Route by global coordinates only from overlay handling so a
         # normal button click cannot be fired twice.
         if hasattr(self, "chat_view") and self.chat_view.handle_global_action_mouse_press(global_pos):

@@ -41,6 +41,7 @@ class SelectableMessageLabel(QLabel):
 
 class ChatView(QScrollArea):
     regenerate_requested = Signal(object)
+    cancel_response_requested = Signal()
     assistant_message_display_finished = Signal(str)
 
     def __init__(self) -> None:
@@ -57,6 +58,9 @@ class ChatView(QScrollArea):
         self._message_font_size = 10
         self._typewriter_interval_ms = TYPEWRITER_INTERVAL_MS
         self._typewriter_timers: dict[str, QTimer] = {}
+        self._copy_action_text = ""
+        self._regenerate_action_text = ""
+        self._cancel_response_action_text = ""
 
         self.setWidgetResizable(True)
 
@@ -212,6 +216,8 @@ class ChatView(QScrollArea):
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop
         )
         label.setMaximumWidth(self._message_max_width())
+        if (message.metadata or {}).get("pending"):
+            label.setMinimumWidth(180)
         should_animate = (
             animate
             and message.role == "assistant"
@@ -260,7 +266,16 @@ class ChatView(QScrollArea):
         layout.setContentsMargins(2, 0, 2, 0)
         layout.setSpacing(4)
 
-        copy_button = QPushButton("복사")
+        if message.role == "assistant" and (message.metadata or {}).get("pending"):
+            cancel_button = QPushButton(self._cancel_response_action_text)
+            cancel_button.setObjectName("ChatMessagePendingCancelButton")
+            cancel_button.setCursor(Qt.CursorShape.PointingHandCursor)
+            cancel_button.clicked.connect(self.cancel_response_requested.emit)
+            layout.addWidget(cancel_button)
+            layout.addStretch()
+            return actions
+
+        copy_button = QPushButton(self._copy_action_text)
         copy_button.setObjectName("ChatMessageActionButton")
         copy_button.setCursor(Qt.CursorShape.PointingHandCursor)
         copy_button.clicked.connect(
@@ -269,7 +284,7 @@ class ChatView(QScrollArea):
         layout.addWidget(copy_button)
 
         if message.role == "assistant":
-            regenerate_button = QPushButton("새로고침")
+            regenerate_button = QPushButton(self._regenerate_action_text)
             regenerate_button.setObjectName("ChatMessageActionButton")
             regenerate_button.setCursor(Qt.CursorShape.PointingHandCursor)
             regenerate_button.clicked.connect(
@@ -284,11 +299,22 @@ class ChatView(QScrollArea):
         layout.addStretch()
         return actions
 
+    def set_action_texts(
+        self,
+        *,
+        copy_text: str,
+        regenerate_text: str,
+        cancel_response_text: str,
+    ) -> None:
+        self._copy_action_text = copy_text
+        self._regenerate_action_text = regenerate_text
+        self._cancel_response_action_text = cancel_response_text
+
     def handle_global_action_mouse_press(self, global_pos: QPoint) -> bool:
         """Trigger chat action buttons hidden under the bottom overlay.
 
         The bottom character/composer overlay visually overlaps the lower chat
-        area. When a copy/regenerate button is behind that overlay, Qt delivers
+        area. When a chat action button is behind that overlay, Qt delivers
         the mouse press to the overlay instead of the button. This method uses
         global coordinates as a fallback and clicks the action button directly.
         It should only be called from overlay mouse handling, never for normal
@@ -297,7 +323,16 @@ class ChatView(QScrollArea):
         if global_pos is None:
             return False
 
-        for button in self.findChildren(QPushButton, "ChatMessageActionButton"):
+        action_button_names = {
+            "ChatMessageActionButton",
+            "ChatMessagePendingCancelButton",
+        }
+        buttons = [
+            button
+            for button in self.findChildren(QPushButton)
+            if button.objectName() in action_button_names
+        ]
+        for button in buttons:
             if not self._is_alive_widget(button) or not button.isVisible() or not button.isEnabled():
                 continue
 
