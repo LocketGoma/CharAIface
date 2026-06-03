@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import csv
 from functools import lru_cache
 import json
 import re
-from io import StringIO
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 from datetime import datetime
 
 import httpx
@@ -152,14 +150,6 @@ class ChatService:
             return command_response
 
         settings = self._effective_settings(request)
-        file_analysis_response = self._try_handle_file_analysis_direct_response(
-            latest_user_message=latest_user_message,
-            request=request,
-            settings=settings,
-        )
-        if file_analysis_response is not None:
-            return file_analysis_response
-
         web_search_context = self._prepare_web_search_context(
             latest_user_message=latest_user_message,
             request=request,
@@ -248,143 +238,7 @@ class ChatService:
 
         if normalized_command == "/help":
             return self._create_help_response()
-
         return None
-
-    def _try_handle_file_analysis_direct_response(
-        self,
-        *,
-        latest_user_message: ChatMessage,
-        request: ChatRequest,
-        settings: dict[str, Any],
-    ) -> ChatResponse | None:
-        metadata = getattr(latest_user_message, "metadata", {}) or {}
-        file_path = str(metadata.get("file_path") or "").strip()
-        if not metadata.get("transient_file_context") or not file_path:
-            return None
-
-        user_text = str(
-            metadata.get("transient_original_user_content")
-            or latest_user_message.content
-            or ""
-        )
-        if not self._looks_like_direct_table_frequency_request(user_text):
-            return None
-
-        try:
-            analysis = self.file_analysis_service.analyze(
-                FileAnalysisRequest(
-                    file_path=file_path,
-                    sample_size=10,
-                    include_value_frequencies=True,
-                    save_result=False,
-                )
-            )
-        except FileAnalysisError as error:
-            print(f"[FileAnalysis] Direct analysis response skipped: {error}")
-            return None
-
-        analysis_info = (
-            analysis.get("analysis") if isinstance(analysis.get("analysis"), dict) else {}
-        )
-        if analysis_info.get("type") != "table":
-            return None
-
-        frequency_csv = self._select_direct_frequency_csv(user_text, analysis_info)
-        if not frequency_csv:
-            return None
-
-        app_language = self._request_language(request, settings)
-        content = self._localize_frequency_csv_headers(
-            frequency_csv,
-            app_language=app_language,
-        )
-
-        return self._create_assistant_response(
-            content=content,
-            route="command",
-            model="file_analysis",
-            paid_model_used=False,
-            metadata={
-                "source": "file_analysis_tool",
-                "deterministic": True,
-                "file_path": file_path,
-            },
-        )
-
-    def _looks_like_direct_table_frequency_request(self, text: str) -> bool:
-        normalized = str(text or "").strip().lower()
-        if not normalized:
-            return False
-
-        frequency_markers = (
-            "등장 횟수",
-            "등장횟수",
-            "등장 확률",
-            "등장확률",
-            "각 번호",
-            "각 숫자",
-            "각 값",
-            "개수",
-            "빈도",
-            "횟수",
-            "frequency",
-            "count",
-            "counts",
-            "probability",
-            "appearance",
-            "appearances",
-            "value count",
-            "value frequency",
-            "row appearance",
-        )
-        output_markers = ("csv", "표", "table")
-        return any(marker in normalized for marker in frequency_markers) and any(
-            marker in normalized for marker in output_markers
-        )
-
-    def _select_direct_frequency_csv(
-        self,
-        user_text: str,
-        analysis_info: dict[str, Any],
-    ) -> str:
-        normalized = str(user_text or "").strip().lower()
-        numeric_markers = (
-            "번호",
-            "숫자",
-            "number",
-            "numeric",
-        )
-        if any(marker in normalized for marker in numeric_markers):
-            return str(analysis_info.get("numeric_value_frequency_csv") or "").strip()
-        return str(analysis_info.get("all_cell_value_frequency_csv") or "").strip()
-
-    def _localize_frequency_csv_headers(self, content: str, *, app_language: str) -> str:
-        if not str(content or "").strip():
-            return ""
-
-        if app_language != "ko":
-            return content.strip()
-
-        reader = csv.reader(StringIO(content))
-        rows = list(reader)
-        if not rows:
-            return content.strip()
-
-        header_map = {
-            "value": "값",
-            "number": "번호",
-            "total_cell_count": "전체_등장_횟수",
-            "row_appearance_count": "등장_회차_수",
-            "row_appearance_probability_percent": "매_회차별_등장_확률_percent",
-            "columns_seen": "등장_컬럼",
-        }
-        rows[0] = [header_map.get(cell, cell) for cell in rows[0]]
-
-        output = StringIO()
-        writer = csv.writer(output)
-        writer.writerows(rows)
-        return output.getvalue().strip()
 
     def _select_route(
         self,
@@ -547,12 +401,27 @@ class ChatService:
             cloud_fallback_context=cloud_fallback_context,
         )
 
+        tool_response_metadata: dict[str, Any] = {}
         try:
-            content = self._call_ollama_chat(
-                base_url=base_url,
-                model=model,
-                messages=model_messages,
+            tool_response = self._try_create_file_tool_augmented_content(
+                latest_user_message=latest_user_message,
+                base_messages=model_messages,
+                app_language=app_language,
+                call_model=lambda messages: self._call_ollama_chat(
+                    base_url=base_url,
+                    model=model,
+                    messages=messages,
+                ),
             )
+            if tool_response is not None:
+                content = tool_response["content"]
+                tool_response_metadata = tool_response["metadata"]
+            else:
+                content = self._call_ollama_chat(
+                    base_url=base_url,
+                    model=model,
+                    messages=model_messages,
+                )
         except httpx.TimeoutException as error:
             return self._create_local_error_response(
                 request=request,
@@ -615,6 +484,7 @@ class ChatService:
                 "render_markdown": self._render_markdown_requested(latest_user_message),
                 **self.web_search_context.metadata(web_search_context),
                 **self._cloud_fallback_metadata(cloud_fallback_context),
+                **tool_response_metadata,
             },
         )
 
@@ -679,14 +549,31 @@ class ChatService:
             web_search_context=web_search_context,
         )
 
+        tool_response_metadata: dict[str, Any] = {}
         try:
-            content = self._call_cloud_ai_chat(
-                provider=provider,
-                base_url=base_url,
-                api_key=api_key,
-                model=model,
-                messages=model_messages,
+            tool_response = self._try_create_file_tool_augmented_content(
+                latest_user_message=latest_user_message,
+                base_messages=model_messages,
+                app_language=app_language,
+                call_model=lambda messages: self._call_cloud_ai_chat(
+                    provider=provider,
+                    base_url=base_url,
+                    api_key=api_key,
+                    model=model,
+                    messages=messages,
+                ),
             )
+            if tool_response is not None:
+                content = tool_response["content"]
+                tool_response_metadata = tool_response["metadata"]
+            else:
+                content = self._call_cloud_ai_chat(
+                    provider=provider,
+                    base_url=base_url,
+                    api_key=api_key,
+                    model=model,
+                    messages=model_messages,
+                )
         except httpx.TimeoutException as error:
             return self._create_cloud_error_response(
                 request=request,
@@ -753,6 +640,7 @@ class ChatService:
                 "language": app_language,
                 "render_markdown": self._render_markdown_requested(latest_user_message),
                 **self.web_search_context.metadata(web_search_context),
+                **tool_response_metadata,
             },
         )
 
@@ -802,6 +690,270 @@ class ChatService:
 
         handler = getattr(self, handler_name)
         return handler(base_url=base_url, api_key=api_key, model=model, messages=messages)
+
+    def _try_create_file_tool_augmented_content(
+        self,
+        *,
+        latest_user_message: ChatMessage,
+        base_messages: list[dict[str, str]],
+        app_language: str,
+        call_model: Callable[[list[dict[str, str]]], str],
+    ) -> dict[str, Any] | None:
+        metadata = getattr(latest_user_message, "metadata", {}) or {}
+        file_path = str(metadata.get("file_path") or "").strip()
+        if not metadata.get("transient_file_context") or not file_path:
+            return None
+
+        tool_call = self._request_file_tool_call_decision(
+            latest_user_message=latest_user_message,
+            app_language=app_language,
+            call_model=call_model,
+        )
+        if not tool_call or tool_call.get("tool") != "file_analyze":
+            return None
+
+        tool_result = self._execute_file_analyze_tool_call(
+            file_path=file_path,
+            tool_call=tool_call,
+        )
+        direct_content = self._direct_file_tool_response_content(
+            tool_call=tool_call,
+            tool_result=tool_result,
+        )
+        if direct_content:
+            return {
+                "content": direct_content,
+                "metadata": {
+                    "tool_loop_used": True,
+                    "tool_name": "file_analyze",
+                    "tool_status": tool_result.get("status"),
+                    "tool_response_mode": "direct_tool_result",
+                },
+            }
+
+        tool_result_prompt = self._build_file_tool_result_prompt(
+            tool_call=tool_call,
+            tool_result=tool_result,
+            app_language=app_language,
+        )
+        final_messages = [
+            *base_messages,
+            {
+                "role": "assistant",
+                "content": self._format_file_tool_call_trace(tool_call),
+            },
+            {
+                "role": "user",
+                "content": tool_result_prompt,
+            },
+        ]
+        content = call_model(final_messages)
+        if not str(content or "").strip():
+            return None
+
+        return {
+            "content": content,
+            "metadata": {
+                "tool_loop_used": True,
+                "tool_name": "file_analyze",
+                "tool_status": tool_result.get("status"),
+                "tool_response_mode": "model_final",
+            },
+        }
+
+    def _request_file_tool_call_decision(
+        self,
+        *,
+        latest_user_message: ChatMessage,
+        app_language: str,
+        call_model: Callable[[list[dict[str, str]]], str],
+    ) -> dict[str, Any] | None:
+        metadata = getattr(latest_user_message, "metadata", {}) or {}
+        file_name = str(metadata.get("file_name") or Path(str(metadata.get("file_path") or "")).name)
+        file_type = str(metadata.get("file_type") or Path(file_name).suffix)
+        original_user_content = str(
+            metadata.get("transient_original_user_content")
+            or latest_user_message.content
+            or ""
+        ).strip()
+
+        planner_messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are a tool-use planner for CharAIface.\n"
+                    "Decide whether the assistant should call a backend tool before answering.\n"
+                    "Return strict JSON only. Do not use Markdown.\n\n"
+                    "Available tool:\n"
+                    "- file_analyze: Reads and analyzes an attached file. It supports table summaries, CSV/TSV value frequencies, row appearance probabilities, JSON/text summaries, and source-code structure.\n\n"
+                    "Call file_analyze when the user asks to inspect, analyze, calculate, summarize, aggregate, transform, or reason from the attached file.\n"
+                    "Do not call a tool for casual conversation or questions unrelated to the attached file.\n\n"
+                    "JSON schema:\n"
+                    "{\"tool\":\"file_analyze\",\"arguments\":{\"sample_size\":10,\"include_value_frequencies\":true,\"save_result\":false,\"output_format\":\"json\",\"preferred_result\":\"auto\",\"response_mode\":\"model_final\"},\"reason\":\"short reason\"}\n"
+                    "or\n"
+                    "{\"tool\":\"none\",\"arguments\":{},\"reason\":\"short reason\"}\n\n"
+                    "Use preferred_result='numeric_value_frequency_csv' for per-number or numeric frequency/probability CSV requests.\n"
+                    "Use preferred_result='all_cell_value_frequency_csv' for general cell value frequency/probability CSV requests.\n"
+                    "Use response_mode='direct_tool_result' only when the user asks for raw CSV/table output that the tool result can provide directly.\n"
+                    "Otherwise use response_mode='model_final'."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"App language: {app_language}\n"
+                    f"Attached file name: {file_name}\n"
+                    f"Attached file type: {file_type}\n\n"
+                    "User request:\n"
+                    f"{original_user_content}"
+                ),
+            },
+        ]
+        raw_decision = call_model(planner_messages)
+        decision = self._parse_tool_call_json(raw_decision)
+        if not isinstance(decision, dict):
+            print(f"[ToolLoop] Ignoring non-JSON tool decision: {raw_decision[:200]}")
+            return None
+
+        tool_name = str(decision.get("tool") or "").strip()
+        if tool_name not in {"file_analyze", "none"}:
+            return None
+        if tool_name == "none":
+            return None
+
+        arguments = decision.get("arguments")
+        if not isinstance(arguments, dict):
+            arguments = {}
+        decision["arguments"] = arguments
+        return decision
+
+    def _execute_file_analyze_tool_call(
+        self,
+        *,
+        file_path: str,
+        tool_call: dict[str, Any],
+    ) -> dict[str, Any]:
+        arguments = tool_call.get("arguments") if isinstance(tool_call.get("arguments"), dict) else {}
+        try:
+            analysis = self.file_analysis_service.analyze(
+                FileAnalysisRequest(
+                    file_path=file_path,
+                    sample_size=self._bounded_int(arguments.get("sample_size"), default=10, minimum=0, maximum=100),
+                    include_value_frequencies=bool(arguments.get("include_value_frequencies", True)),
+                    save_result=bool(arguments.get("save_result", False)),
+                    output_format=str(arguments.get("output_format") or "json"),
+                )
+            )
+        except FileAnalysisError as error:
+            return {
+                "status": "error",
+                "error": str(error),
+            }
+
+        return {
+            "status": "ok",
+            "result": analysis,
+        }
+
+    def _direct_file_tool_response_content(
+        self,
+        *,
+        tool_call: dict[str, Any],
+        tool_result: dict[str, Any],
+    ) -> str:
+        if tool_result.get("status") != "ok":
+            return ""
+
+        arguments = tool_call.get("arguments") if isinstance(tool_call.get("arguments"), dict) else {}
+        response_mode = str(arguments.get("response_mode") or "").strip()
+        if response_mode != "direct_tool_result":
+            return ""
+
+        result = tool_result.get("result") if isinstance(tool_result.get("result"), dict) else {}
+        analysis_info = result.get("analysis") if isinstance(result.get("analysis"), dict) else {}
+        preferred_result = str(arguments.get("preferred_result") or "auto").strip()
+        candidates: list[str] = []
+        if preferred_result and preferred_result != "auto":
+            candidates.append(preferred_result)
+        candidates.extend(
+            [
+                "numeric_value_frequency_csv",
+                "all_cell_value_frequency_csv",
+            ]
+        )
+
+        for key in candidates:
+            content = str(analysis_info.get(key) or "").strip()
+            if content:
+                return content
+        return ""
+
+    def _build_file_tool_result_prompt(
+        self,
+        *,
+        tool_call: dict[str, Any],
+        tool_result: dict[str, Any],
+        app_language: str,
+    ) -> str:
+        if tool_result.get("status") != "ok":
+            return (
+                "[Tool Result: file_analyze]\n"
+                f"status: error\nerror: {tool_result.get('error', '')}\n\n"
+                "The backend tool failed. Answer the user honestly and briefly."
+            )
+
+        result = tool_result.get("result") if isinstance(tool_result.get("result"), dict) else {}
+        formatted_result = self._format_file_analysis_tool_context(result)
+        return (
+            "[Tool Result: file_analyze]\n"
+            "The model requested this backend tool call, and the app executed it deterministically.\n"
+            "Use the tool result below to answer the user's original request.\n"
+            "If the user requested CSV output, output only CSV text without explanations, Markdown, code fences, XML-like tags, or comments.\n"
+            f"App language: {app_language}\n"
+            f"Tool call reason: {tool_call.get('reason', '')}\n\n"
+            f"{formatted_result}"
+        ).strip()
+
+    def _format_file_tool_call_trace(self, tool_call: dict[str, Any]) -> str:
+        return (
+            "[Tool Call]\n"
+            f"{json.dumps({'tool': 'file_analyze', 'arguments': tool_call.get('arguments', {})}, ensure_ascii=False)}"
+        )
+
+    def _parse_tool_call_json(self, content: str) -> dict[str, Any] | None:
+        text = str(content or "").strip()
+        if not text:
+            return None
+        text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE).strip()
+        text = re.sub(r"\s*```$", "", text).strip()
+
+        candidates = [text]
+        match = re.search(r"\{.*\}", text, flags=re.DOTALL)
+        if match:
+            candidates.append(match.group(0))
+
+        for candidate in candidates:
+            try:
+                payload = json.loads(candidate)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(payload, dict):
+                return payload
+        return None
+
+    def _bounded_int(
+        self,
+        value: Any,
+        *,
+        default: int,
+        minimum: int,
+        maximum: int,
+    ) -> int:
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            parsed = default
+        return max(minimum, min(maximum, parsed))
 
     def _call_openai_cloud_chat(
         self,
@@ -1091,10 +1243,6 @@ class ChatService:
             content = str(message.content).strip()
             if not content:
                 continue
-            if id(message) == latest_user_message_id:
-                tool_context = self._build_file_analysis_tool_context(message)
-                if tool_context:
-                    content = f"{content}\n\n{tool_context}"
 
             messages.append(
                 {
@@ -1115,27 +1263,6 @@ class ChatService:
             messages.append({"role": "user", "content": latest_user_message.content})
 
         return messages
-
-    def _build_file_analysis_tool_context(self, message: ChatMessage) -> str:
-        metadata = getattr(message, "metadata", {}) or {}
-        file_path = str(metadata.get("file_path") or "").strip()
-        if not metadata.get("transient_file_context") or not file_path:
-            return ""
-
-        try:
-            analysis = self.file_analysis_service.analyze(
-                FileAnalysisRequest(
-                    file_path=file_path,
-                    sample_size=10,
-                    include_value_frequencies=True,
-                    save_result=False,
-                )
-            )
-        except FileAnalysisError as error:
-            print(f"[FileAnalysis] Chat tool analysis skipped: {error}")
-            return ""
-
-        return self._format_file_analysis_tool_context(analysis)
 
     def _format_file_analysis_tool_context(self, analysis: dict[str, Any]) -> str:
         file_info = analysis.get("file") if isinstance(analysis.get("file"), dict) else {}
