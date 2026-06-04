@@ -1,0 +1,21 @@
+{
+  "id": "light",
+  "name": "Light",
+  "palette": {
+    "window_bg": "#FFFFFF",
+    "panel_bg": "#F7F7F8",
+    "chat_bg": "#FFFFFF",
+    "user_bubble_bg": "#E7F0FF",
+    "assistant_bubble_bg": "#F2F2F3",
+    "text_primary": "#202123",
+    "text_secondary": "#6B7280",
+    "border": "#D9D9E3",
+    "accent": "#10A37F",
+    "accent_text": "#FFFFFF",
+    "input_bg": "#FFFFFF",
+    "input_border": "#CFCFD8",
+    "error": "#D92D20",
+    "warning": "#B54708",
+    "success": "#067647"
+  }
+}

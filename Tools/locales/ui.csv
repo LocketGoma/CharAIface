@@ -1,0 +1,54 @@
+key,ko,en
+app.title,CharAIface 캐릭터 세트 생성기,CharAIface Character Set Generator
+menu.file,파일,File
+menu.edit,편집,Edit
+menu.view,보기,View
+menu.help,도움말,Help
+menu.new,새로 만들기,New
+menu.open,열기...,Open...
+menu.save,저장...,Save...
+menu.exit,종료,Exit
+menu.undo,실행 취소,Undo
+menu.redo,다시 실행,Redo
+menu.preferences,환경설정,Preferences
+menu.fullscreen_preview,전체화면 미리보기,Fullscreen Preview
+menu.about,정보,About
+preview.title,메인 채팅 미리보기,Main Chat Preview
+preview.fullscreen,전체화면,Fullscreen
+preview.message.user,오늘은 새 캐릭터 세트를 테스트하고 있어.,I am testing a new character set today.
+preview.message.assistant,좋아. 선택한 반응 이미지와 팔레트가 메인 채팅 화면처럼 표시돼.,Great. The selected reaction image and palette are shown like the main chat screen.
+preview.empty,하단에서 이미지를 선택하세요,Select an image from the bottom strip
+editor.title,반응 이미지,Reaction Images
+editor.add,+,+
+editor.add.tooltip,이미지 추가,Add image
+editor.empty_tile,이미지 없음,No image
+metadata.title,캐릭터 정보,Character Info
+metadata.id,ID,ID
+metadata.name,이름,Name
+metadata.version,버전,Version
+metadata.author,제작자,Author
+metadata.description,설명,Description
+metadata.style,스타일 프롬프트,Style Prompt
+theme.label,테마,Theme
+theme.light,Light,Light
+theme.dark,Dark,Dark
+palette.title,팔레트,Palette
+palette.pick,선택,Pick
+chat.sidebar.title,채팅,Chats
+chat.sidebar.new,+ 새 채팅,+ New Chat
+chat.sidebar.item,캐릭터 세트 테스트,Character Set Test
+chat.header.title,CharAIface,CharAIface
+chat.header.status,캐릭터 세트 미리보기,Character set preview
+chat.input.placeholder,메시지를 입력하세요,Enter a message
+chat.attachment,첨부 없음,No attachment
+chat.send,전송,Send
+dialog.image_filter,이미지 파일 (*.png *.jpg *.jpeg *.gif *.apng),Image Files (*.png *.jpg *.jpeg *.gif *.apng)
+dialog.charpack_filter,CharAIface 캐릭터 팩 (*.charpack),CharAIface Character Pack (*.charpack)
+dialog.open_charpack,캐릭터 팩 열기,Open Character Pack
+dialog.save_charpack,캐릭터 팩 저장,Save Character Pack
+error.title,오류,Error
+error.open_failed,캐릭터 팩을 열 수 없습니다.,Could not open the character pack.
+error.save_failed,캐릭터 팩을 저장할 수 없습니다.,Could not save the character pack.
+error.missing_idle,idle 반응 이미지를 하나 이상 추가해야 합니다.,At least one idle reaction image is required.
+error.no_images,이미지를 하나 이상 추가해야 합니다.,At least one image is required.
+about.text,CharAIface 캐릭터 세트 생성기 프로토타입,CharAIface Character Set Generator prototype
