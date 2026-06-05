@@ -3,6 +3,7 @@ import sys
 from pathlib import Path
 from uuid import uuid4
 from shared.schema.chat import ChatMessage, ChatRequest
+from shared.file_types import file_dialog_filter
 from desktop.chat.chat_session import ChatSession
 from desktop.chat.session_store import ChatSessionStore
 from desktop.client.backend_http_client import BackendHttpClient
@@ -672,7 +673,7 @@ class MainWindow(QMainWindow):
             self,
             self.localization.t("chat.file.attach.title"),
             str(Path.home() / "Documents"),
-            "Text and code files (*.txt *.md *.csv *.py *.h *.hpp *.c *.cpp *.cc *.js *.ts *.tsx *.jsx *.json *.yaml *.yml *.toml *.ini *.cfg *.conf *.sh *.sql *.html *.css *.xml);;All files (*)",
+            file_dialog_filter(),
         )
         if not selected_path:
             return
@@ -692,7 +693,8 @@ class MainWindow(QMainWindow):
             self.localization.t(
                 "chat.file.attached",
                 name=attachment.name,
-            )
+            ),
+            detail=attachment.display_detail,
         )
         self._update_content_geometry()
 
@@ -1863,13 +1865,15 @@ class MainWindow(QMainWindow):
             f"{clean_user_content}\n\n"
             "[Attached File Handling Hint]\n"
             "The Machine-readable context below is deterministic helper data parsed from the original file by the app.\n"
+            "First identify the attachment type and the expected user outcome from [Attachment Intake] and [User Request].\n"
+            "Use the attached file as the primary input whenever the request refers to the file, this data, this code, this document, or attached content.\n"
             "For analysis, calculation, or aggregation tasks, prefer that helper data over free-form guessing.\n"
             "If ALL_CELL_VALUE_FREQUENCY_CSV is present and the user asks for value counts, row appearances, or row appearance probabilities, use that block directly.\n"
             "Treat every numeric CSV cell as one independent occurrence unless the user explicitly asks for combination analysis.\n"
             "If CELL_VALUE_FREQUENCY_CSV is present and the user asks for each number's appearance count, use that block directly.\n"
             "For CSV output requests, return only CSV text without explanations, Markdown, or comments.\n\n"
             "[Attached File]\n"
-            f"{build_file_context_message(attachment)}"
+            f"{build_file_context_message(attachment, clean_user_content)}"
         ).strip()
 
     def _user_message_content_with_inline_data_context(

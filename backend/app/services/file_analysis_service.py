@@ -17,6 +17,13 @@ from pygments.lexers import guess_lexer_for_filename
 from pygments.token import Token
 from pygments.util import ClassNotFound
 
+from shared.file_types import (
+    JSON_SUFFIXES,
+    SOURCE_CODE_SUFFIXES,
+    SUPPORTED_TEXT_FILE_SUFFIXES,
+    TABLE_SUFFIXES,
+)
+
 try:
     from tree_sitter_language_pack import detect_language_from_path, get_parser
 except Exception:  # pragma: no cover - optional parser integration
@@ -26,44 +33,6 @@ except Exception:  # pragma: no cover - optional parser integration
 
 MAX_ANALYSIS_FILE_BYTES = 1024 * 1024
 TEXT_ENCODINGS = ("utf-8-sig", "utf-8", "utf-16", "cp949")
-SUPPORTED_TEXT_SUFFIXES = {".txt", ".md", ".markdown", ".log"}
-SUPPORTED_TABLE_SUFFIXES = {".csv", ".tsv"}
-SUPPORTED_JSON_SUFFIXES = {".json"}
-SUPPORTED_CODE_SUFFIXES = {
-    ".c",
-    ".cc",
-    ".cpp",
-    ".cxx",
-    ".h",
-    ".hh",
-    ".hpp",
-    ".hxx",
-    ".py",
-    ".js",
-    ".jsx",
-    ".ts",
-    ".tsx",
-    ".java",
-    ".cs",
-    ".go",
-    ".rs",
-    ".swift",
-    ".kt",
-    ".kts",
-    ".php",
-    ".rb",
-    ".sh",
-    ".sql",
-    ".html",
-    ".css",
-    ".xml",
-    ".yaml",
-    ".yml",
-    ".toml",
-    ".ini",
-    ".cfg",
-    ".conf",
-}
 TREE_SITTER_LANGUAGE_ALIASES = {
     "c++": "cpp",
     "cc": "cpp",
@@ -172,12 +141,7 @@ class FileAnalysisService:
             )
 
         suffix = resolved.suffix.lower()
-        if suffix not in (
-            SUPPORTED_TABLE_SUFFIXES
-            | SUPPORTED_JSON_SUFFIXES
-            | SUPPORTED_TEXT_SUFFIXES
-            | SUPPORTED_CODE_SUFFIXES
-        ):
+        if suffix not in SUPPORTED_TEXT_FILE_SUFFIXES:
             raise FileAnalysisError(f"Unsupported file type: {suffix or '(none)'}")
 
         return resolved
@@ -223,16 +187,16 @@ class FileAnalysisService:
         include_value_frequencies: bool,
     ) -> dict[str, Any]:
         suffix = path.suffix.lower()
-        if suffix in SUPPORTED_TABLE_SUFFIXES:
+        if suffix in TABLE_SUFFIXES:
             return self._analyze_table(
                 content,
                 delimiter="\t" if suffix == ".tsv" else ",",
                 sample_size=sample_size,
                 include_value_frequencies=include_value_frequencies,
             )
-        if suffix in SUPPORTED_JSON_SUFFIXES:
+        if suffix in JSON_SUFFIXES:
             return self._analyze_json(content, sample_size=sample_size)
-        if suffix in SUPPORTED_CODE_SUFFIXES:
+        if suffix in SOURCE_CODE_SUFFIXES:
             return self._analyze_code(path, content, sample_size=sample_size)
         return self._analyze_text(content, sample_size=sample_size)
 
@@ -262,6 +226,8 @@ class FileAnalysisService:
             "columns": columns,
             "sample_rows": self._sample_rows_from_dataframe(dataframe, sample_size),
             "schema": self._schema_from_dataframe(dataframe),
+            "column_summary_csv": self._column_summary_csv(dataframe),
+            "table_reasoning_hints": self._table_reasoning_hints(dataframe),
         }
 
         if include_value_frequencies:
@@ -279,6 +245,9 @@ class FileAnalysisService:
             analysis["numeric_value_frequency_csv"] = self._frequency_rows_to_csv(
                 numeric_frequencies,
                 first_column="number",
+            )
+            analysis["per_column_value_frequency_csv"] = (
+                self._per_column_value_frequency_csv(dataframe)
             )
 
         return analysis
@@ -596,9 +565,112 @@ class FileAnalysisService:
                     "missing_count": int(len(series) - len(non_empty_series)),
                     "unique_count": len(set(non_empty)),
                     "numeric_stats": self._numeric_stats(non_empty),
+                    "examples": self._example_values(non_empty),
+                    "top_values": self._top_values(non_empty),
                 }
             )
         return schema
+
+    def _column_summary_csv(self, dataframe: pd.DataFrame) -> str:
+        output = StringIO()
+        writer = csv.writer(output)
+        writer.writerow(
+            [
+                "column",
+                "inferred_type",
+                "non_empty_count",
+                "missing_count",
+                "unique_count",
+                "example_values",
+                "top_values",
+                "numeric_min",
+                "numeric_max",
+                "numeric_mean",
+                "numeric_median",
+            ]
+        )
+        for column in dataframe.columns:
+            series = dataframe[column].astype(str)
+            non_empty_series = series[series.str.strip() != ""]
+            non_empty = non_empty_series.tolist()
+            numeric_stats = self._numeric_stats(non_empty) or {}
+            writer.writerow(
+                [
+                    column,
+                    self._infer_type_from_series(non_empty_series),
+                    len(non_empty),
+                    int(len(series) - len(non_empty_series)),
+                    len(set(non_empty)),
+                    "; ".join(self._example_values(non_empty)),
+                    "; ".join(
+                        f"{item['value']}:{item['count']}"
+                        for item in self._top_values(non_empty)
+                    ),
+                    self._format_stat_value(numeric_stats.get("min")),
+                    self._format_stat_value(numeric_stats.get("max")),
+                    self._format_stat_value(numeric_stats.get("mean")),
+                    self._format_stat_value(numeric_stats.get("median")),
+                ]
+            )
+        return output.getvalue().strip()
+
+    def _per_column_value_frequency_csv(self, dataframe: pd.DataFrame) -> str:
+        row_count = int(len(dataframe.index))
+        output = StringIO()
+        writer = csv.writer(output)
+        writer.writerow(
+            [
+                "column",
+                "value",
+                "total_count",
+                "row_appearance_count",
+                "row_appearance_probability_percent",
+            ]
+        )
+        for column in dataframe.columns:
+            total_counts: dict[str, int] = {}
+            row_counts: dict[str, int] = {}
+            for value in dataframe[column].astype(str):
+                normalized = value.strip()
+                if not normalized:
+                    continue
+                total_counts[normalized] = total_counts.get(normalized, 0) + 1
+                row_counts[normalized] = row_counts.get(normalized, 0) + 1
+
+            for value in self._sorted_values(total_counts):
+                row_appearance_count = row_counts.get(value, 0)
+                writer.writerow(
+                    [
+                        column,
+                        value,
+                        total_counts[value],
+                        row_appearance_count,
+                        self._format_percent((row_appearance_count / row_count) * 100)
+                        if row_count
+                        else "0",
+                    ]
+                )
+        return output.getvalue().strip()
+
+    def _table_reasoning_hints(self, dataframe: pd.DataFrame) -> list[str]:
+        hints = [
+            "Use column_summary_csv to understand each column before answering broad analysis requests.",
+            "Use per_column_value_frequency_csv for category counts within a specific column.",
+            "Use all_cell_value_frequency_csv only when the user asks for values across the entire table.",
+        ]
+        integer_columns = [
+            str(column)
+            for column in dataframe.columns
+            if self._infer_type_from_series(
+                dataframe[column].astype(str)[dataframe[column].astype(str).str.strip() != ""]
+            )
+            == "integer"
+        ]
+        if len(integer_columns) >= 2:
+            hints.append(
+                "Multiple integer columns are present. Do not treat a row as a combination unless the user explicitly describes the rows that way."
+            )
+        return hints
 
     def _value_frequencies_from_dataframe(
         self,
@@ -638,6 +710,31 @@ class FileAnalysisService:
                 }
             )
         return result
+
+    def _example_values(self, values: list[str], limit: int = 5) -> list[str]:
+        examples: list[str] = []
+        seen: set[str] = set()
+        for value in values:
+            normalized = str(value).strip()
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            examples.append(normalized)
+            if len(examples) >= limit:
+                break
+        return examples
+
+    def _top_values(self, values: list[str], limit: int = 5) -> list[dict[str, Any]]:
+        counts: dict[str, int] = {}
+        for value in values:
+            normalized = str(value).strip()
+            if not normalized:
+                continue
+            counts[normalized] = counts.get(normalized, 0) + 1
+        return [
+            {"value": value, "count": counts[value]}
+            for value in sorted(counts, key=lambda item: (-counts[item], item))[:limit]
+        ]
 
     def _frequency_rows_to_csv(
         self,
@@ -759,6 +856,13 @@ class FileAnalysisService:
     def _format_percent(self, value: float) -> str:
         formatted = f"{value:.2f}".rstrip("0").rstrip(".")
         return formatted or "0"
+
+    def _format_stat_value(self, value: Any) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, float):
+            return f"{value:.6g}"
+        return str(value)
 
     def _sorted_values(self, counts: dict[str, int]) -> list[str]:
         def sort_key(value: str) -> tuple[int, float | str]:

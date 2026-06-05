@@ -296,9 +296,12 @@ class BottomUserArea(QWidget):
         self._response_pending = is_pending
         self._update_send_button_text()
 
-    def set_attached_file_name(self, file_name: str | None) -> None:
+    def set_attached_file_name(self, file_name: str | None, *, detail: str = "") -> None:
         label = str(file_name or "").strip()
-        self.attachment_label.setText(label)
+        detail = str(detail or "").strip()
+        display_text = f"{label} · {detail}" if label and detail else label
+        self.attachment_label.setText(display_text)
+        self.attachment_label.setToolTip(display_text)
         has_attachment = bool(label)
         self.attachment_pill.setVisible(has_attachment)
 

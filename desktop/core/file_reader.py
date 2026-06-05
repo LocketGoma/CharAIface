@@ -3,51 +3,22 @@ import csv
 from io import StringIO
 from pathlib import Path
 
+from shared.file_intake import render_attachment_intake_block
+from shared.file_types import (
+    JSON_SUFFIXES,
+    MARKDOWN_SUFFIXES,
+    SOURCE_CODE_SUFFIXES,
+    TABLE_SUFFIXES,
+    file_type_label,
+    format_file_size,
+)
+
 
 MAX_FILE_BYTES = 1024 * 1024
 MIN_INLINE_CSV_ROWS = 2
 TEXT_ENCODINGS = ("utf-8-sig", "utf-8", "utf-16", "cp949")
 UTF16_BOMS = (b"\xff\xfe", b"\xfe\xff")
 ALLOWED_CONTROL_CHARS = {"\n", "\r", "\t", "\f"}
-SOURCE_CODE_SUFFIXES = {
-    ".c",
-    ".cc",
-    ".cfg",
-    ".conf",
-    ".cpp",
-    ".cs",
-    ".css",
-    ".go",
-    ".h",
-    ".hpp",
-    ".htm",
-    ".html",
-    ".ini",
-    ".java",
-    ".js",
-    ".json",
-    ".jsx",
-    ".kt",
-    ".kts",
-    ".m",
-    ".mm",
-    ".php",
-    ".plist",
-    ".properties",
-    ".py",
-    ".rb",
-    ".rs",
-    ".sh",
-    ".sql",
-    ".swift",
-    ".toml",
-    ".ts",
-    ".tsx",
-    ".vue",
-    ".xml",
-    ".yaml",
-    ".yml",
-}
 
 
 class FileReadError(Exception):
@@ -59,9 +30,15 @@ class FileReadResult:
     path: Path
     name: str
     suffix: str
+    size_bytes: int
+    type_label: str
     summary: str
     model_context: str = ""
     truncated: bool = False
+
+    @property
+    def display_detail(self) -> str:
+        return f"{self.type_label} · {format_file_size(self.size_bytes)}"
 
 
 def read_file_for_chat(path: str | Path) -> FileReadResult:
@@ -83,28 +60,35 @@ def read_file_for_chat(path: str | Path) -> FileReadResult:
         path=file_path,
         name=file_path.name,
         suffix=suffix,
+        size_bytes=file_path.stat().st_size,
+        type_label=file_type_label(suffix or file_path.name),
         summary=summary,
         model_context=model_context,
         truncated=truncated,
     )
 
 
-def build_file_context_message(result: FileReadResult) -> str:
+def build_file_context_message(result: FileReadResult, user_content: str = "") -> str:
     truncated_note = "\n\n[Note: File content was truncated for chat context.]" if result.truncated else ""
     tag = _content_tag_for_suffix(result.suffix)
+    intake = render_attachment_intake_block(result.name, result.suffix, user_content)
     metadata = (
         "Attached file metadata:\n"
         f"- name: {result.name}\n"
-        f"- type: {result.suffix or '(none)'}"
+        f"- suffix: {result.suffix or '(none)'}\n"
+        f"- type: {result.type_label}\n"
+        f"- size: {format_file_size(result.size_bytes)}"
     )
     if result.model_context.strip():
         return (
+            f"{intake}\n\n"
             f"{metadata}\n\n"
             f"{result.model_context}"
             f"{truncated_note}"
         )
 
     return (
+        f"{intake}\n\n"
         f"{metadata}\n\n"
         "Actual attached file content:\n"
         f"<{tag} filename=\"{result.name}\">\n"
@@ -471,9 +455,11 @@ def _is_larger_than_limit(path: Path) -> bool:
 
 
 def _content_tag_for_suffix(suffix: str) -> str:
-    if suffix == ".csv":
+    if suffix in TABLE_SUFFIXES:
         return "CSV"
-    if suffix == ".md":
+    if suffix in JSON_SUFFIXES:
+        return "JSON"
+    if suffix in MARKDOWN_SUFFIXES:
         return "MARKDOWN"
     if suffix in SOURCE_CODE_SUFFIXES:
         return "CODE"

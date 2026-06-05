@@ -12,6 +12,7 @@ from backend.app.services.file_analysis_service import (
     FileAnalysisRequest,
     FileAnalysisService,
 )
+from shared.file_intake import render_attachment_intake_block
 from shared.schema.chat import ChatMessage
 
 
@@ -36,6 +37,8 @@ DEFAULT_PLANNER_SYSTEM_PROMPT = (
     "{\"tool\":\"none\",\"arguments\":{},\"reason\":\"short reason\"}\n\n"
     "Use preferred_result='numeric_value_frequency_csv' for per-number or numeric frequency/probability CSV requests.\n"
     "Use preferred_result='all_cell_value_frequency_csv' for general cell value frequency/probability CSV requests.\n"
+    "Use preferred_result='column_summary_csv' for column overview, schema, missing value, example, or numeric-stat summary requests.\n"
+    "Use preferred_result='per_column_value_frequency_csv' for counts or distributions grouped by each column.\n"
     "Use response_mode='direct_tool_result' only when the user asks for raw CSV/table output that the tool result can provide directly.\n"
     "Otherwise use response_mode='model_final'."
 )
@@ -177,6 +180,7 @@ class FileToolLoop:
                     f"App language: {app_language}\n"
                     f"Attached file name: {file_name}\n"
                     f"Attached file type: {file_type}\n\n"
+                    f"{render_attachment_intake_block(file_name, file_type, original_user_content)}\n\n"
                     "User request:\n"
                     f"{original_user_content}"
                 ),
@@ -255,6 +259,8 @@ class FileToolLoop:
             candidates.append(preferred_result)
         candidates.extend(
             [
+                "column_summary_csv",
+                "per_column_value_frequency_csv",
                 "numeric_value_frequency_csv",
                 "all_cell_value_frequency_csv",
             ]
@@ -313,6 +319,41 @@ class FileToolLoop:
             all_frequency_csv = str(
                 analysis_info.get("all_cell_value_frequency_csv") or ""
             ).strip()
+            column_summary_csv = str(
+                analysis_info.get("column_summary_csv") or ""
+            ).strip()
+            per_column_frequency_csv = str(
+                analysis_info.get("per_column_value_frequency_csv") or ""
+            ).strip()
+            reasoning_hints = analysis_info.get("table_reasoning_hints")
+            if isinstance(reasoning_hints, list) and reasoning_hints:
+                lines.extend(
+                    [
+                        "",
+                        "Table reasoning hints:",
+                        *[f"- {hint}" for hint in reasoning_hints if str(hint).strip()],
+                    ]
+                )
+            if column_summary_csv:
+                lines.extend(
+                    [
+                        "",
+                        "Use this block first for broad CSV/table analysis requests. It describes column types, missing values, examples, top values, and numeric statistics.",
+                        "<COLUMN_SUMMARY_CSV>",
+                        column_summary_csv,
+                        "</COLUMN_SUMMARY_CSV>",
+                    ]
+                )
+            if per_column_frequency_csv:
+                lines.extend(
+                    [
+                        "",
+                        "Use this block when the user asks for counts, distributions, or probabilities within each specific column.",
+                        "<PER_COLUMN_VALUE_FREQUENCY_CSV>",
+                        per_column_frequency_csv,
+                        "</PER_COLUMN_VALUE_FREQUENCY_CSV>",
+                    ]
+                )
             if numeric_frequency_csv:
                 lines.extend(
                     [
