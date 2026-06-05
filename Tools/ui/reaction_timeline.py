@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QListView,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
@@ -18,6 +19,12 @@ from characters.character_pack_archive import ReactionImage
 from localization.localization_manager import LocalizationManager
 
 from ui.constants import REACTION_TYPES
+
+TILE_WIDTH = 168
+TILE_IMAGE_HEIGHT = 214
+TILE_COMBO_HEIGHT = 30
+TILE_HEIGHT = TILE_IMAGE_HEIGHT + TILE_COMBO_HEIGHT + 4
+TILE_SPACING = 8
 
 
 class ReactionTile(QFrame):
@@ -33,7 +40,7 @@ class ReactionTile(QFrame):
         self.image = image
         self.localization = localization
         self.setObjectName("ReactionTile")
-        self.setFixedSize(200, 346)
+        self.setFixedSize(TILE_WIDTH, TILE_HEIGHT)
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
 
         layout = QVBoxLayout(self)
@@ -42,15 +49,16 @@ class ReactionTile(QFrame):
 
         self.preview = QLabel()
         self.preview.setObjectName("ReactionTileImage")
-        self.preview.setFixedSize(200, 300)
+        self.preview.setFixedSize(TILE_WIDTH, TILE_IMAGE_HEIGHT)
         self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.preview)
 
         self.combo = QComboBox()
+        self.combo.setView(QListView())
         self.combo.addItems(REACTION_TYPES)
         self.combo.setCurrentText(image.reaction)
-        self.combo.setFixedWidth(200)
-        self.combo.setFixedHeight(30)
+        self.combo.setFixedWidth(TILE_WIDTH)
+        self.combo.setFixedHeight(TILE_COMBO_HEIGHT)
         self.combo.currentTextChanged.connect(self._reaction_changed)
         layout.addWidget(self.combo)
 
@@ -62,7 +70,7 @@ class ReactionTile(QFrame):
     def _set_image(self, path: Path) -> None:
         if path.suffix.lower() == ".gif":
             movie = QMovie(str(path))
-            movie.setScaledSize(QSize(200, 300))
+            movie.setScaledSize(QSize(TILE_WIDTH, TILE_IMAGE_HEIGHT))
             self.preview.setMovie(movie)
             movie.start()
             return
@@ -105,9 +113,9 @@ class ReactionTimeline(QObject):
             layout.addStretch(1)
 
         width = (
-            len(images) * 200 + max(0, len(images) - 1) * 8
+            len(images) * TILE_WIDTH + max(0, len(images) - 1) * TILE_SPACING
             if images
             else 1
         )
-        container.setFixedSize(width, 346)
+        container.setFixedSize(width, TILE_HEIGHT)
         return container

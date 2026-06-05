@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QAction, QColor
 from PySide6.QtWidgets import (
     QColorDialog,
@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListView,
     QMainWindow,
     QMessageBox,
     QPushButton,
@@ -45,6 +46,11 @@ LOCALE_PATH = TOOLS_DIR / "locales" / "ui.csv"
 THEMES_DIR = TOOLS_DIR / "themes"
 WORKSPACE_DIR = TOOLS_DIR / ".charactersetgenerator_workspace"
 SIDE_PANEL_WIDTH = 340
+DEFAULT_WINDOW_SIZE = QSize(1180, 740)
+MINIMUM_WINDOW_SIZE = QSize(960, 680)
+SCREEN_MARGIN = 140
+EDITOR_PANEL_HEIGHT = 302
+TIMELINE_SCROLL_HEIGHT = 254
 
 
 class CharacterSetGeneratorWindow(QMainWindow):
@@ -60,8 +66,8 @@ class CharacterSetGeneratorWindow(QMainWindow):
         self.selected_image: ReactionImage | None = None
 
         self.setWindowTitle(self.localization.t("app.title"))
-        self.resize(1400, 1040)
-        self.setMinimumSize(1100, 960)
+        self.setMinimumSize(MINIMUM_WINDOW_SIZE)
+        self._set_initial_window_size()
 
         self._create_actions()
         self._create_menu_bar()
@@ -134,7 +140,7 @@ class CharacterSetGeneratorWindow(QMainWindow):
 
         editor_panel = QFrame()
         editor_panel.setObjectName("EditorPanel")
-        editor_panel.setFixedHeight(398)
+        editor_panel.setFixedHeight(EDITOR_PANEL_HEIGHT)
         editor_layout = QHBoxLayout(editor_panel)
         editor_layout.setContentsMargins(10, 10, 10, 10)
         editor_layout.setSpacing(10)
@@ -159,7 +165,7 @@ class CharacterSetGeneratorWindow(QMainWindow):
         timeline_layout.addLayout(editor_header)
 
         self.timeline_scroll = QScrollArea()
-        self.timeline_scroll.setFixedHeight(350)
+        self.timeline_scroll.setFixedHeight(TIMELINE_SCROLL_HEIGHT)
         self.timeline_scroll.setWidgetResizable(False)
         self.timeline_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.timeline_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -171,6 +177,17 @@ class CharacterSetGeneratorWindow(QMainWindow):
 
         self.setCentralWidget(central)
         self._rebuild_timeline()
+
+    def _set_initial_window_size(self) -> None:
+        screen = self.screen()
+        available = screen.availableGeometry() if screen is not None else None
+        if available is None:
+            self.resize(DEFAULT_WINDOW_SIZE)
+            return
+
+        width = min(DEFAULT_WINDOW_SIZE.width(), max(MINIMUM_WINDOW_SIZE.width(), available.width() - SCREEN_MARGIN))
+        height = min(DEFAULT_WINDOW_SIZE.height(), max(MINIMUM_WINDOW_SIZE.height(), available.height() - SCREEN_MARGIN))
+        self.resize(width, height)
 
     def _theme_changed(self) -> None:
         theme_id = self.theme_combo.currentData()
@@ -220,6 +237,7 @@ class CharacterSetGeneratorWindow(QMainWindow):
         form.addRow(self.localization.t("metadata.description"), self.description_input)
 
         self.theme_combo = QComboBox()
+        self.theme_combo.setView(QListView())
         for theme in self.theme_manager.themes:
             label_key = f"theme.{theme.id}"
             label = self.localization.t(label_key)

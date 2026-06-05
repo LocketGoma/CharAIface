@@ -161,6 +161,33 @@ QPushButton:hover,
 QComboBox:hover {{
     border: 1px solid {p.accent};
 }}
+QComboBox::drop-down {{
+    background-color: {p.input_bg};
+    border-left: 1px solid {p.input_border};
+    border-top-right-radius: 8px;
+    border-bottom-right-radius: 8px;
+    width: 28px;
+}}
+QComboBox QAbstractItemView {{
+    background-color: {p.input_bg};
+    color: {p.text_primary};
+    border: 1px solid {p.input_border};
+    outline: 0;
+    selection-background-color: {p.accent};
+    selection-color: {p.accent_text};
+}}
+QComboBox QAbstractItemView::item {{
+    min-height: 24px;
+    padding: 4px 8px;
+}}
+QComboBox QAbstractItemView::item:selected {{
+    background-color: {p.accent};
+    color: {p.accent_text};
+}}
+QComboBox QAbstractItemView::item:hover {{
+    background-color: {p.panel_bg};
+    color: {p.text_primary};
+}}
 QPushButton#AddImageButton {{
     font-size: 18px;
     font-weight: 700;
