@@ -19,6 +19,7 @@ class BottomUserArea(QWidget):
     send_requested = Signal(str)
     cancel_requested = Signal()
     file_attach_requested = Signal()
+    file_attachment_cancel_requested = Signal()
     text_changed = Signal(str)
 
     def __init__(self, localization: LocalizationManager) -> None:
@@ -71,12 +72,29 @@ class BottomUserArea(QWidget):
         self.attach_button.setFixedSize(34, 30)
         self.attach_button.clicked.connect(self.file_attach_requested.emit)
 
+        self.attachment_pill = QFrame()
+        self.attachment_pill.setObjectName("AttachmentPill")
+        self.attachment_pill.setFixedHeight(30)
+        self.attachment_pill.setVisible(False)
+        attachment_pill_layout = QHBoxLayout(self.attachment_pill)
+        attachment_pill_layout.setContentsMargins(10, 0, 6, 0)
+        attachment_pill_layout.setSpacing(6)
+
         self.attachment_label = QLabel()
         self.attachment_label.setObjectName("AttachmentLabel")
-        self.attachment_label.setVisible(False)
+
+        self.attachment_cancel_button = QPushButton("×")
+        self.attachment_cancel_button.setObjectName("AttachmentCancelButton")
+        self.attachment_cancel_button.setFixedSize(24, 24)
+        self.attachment_cancel_button.clicked.connect(
+            self.file_attachment_cancel_requested.emit
+        )
+
+        attachment_pill_layout.addWidget(self.attachment_label, stretch=1)
+        attachment_pill_layout.addWidget(self.attachment_cancel_button)
 
         attachment_layout.addWidget(self.attach_button)
-        attachment_layout.addWidget(self.attachment_label, stretch=1)
+        attachment_layout.addWidget(self.attachment_pill, stretch=1)
         composer_layout.addWidget(attachment_row)
         composer_layout.addWidget(self.composer)
 
@@ -219,12 +237,15 @@ class BottomUserArea(QWidget):
         return character_info_height + spacing + user_name_height
 
     def recommended_input_area_height(self) -> int:
-        attachment_height = 36 if self.attachment_label.isVisible() else 0
+        attachment_height = 36 if self._has_visible_attachment() else 0
         return self.composer.height() + attachment_height + 46
 
     def retranslate_ui(self) -> None:
         self._update_send_button_text()
         self.attach_button.setToolTip(self.localization.t("chat.file.attach.button"))
+        self.attachment_cancel_button.setToolTip(
+            self.localization.t("chat.file.attach.cancel")
+        )
         self.composer.set_placeholder_text(self.localization.t("chat.placeholder"))
         self.set_state("idle")
 
@@ -262,7 +283,7 @@ class BottomUserArea(QWidget):
 
         text = self.composer.toPlainText().strip()
 
-        if not text and not self.attachment_label.isVisible():
+        if not text and not self._has_visible_attachment():
             return
 
         self.composer.blockSignals(True)
@@ -278,7 +299,11 @@ class BottomUserArea(QWidget):
     def set_attached_file_name(self, file_name: str | None) -> None:
         label = str(file_name or "").strip()
         self.attachment_label.setText(label)
-        self.attachment_label.setVisible(bool(label))
+        has_attachment = bool(label)
+        self.attachment_pill.setVisible(has_attachment)
+
+    def _has_visible_attachment(self) -> bool:
+        return self.attachment_pill.isVisible()
 
     def _update_send_button_text(self) -> None:
         key = "chat.stop_generating" if self._response_pending else "chat.send"

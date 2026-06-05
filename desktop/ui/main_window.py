@@ -241,6 +241,9 @@ class MainWindow(QMainWindow):
         self.bottom_area.file_attach_requested.connect(
             self._on_file_attach_requested
         )
+        self.bottom_area.file_attachment_cancel_requested.connect(
+            self._clear_pending_file_attachment
+        )
         self.bottom_area.text_changed.connect(self.character_state.on_user_text_changed)
         self.character_state.state_changed.connect(self.bottom_area.set_state)
         self.chat_view.regenerate_requested.connect(self._on_regenerate_requested)

@@ -28,6 +28,7 @@ chat.failure.backend_unreachable,백엔드 응답이 없습니다. 앱 상태를
 chat.failure.developer_details,개발자 진단 정보,Developer diagnostics
 chat.failure.unknown,응답 생성 중 알 수 없는 오류가 발생했습니다. 다시 시도해 주세요.,An unknown error occurred while generating the response. Please try again.
 chat.file.attach.button,파일 첨부,Attach file
+chat.file.attach.cancel,첨부 취소,Remove attached file
 chat.file.attach.failed,파일을 읽을 수 없습니다. {error},Could not read the file. {error}
 chat.file.attach.title,파일 첨부,Attach File
 chat.file.attached,첨부됨: {name},Attached: {name}

@@ -541,12 +541,43 @@ def build_qss(theme: ThemeDefinition) -> str:
         border: 1px solid {p.accent};
     }}
 
-    QLabel#AttachmentLabel {{
-        color: {p.text_secondary};
+    QFrame#AttachmentPill {{
         background-color: {p.input_bg};
         border: 1px solid {p.border};
         border-radius: 8px;
-        padding: 5px 8px;
+        min-height: 28px;
+    }}
+
+    QFrame#AttachmentPill:hover {{
+        border: 1px solid {p.accent};
+    }}
+
+    QLabel#AttachmentLabel {{
+        color: {p.text_secondary};
+        background-color: transparent;
+        border: none;
+        padding: 0;
+        font-weight: bold;
+    }}
+
+    QPushButton#AttachmentCancelButton {{
+        background-color: transparent;
+        color: {p.text_secondary};
+        border: none;
+        border-radius: 6px;
+        font-size: 12pt;
+        font-weight: bold;
+        padding: 0;
+    }}
+
+    QPushButton#AttachmentCancelButton:hover {{
+        background-color: {p.panel_bg};
+        color: {p.text_primary};
+    }}
+
+    QPushButton#AttachmentCancelButton:pressed {{
+        background-color: {p.border};
+        color: {p.text_primary};
     }}
 
     QPushButton#DialogSaveButton {{
