@@ -1,11 +1,13 @@
 from pathlib import Path
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from shared.schema.character import CharacterThemeConfig
 
 
 class CharacterPack(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     id: str
     name: str
     version: str
@@ -22,9 +24,6 @@ class CharacterPack(BaseModel):
 
     theme: CharacterThemeConfig | None = None
     warnings: list[str] = Field(default_factory=list)
-
-    class Config:
-        arbitrary_types_allowed = True
 
     def avatar_images_as_str(self) -> dict[str, str]:
         return {

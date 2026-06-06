@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from PySide6.QtCore import Qt, QUrl, Signal
 from PySide6.QtGui import QDesktopServices, QFontDatabase, QIntValidator
 
@@ -7,6 +9,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QDialogButtonBox,
+    QFileDialog,
     QFormLayout,
     QHBoxLayout,
     QLabel,
@@ -23,6 +26,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from desktop.characters.character_pack_archive import import_charpack, inspect_charpack
 from backend.app.services.cloud_auth_manager import (
     CloudAuthManager,
     CloudCredentialConfig,
@@ -274,6 +278,11 @@ class SettingsDialog(QDialog):
         )
         self.character_reload_button.clicked.connect(self._reload_character_packs)
 
+        self.character_import_button = QPushButton(
+            self.localization.t("settings.character.import_charpack")
+        )
+        self.character_import_button.clicked.connect(self._import_character_pack)
+
         self.character_info_label = QLabel()
         self.character_info_label.setWordWrap(True)
         self.character_info_label.setObjectName("CharacterInfoLabel")
@@ -282,7 +291,13 @@ class SettingsDialog(QDialog):
         self.character_combo.currentIndexChanged.connect(self._refresh_theme_palette_view)
 
         form_layout.addRow(self.localization.t("settings.character.select"), self.character_combo)
-        form_layout.addRow("", self.character_reload_button)
+        character_button_row = QWidget()
+        character_button_layout = QHBoxLayout(character_button_row)
+        character_button_layout.setContentsMargins(0, 0, 0, 0)
+        character_button_layout.setSpacing(8)
+        character_button_layout.addWidget(self.character_import_button)
+        character_button_layout.addWidget(self.character_reload_button)
+        form_layout.addRow("", character_button_row)
 
         layout.addLayout(form_layout)
         layout.addWidget(self.character_info_label)
@@ -1488,13 +1503,13 @@ class SettingsDialog(QDialog):
 
         self._finalize_combo_box(self.character_combo)
 
-    def _reload_character_packs(self) -> None:
-        current_character_id = self.character_combo.currentData()
-        if current_character_id is None:
-            current_character_id = self.settings.selected_character_id
-
+    def _refresh_character_combo(self, selected_character_id: str | None = None) -> None:
         self.character_registry.load()
         self.character_registry_reloaded = True
+
+        current_character_id = selected_character_id or self.character_combo.currentData()
+        if current_character_id is None:
+            current_character_id = self.settings.selected_character_id
 
         self.character_combo.blockSignals(True)
         self.character_combo.clear()
@@ -1517,6 +1532,10 @@ class SettingsDialog(QDialog):
 
         self.character_combo.blockSignals(False)
         self._update_character_info_label()
+        self._refresh_theme_palette_view()
+
+    def _reload_character_packs(self) -> None:
+        self._refresh_character_combo()
 
         QMessageBox.information(
             self,
@@ -1524,6 +1543,51 @@ class SettingsDialog(QDialog):
             self.localization.t(
                 "settings.character.reload.completed",
                 count=len(self.character_registry.packs),
+            ),
+        )
+
+    def _import_character_pack(self) -> None:
+        file_name, _selected_filter = QFileDialog.getOpenFileName(
+            self,
+            self.localization.t("settings.character.import_charpack"),
+            "",
+            self.localization.t("settings.character.charpack_filter"),
+        )
+        if not file_name:
+            return
+
+        source_path = Path(file_name)
+        try:
+            info = inspect_charpack(source_path)
+            builtin_character_ids = {
+                pack.id
+                for pack in self.character_registry.packs
+                if self.character_registry.is_builtin(pack.id)
+            }
+            imported_dir = import_charpack(
+                source_path,
+                self.character_registry.user_characters_dir,
+                builtin_character_ids=builtin_character_ids,
+            )
+            self._refresh_character_combo(selected_character_id=imported_dir.name)
+        except Exception as error:
+            QMessageBox.critical(
+                self,
+                self.localization.t("settings.character.import.failed.title"),
+                self.localization.t(
+                    "settings.character.import.failed",
+                    error=str(error),
+                ),
+            )
+            return
+
+        QMessageBox.information(
+            self,
+            self.localization.t("settings.character.import.completed.title"),
+            self.localization.t(
+                "settings.character.import.completed",
+                name=info.name,
+                character_id=info.character_id,
             ),
         )
 

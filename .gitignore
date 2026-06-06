@@ -239,3 +239,5 @@ resources/data/chat_sessions/session_index.json
 **/__init__.py
 resources/data/exports
 tests
+resources/characters
+!resources/characters/README.md
