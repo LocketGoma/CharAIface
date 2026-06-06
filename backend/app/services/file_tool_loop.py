@@ -32,22 +32,25 @@ DEFAULT_PLANNER_SYSTEM_PROMPT = (
     "Call file_analyze when the user asks to inspect, analyze, calculate, summarize, aggregate, transform, or reason from the attached file.\n"
     "Do not call a tool for casual conversation or questions unrelated to the attached file.\n\n"
     "JSON schema:\n"
-    "{\"tool\":\"file_analyze\",\"arguments\":{\"sample_size\":10,\"include_value_frequencies\":true,\"save_result\":false,\"output_format\":\"json\",\"preferred_result\":\"auto\",\"response_mode\":\"model_final\"},\"reason\":\"short reason\"}\n"
+    "{\"tool\":\"file_analyze\",\"arguments\":{\"sample_size\":10,\"include_value_frequencies\":true,\"save_result\":false,\"output_format\":\"json\",\"preferred_result\":\"auto\",\"response_mode\":\"model_final\"},\"request_intent\":{\"intent\":\"short intent label\",\"expected_outcome\":\"what the user wants\",\"answer_strategy\":\"how the final assistant should use the tool result\",\"forbidden_behavior\":\"what the final assistant must avoid\"},\"reason\":\"short reason\"}\n"
     "or\n"
-    "{\"tool\":\"none\",\"arguments\":{},\"reason\":\"short reason\"}\n\n"
+    "{\"tool\":\"none\",\"arguments\":{},\"request_intent\":{\"intent\":\"short intent label\",\"expected_outcome\":\"what the user wants\",\"answer_strategy\":\"how the assistant should answer\",\"forbidden_behavior\":\"what the assistant must avoid\"},\"reason\":\"short reason\"}\n\n"
+    "The request_intent object is required. Infer it from the user's request, not from hard-coded examples.\n"
+    "Use intent='statistics_or_counting' when the user asks for computed counts, frequencies, distributions, probabilities, totals, or other statistics from data.\n"
+    "Use intent='summary' only when the user asks to summarize or describe the file.\n"
     "Use preferred_result='numeric_value_frequency_csv' for per-number or numeric frequency/probability CSV requests.\n"
     "Use preferred_result='all_cell_value_frequency_csv' for general cell value frequency/probability CSV requests.\n"
     "Use preferred_result='column_summary_csv' for column overview, schema, missing value, example, or numeric-stat summary requests.\n"
     "Use preferred_result='per_column_value_frequency_csv' for counts or distributions grouped by each column.\n"
     "For exact count, frequency, distribution, or probability requests, select the most specific preferred_result that already contains the computed result.\n"
-    "Use response_mode='direct_tool_result' only when preferred_result is not 'auto' and the user asks for raw CSV/table output that the selected tool result can provide directly.\n"
-    "Otherwise use response_mode='model_final'."
+    "Always use response_mode='model_final'. The model must answer after reading the backend tool result and request intent."
 )
 DEFAULT_TOOL_RESULT_PREFIX = (
     "[Tool Result: file_analyze]\n"
     "The model requested this backend tool call, and the app executed it deterministically.\n"
     "Use the tool result below to answer the user's original request.\n"
     "For exact counts, frequencies, distributions, probabilities, schema summaries, or table transformations, use the deterministic tool blocks instead of estimating from sample rows.\n"
+    "For item-by-item, value-by-value, category-by-category, or column-specific count requests, convert the matching frequency CSV block into the final answer.\n"
     "Follow the final response language instruction below. "
     "If the user requested CSV output, output only CSV text without explanations, Markdown, code fences, XML-like tags, or comments."
 )
@@ -117,33 +120,27 @@ class FileToolLoop:
         )
         used_default_tool_call = False
         if not tool_call or tool_call.get("tool") != "file_analyze":
-            tool_call = self._default_file_analyze_tool_call()
+            tool_call = self._default_file_analyze_tool_call(
+                original_user_content=self._original_user_content(latest_user_message)
+            )
             used_default_tool_call = True
+        print(
+            "[ToolLoop] file_analyze "
+            f"{'defaulted' if used_default_tool_call else 'selected'} "
+            f"for {Path(file_path).name}"
+        )
 
         tool_result = self._execute_file_analyze_tool_call(
             file_path=file_path,
             tool_call=tool_call,
         )
-        direct_content = self._direct_response_content(
-            tool_call=tool_call,
-            tool_result=tool_result,
-        )
-        if direct_content:
-            return FileToolResponse(
-                content=direct_content,
-                metadata={
-                    "tool_loop_used": True,
-                    "tool_name": "file_analyze",
-                    "tool_status": tool_result.get("status"),
-                    "tool_response_mode": "direct_tool_result",
-                    "tool_call_defaulted": used_default_tool_call,
-                },
-            )
+        print(f"[ToolLoop] file_analyze status: {tool_result.get('status')}")
 
         tool_result_prompt = self._build_tool_result_prompt(
             tool_call=tool_call,
             tool_result=tool_result,
             app_language=app_language,
+            original_user_content=self._original_user_content(latest_user_message),
         )
         final_messages = [
             *base_messages,
@@ -226,7 +223,7 @@ class FileToolLoop:
             or ""
         ).strip()
 
-    def _default_file_analyze_tool_call(self) -> dict[str, Any]:
+    def _default_file_analyze_tool_call(self, *, original_user_content: str) -> dict[str, Any]:
         return {
             "tool": "file_analyze",
             "arguments": {
@@ -236,6 +233,19 @@ class FileToolLoop:
                 "output_format": "json",
                 "preferred_result": "auto",
                 "response_mode": "model_final",
+            },
+            "request_intent": {
+                "intent": "attached_file_task",
+                "expected_outcome": (
+                    "The user wants the assistant to answer the request using the attached file."
+                ),
+                "answer_strategy": (
+                    "Use the backend file analysis result as evidence and follow the original user request."
+                ),
+                "forbidden_behavior": (
+                    "Do not ignore the attached file or claim it cannot be read when backend analysis is available."
+                ),
+                "original_user_request": str(original_user_content or "").strip(),
             },
             "reason": (
                 "Attached file context is present, so the backend should analyze the file "
@@ -276,28 +286,35 @@ class FileToolLoop:
             "result": analysis,
         }
 
-    def _direct_response_content(
+    def _request_intent_block(
         self,
         *,
         tool_call: dict[str, Any],
-        tool_result: dict[str, Any],
+        original_user_content: str,
     ) -> str:
-        if tool_result.get("status") != "ok":
-            return ""
-
-        arguments = tool_call.get("arguments") if isinstance(tool_call.get("arguments"), dict) else {}
-        response_mode = str(arguments.get("response_mode") or "").strip()
-        if response_mode != "direct_tool_result":
-            return ""
-
-        result = tool_result.get("result") if isinstance(tool_result.get("result"), dict) else {}
-        analysis_info = result.get("analysis") if isinstance(result.get("analysis"), dict) else {}
-        preferred_result = str(arguments.get("preferred_result") or "auto").strip()
-        if not preferred_result or preferred_result == "auto":
-            return ""
-
-        content = str(analysis_info.get(preferred_result) or "").strip()
-        return content
+        request_intent = tool_call.get("request_intent")
+        if isinstance(request_intent, dict):
+            intent = str(request_intent.get("intent") or "attached_file_task").strip()
+            expected_outcome = str(request_intent.get("expected_outcome") or "").strip()
+            answer_strategy = str(request_intent.get("answer_strategy") or "").strip()
+            forbidden_behavior = str(request_intent.get("forbidden_behavior") or "").strip()
+            return "\n".join(
+                [
+                    "[Request Intent]",
+                    f"- intent: {intent}",
+                    f"- user_expected_outcome: {expected_outcome or 'Answer the user request using the attached file.'}",
+                    f"- required_behavior: {answer_strategy or 'Use the backend file analysis result as evidence.'}",
+                    f"- forbidden_behavior: {forbidden_behavior or 'Do not ignore the attached file or invent unsupported facts.'}",
+                ]
+            )
+        return "\n".join(
+            [
+                "[Request Intent]",
+                "- intent: attached_file_task",
+                f"- user_expected_outcome: Infer the requested operation from this user request: {str(original_user_content or '').strip()}",
+                "- required_behavior: Prefer deterministic backend analysis fields over guessing from sample rows.",
+            ]
+        )
 
     def _build_tool_result_prompt(
         self,
@@ -305,6 +322,7 @@ class FileToolLoop:
         tool_call: dict[str, Any],
         tool_result: dict[str, Any],
         app_language: str,
+        original_user_content: str,
     ) -> str:
         language_instruction = self._final_response_language_instruction(app_language)
         if tool_result.get("status") != "ok":
@@ -328,6 +346,14 @@ class FileToolLoop:
             f"{language_instruction}\n"
             f"App language code: {app_language}\n"
             f"Tool call reason: {tool_call.get('reason', '')}\n\n"
+            f"{self._request_intent_block(tool_call=tool_call, original_user_content=original_user_content)}\n\n"
+            "Original user request to answer exactly:\n"
+            "<USER_REQUEST>\n"
+            f"{str(original_user_content or '').strip()}\n"
+            "</USER_REQUEST>\n\n"
+            "Do not summarize the attached file unless the user requested a summary. "
+            "Use the backend tool result to perform the exact requested operation. "
+            "If the request asks for item/value/category/column counts, use a frequency CSV block as the answer source.\n\n"
             f"{formatted_result}"
         ).strip()
 
@@ -351,6 +377,7 @@ class FileToolLoop:
                 language_instruction,
                 "Answer the user's request directly. Do not summarize these field names or explain the tool result.",
                 "For exact counts, frequencies, distributions, probabilities, or schema summaries, use the deterministic CSV blocks below and do not estimate from sample rows.",
+                "For item-by-item, value-by-value, category-by-category, or column-specific count requests, convert the matching frequency CSV block into the final answer.",
                 "For CSV output requests, return only CSV text without explanations, Markdown, or comments.",
                 f"- filename: {file_info.get('name', '')}",
                 f"- table_engine: {analysis_info.get('engine', '')}",
@@ -396,16 +423,6 @@ class FileToolLoop:
                         *[f"- {hint}" for hint in reasoning_hints if str(hint).strip()],
                     ]
                 )
-            if column_summary_csv:
-                lines.extend(
-                    [
-                        "",
-                        "Use this block first for broad CSV/table analysis requests. It describes column types, missing values, examples, top values, and numeric statistics.",
-                        "<COLUMN_SUMMARY_CSV>",
-                        column_summary_csv,
-                        "</COLUMN_SUMMARY_CSV>",
-                    ]
-                )
             if per_column_frequency_csv:
                 lines.extend(
                     [
@@ -434,6 +451,16 @@ class FileToolLoop:
                         "<ALL_CELL_VALUE_FREQUENCY_CSV>",
                         all_frequency_csv,
                         "</ALL_CELL_VALUE_FREQUENCY_CSV>",
+                    ]
+                )
+            if column_summary_csv:
+                lines.extend(
+                    [
+                        "",
+                        "Use this block for schema, column overview, missing value, example, top value, or numeric-stat summary requests.",
+                        "<COLUMN_SUMMARY_CSV>",
+                        column_summary_csv,
+                        "</COLUMN_SUMMARY_CSV>",
                     ]
                 )
 
