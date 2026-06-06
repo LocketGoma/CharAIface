@@ -2,8 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QSize, Qt
-from PySide6.QtGui import QMovie, QPixmap
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog,
     QFrame,
@@ -16,6 +15,7 @@ from PySide6.QtWidgets import (
 )
 
 from localization.localization_manager import LocalizationManager
+from ui.animated_image_label import AnimatedImageLabel
 
 
 class MainChatStage(QWidget):
@@ -30,11 +30,13 @@ class MainChatStage(QWidget):
         self.fullscreen = fullscreen
         self.setObjectName("ChatStage")
 
-        self.avatar = QLabel(localization.t("preview.empty"), self)
+        self.avatar = AnimatedImageLabel(self)
+        self.avatar.setText(localization.t("preview.empty"))
         self.avatar.setObjectName("AvatarPlaceholder")
         self.avatar.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom)
-        self.avatar_side = 360 if fullscreen else 238
-        self.avatar.setFixedSize(self.avatar_side, self.avatar_side)
+        self.avatar_width = 360 if fullscreen else 238
+        self.avatar_height = 420 if fullscreen else 320
+        self.avatar.setFixedSize(self.avatar_width, self.avatar_height)
 
         self.user_message = QLabel(localization.t("preview.message.user"), self)
         self.user_message.setObjectName("UserMessageBubble")
@@ -122,8 +124,6 @@ class PreviewPanel(QFrame):
         self.localization = localization
         self.fullscreen = fullscreen
         self.image_path: Path | None = None
-        self._movie: QMovie | None = None
-        self.avatar_size = 360 if fullscreen else 238
 
         self.setObjectName("PreviewPanel")
         root = QVBoxLayout(self)
@@ -222,44 +222,19 @@ class PreviewPanel(QFrame):
 
     def set_image(self, path: Path | None) -> None:
         self.image_path = path
-        self._stop_movie()
 
         if path is None:
+            self.avatar.stop_animation()
             self.avatar.clear()
             self.avatar.setText(self.localization.t("preview.empty"))
             return
 
-        if path.suffix.lower() == ".gif":
-            movie = QMovie(str(path))
-            movie.setScaledSize(QSize(self.avatar_size, self.avatar_size))
-            self._movie = movie
-            self.avatar.setMovie(movie)
-            movie.start()
-            self.avatar.setText("")
-            return
-
-        pixmap = QPixmap(str(path))
-        if pixmap.isNull():
+        if not self.avatar.set_image_path(path, animate=True):
             self.avatar.setText(self.localization.t("preview.empty"))
             return
-        scaled = pixmap.scaled(
-            QSize(self.avatar_size, self.avatar_size),
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation,
-        )
-        self.avatar.setPixmap(scaled)
-        self.avatar.setText("")
-
-    def _stop_movie(self) -> None:
-        if self._movie is not None:
-            self._movie.stop()
-            self._movie = None
-        self.avatar.setMovie(None)
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
-        if self.image_path is not None and self._movie is None:
-            self.set_image(self.image_path)
 
 
 class FullscreenPreview(QDialog):

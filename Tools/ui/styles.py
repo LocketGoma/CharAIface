@@ -1,6 +1,12 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from theme.theme_model import ThemeDefinition
+
+
+TOOLS_DIR = Path(__file__).resolve().parents[1]
+COMBO_ARROW_ICON = (TOOLS_DIR / "resources" / "icons" / "combo_arrow_down.svg").as_posix()
 
 
 def build_stylesheet(theme: ThemeDefinition) -> str:
@@ -8,6 +14,13 @@ def build_stylesheet(theme: ThemeDefinition) -> str:
     return f"""
 QMainWindow {{
     background-color: {p.window_bg};
+}}
+QMessageBox {{
+    background-color: {p.panel_bg};
+}}
+QMessageBox QLabel {{
+    color: {p.text_primary};
+    background-color: transparent;
 }}
 QWidget {{
     color: {p.text_primary};
@@ -166,7 +179,12 @@ QComboBox::drop-down {{
     border-left: 1px solid {p.input_border};
     border-top-right-radius: 8px;
     border-bottom-right-radius: 8px;
-    width: 28px;
+    width: 30px;
+}}
+QComboBox::down-arrow {{
+    image: url("{COMBO_ARROW_ICON}");
+    width: 12px;
+    height: 8px;
 }}
 QComboBox QAbstractItemView {{
     background-color: {p.input_bg};

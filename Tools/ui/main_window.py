@@ -43,14 +43,14 @@ from ui.styles import build_stylesheet
 
 TOOLS_DIR = Path(__file__).resolve().parents[1]
 LOCALE_PATH = TOOLS_DIR / "locales" / "ui.csv"
-THEMES_DIR = TOOLS_DIR / "themes"
+THEMES_DIR = TOOLS_DIR / "resources" / "themes"
 WORKSPACE_DIR = TOOLS_DIR / ".charactersetgenerator_workspace"
 SIDE_PANEL_WIDTH = 340
 DEFAULT_WINDOW_SIZE = QSize(1180, 740)
 MINIMUM_WINDOW_SIZE = QSize(960, 680)
 SCREEN_MARGIN = 140
-EDITOR_PANEL_HEIGHT = 302
-TIMELINE_SCROLL_HEIGHT = 254
+EDITOR_PANEL_HEIGHT = 342
+TIMELINE_SCROLL_HEIGHT = 294
 
 
 class CharacterSetGeneratorWindow(QMainWindow):
@@ -64,6 +64,9 @@ class CharacterSetGeneratorWindow(QMainWindow):
         self.palette_swatches: dict[str, QPushButton] = {}
         self.images: list[ReactionImage] = []
         self.selected_image: ReactionImage | None = None
+        self.short_style_prompt = ""
+        # TODO: expose this as a proper Options setting once the Options dialog exists.
+        self.animate_timeline_images = False
 
         self.setWindowTitle(self.localization.t("app.title"))
         self.setMinimumSize(MINIMUM_WINDOW_SIZE)
@@ -387,6 +390,7 @@ class CharacterSetGeneratorWindow(QMainWindow):
         self.author_input.setText("")
         self.description_input.setText("")
         self.style_input.setPlainText("Respond in this character's voice.")
+        self.short_style_prompt = ""
         self.current_theme_id = "dark"
         self.palette_overrides.clear()
         theme_index = self.theme_combo.findData(self.current_theme_id)
@@ -481,6 +485,7 @@ class CharacterSetGeneratorWindow(QMainWindow):
             description=self.description_input.text().strip(),
             style_prompt=self.style_input.toPlainText(),
             images=self.images,
+            short_style_prompt=self.short_style_prompt,
             theme_base=self.current_theme_id,
             palette_override=self.palette_overrides.copy(),
         )
@@ -492,6 +497,7 @@ class CharacterSetGeneratorWindow(QMainWindow):
         self.author_input.setText(draft.author)
         self.description_input.setText(draft.description)
         self.style_input.setPlainText(draft.style_prompt)
+        self.short_style_prompt = draft.short_style_prompt
         self.current_theme_id = draft.theme_base
         theme_index = self.theme_combo.findData(self.current_theme_id)
         if theme_index >= 0:
@@ -510,6 +516,10 @@ class CharacterSetGeneratorWindow(QMainWindow):
             self.preview.set_image(None)
 
     def _rebuild_timeline(self) -> None:
-        self.timeline_builder = ReactionTimeline(self.localization, self)
+        self.timeline_builder = ReactionTimeline(
+            self.localization,
+            self,
+            animate_images=self.animate_timeline_images,
+        )
         self.timeline_builder.image_selected.connect(self.select_reaction_image)
         self.timeline_scroll.setWidget(self.timeline_builder.rebuild(self.images))
