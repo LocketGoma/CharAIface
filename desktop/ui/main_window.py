@@ -3,6 +3,10 @@ import sys
 from pathlib import Path
 from uuid import uuid4
 from shared.schema.chat import ChatMessage, ChatRequest
+from shared.file_intake import (
+    render_attached_file_handling_hint,
+    render_inline_data_handling_hint,
+)
 from shared.file_types import file_dialog_filter
 from desktop.chat.chat_session import ChatSession
 from desktop.chat.session_store import ChatSessionStore
@@ -684,7 +688,10 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(
                 self,
                 self.localization.t("chat.file.attach.title"),
-                self.localization.t("chat.file.attach.failed", error=str(error)),
+                self.localization.t(
+                    "chat.file.attach.failed",
+                    error=self._file_read_error_message(error),
+                ),
             )
             return
 
@@ -703,6 +710,15 @@ class MainWindow(QMainWindow):
         if hasattr(self, "bottom_area"):
             self.bottom_area.set_attached_file_name(None)
             self._update_content_geometry()
+
+    def _file_read_error_message(self, error: FileReadError) -> str:
+        code = getattr(error, "code", "read_failed")
+        detail = str(getattr(error, "detail", "") or str(error))
+        key = f"chat.file.error.{code}"
+        localized = self.localization.t(key, detail=detail)
+        if localized != f"{{{key}}}":
+            return localized
+        return str(error)
 
     def _on_export_chat_requested(self, session_id: str | None = None) -> None:
         payload = None
@@ -1864,14 +1880,7 @@ class MainWindow(QMainWindow):
             "[User Request]\n"
             f"{clean_user_content}\n\n"
             "[Attached File Handling Hint]\n"
-            "The Machine-readable context below is deterministic helper data parsed from the original file by the app.\n"
-            "First identify the attachment type and the expected user outcome from [Attachment Intake] and [User Request].\n"
-            "Use the attached file as the primary input whenever the request refers to the file, this data, this code, this document, or attached content.\n"
-            "For analysis, calculation, or aggregation tasks, prefer that helper data over free-form guessing.\n"
-            "If ALL_CELL_VALUE_FREQUENCY_CSV is present and the user asks for value counts, row appearances, or row appearance probabilities, use that block directly.\n"
-            "Treat every numeric CSV cell as one independent occurrence unless the user explicitly asks for combination analysis.\n"
-            "If CELL_VALUE_FREQUENCY_CSV is present and the user asks for each number's appearance count, use that block directly.\n"
-            "For CSV output requests, return only CSV text without explanations, Markdown, or comments.\n\n"
+            f"{render_attached_file_handling_hint()}\n\n"
             "[Attached File]\n"
             f"{build_file_context_message(attachment, clean_user_content)}"
         ).strip()
@@ -1886,11 +1895,7 @@ class MainWindow(QMainWindow):
             "[User Request]\n"
             f"{clean_user_content}\n\n"
             "[Inline Data Handling Hint]\n"
-            "The Machine-readable context below is deterministic helper data parsed from CSV-like text in the user request by the app.\n"
-            "For analysis, calculation, or aggregation tasks, prefer that helper data over free-form guessing.\n"
-            "If ALL_CELL_VALUE_FREQUENCY_CSV is present and the user asks for value counts, row appearances, or row appearance probabilities, use that block directly.\n"
-            "Treat every numeric CSV cell as one independent occurrence unless the user explicitly asks for combination analysis.\n"
-            "For CSV output requests, return only CSV text without explanations, Markdown, or comments.\n\n"
+            f"{render_inline_data_handling_hint()}\n\n"
             "[Machine-readable Inline Data]\n"
             f"{inline_context}"
         ).strip()

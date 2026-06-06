@@ -20,6 +20,8 @@ from pygments.util import ClassNotFound
 from shared.file_types import (
     JSON_SUFFIXES,
     SOURCE_CODE_SUFFIXES,
+    SPREADSHEET_SUFFIXES,
+    SUPPORTED_FILE_SUFFIXES,
     SUPPORTED_TEXT_FILE_SUFFIXES,
     TABLE_SUFFIXES,
 )
@@ -99,17 +101,25 @@ class FileAnalysisService:
 
     def analyze(self, request: FileAnalysisRequest) -> dict[str, Any]:
         path = self._validate_file_path(request.file_path)
-        raw_content = self._read_limited_text(path)
         suffix = path.suffix.lower()
-
-        payload: dict[str, Any] = {
-            "file": self._file_metadata(path),
-            "analysis": self._analyze_content(
+        if suffix in SPREADSHEET_SUFFIXES:
+            analysis = self._analyze_spreadsheet(
+                path,
+                sample_size=request.sample_size,
+                include_value_frequencies=request.include_value_frequencies,
+            )
+        else:
+            raw_content = self._read_limited_text(path)
+            analysis = self._analyze_content(
                 path=path,
                 content=raw_content,
                 sample_size=request.sample_size,
                 include_value_frequencies=request.include_value_frequencies,
-            ),
+            )
+
+        payload: dict[str, Any] = {
+            "file": self._file_metadata(path),
+            "analysis": analysis,
         }
 
         if request.save_result:
@@ -141,7 +151,7 @@ class FileAnalysisService:
             )
 
         suffix = resolved.suffix.lower()
-        if suffix not in SUPPORTED_TEXT_FILE_SUFFIXES:
+        if suffix not in SUPPORTED_FILE_SUFFIXES:
             raise FileAnalysisError(f"Unsupported file type: {suffix or '(none)'}")
 
         return resolved
@@ -213,14 +223,37 @@ class FileAnalysisService:
             return {"type": "table", "parse_status": "empty"}
 
         dataframe = self._normalize_dataframe(dataframe)
+        return self._analysis_from_dataframe(
+            dataframe,
+            analysis_type="table",
+            engine="pandas",
+            parse_status="ok",
+            header_row_detected=has_header,
+            sample_size=sample_size,
+            include_value_frequencies=include_value_frequencies,
+            delimiter=delimiter,
+        )
+
+    def _analysis_from_dataframe(
+        self,
+        dataframe: pd.DataFrame,
+        *,
+        analysis_type: str,
+        engine: str,
+        parse_status: str,
+        header_row_detected: bool,
+        sample_size: int,
+        include_value_frequencies: bool,
+        delimiter: str | None = None,
+        sheet_name: str | None = None,
+    ) -> dict[str, Any]:
         columns = [str(column) for column in dataframe.columns]
 
         analysis: dict[str, Any] = {
-            "type": "table",
-            "parse_status": "ok",
-            "engine": "pandas",
-            "delimiter": delimiter,
-            "header_row_detected": has_header,
+            "type": analysis_type,
+            "parse_status": parse_status,
+            "engine": engine,
+            "header_row_detected": header_row_detected,
             "row_count": int(len(dataframe.index)),
             "column_count": int(len(dataframe.columns)),
             "columns": columns,
@@ -229,6 +262,10 @@ class FileAnalysisService:
             "column_summary_csv": self._column_summary_csv(dataframe),
             "table_reasoning_hints": self._table_reasoning_hints(dataframe),
         }
+        if delimiter is not None:
+            analysis["delimiter"] = delimiter
+        if sheet_name is not None:
+            analysis["sheet_name"] = sheet_name
 
         if include_value_frequencies:
             value_frequencies = self._value_frequencies_from_dataframe(dataframe)
@@ -251,6 +288,66 @@ class FileAnalysisService:
             )
 
         return analysis
+
+    def _analyze_spreadsheet(
+        self,
+        path: Path,
+        *,
+        sample_size: int,
+        include_value_frequencies: bool,
+    ) -> dict[str, Any]:
+        try:
+            workbook = pd.ExcelFile(path, engine="openpyxl")
+        except Exception as error:
+            raise FileAnalysisError(f"Could not read spreadsheet with pandas: {error}") from error
+
+        sheet_analyses: list[dict[str, Any]] = []
+        for sheet_name in workbook.sheet_names:
+            dataframe, has_header = self._read_excel_sheet_dataframe(
+                workbook,
+                sheet_name=sheet_name,
+            )
+            dataframe = self._normalize_dataframe(dataframe)
+            sheet_analyses.append(
+                self._analysis_from_dataframe(
+                    dataframe,
+                    analysis_type="table",
+                    engine="pandas/openpyxl",
+                    parse_status="ok",
+                    header_row_detected=has_header,
+                    sample_size=sample_size,
+                    include_value_frequencies=include_value_frequencies,
+                    sheet_name=sheet_name,
+                )
+            )
+
+        if not sheet_analyses:
+            return {
+                "type": "workbook",
+                "parse_status": "empty",
+                "engine": "pandas/openpyxl",
+                "sheet_count": 0,
+                "sheets": [],
+            }
+
+        primary = dict(sheet_analyses[0])
+        primary.update(
+            {
+                "type": "workbook",
+                "parse_status": "ok",
+                "engine": "pandas/openpyxl",
+                "sheet_count": len(sheet_analyses),
+                "sheet_names": list(workbook.sheet_names),
+                "primary_sheet": sheet_analyses[0].get("sheet_name"),
+                "sheets": sheet_analyses,
+            }
+        )
+        primary["table_reasoning_hints"] = [
+            "This workbook was parsed from an Excel .xlsx file.",
+            "Use primary_sheet for direct CSV-style answers unless the user asks for a different sheet or all sheets.",
+            *list(primary.get("table_reasoning_hints") or []),
+        ]
+        return primary
 
     def _read_table_dataframe(self, content: str, *, delimiter: str) -> tuple[pd.DataFrame, bool]:
         try:
@@ -286,8 +383,63 @@ class FileAnalysisService:
                 str(column).strip() or f"column_{index}"
                 for index, column in enumerate(dataframe.columns, start=1)
             ]
+        dataframe.columns = self._unique_column_names(
+            [str(column) for column in dataframe.columns]
+        )
 
         return dataframe, has_header
+
+    def _read_excel_sheet_dataframe(
+        self,
+        workbook: pd.ExcelFile,
+        *,
+        sheet_name: str,
+    ) -> tuple[pd.DataFrame, bool]:
+        try:
+            raw_dataframe = pd.read_excel(
+                workbook,
+                sheet_name=sheet_name,
+                header=None,
+                dtype=str,
+                keep_default_na=False,
+            )
+        except Exception as error:
+            raise FileAnalysisError(
+                f'Could not parse Excel sheet "{sheet_name}" with pandas: {error}'
+            ) from error
+
+        raw_dataframe = raw_dataframe.dropna(how="all").dropna(axis=1, how="all")
+        rows = [
+            [str(cell).strip() for cell in row]
+            for row in raw_dataframe.fillna("").values.tolist()
+            if any(str(cell).strip() for cell in row)
+        ]
+        if not rows:
+            return pd.DataFrame(), False
+
+        has_header = self._looks_like_header_row(rows[0])
+        if has_header:
+            columns = [
+                cell if cell else f"column_{index}"
+                for index, cell in enumerate(rows[0], start=1)
+            ]
+            data_rows = rows[1:]
+        else:
+            columns = [f"column_{index}" for index in range(1, len(rows[0]) + 1)]
+            data_rows = rows
+
+        columns = self._unique_column_names(columns)
+        return pd.DataFrame(data_rows, columns=columns), has_header
+
+    def _unique_column_names(self, columns: list[str]) -> list[str]:
+        seen: dict[str, int] = {}
+        unique: list[str] = []
+        for index, column in enumerate(columns, start=1):
+            base = str(column).strip() or f"column_{index}"
+            count = seen.get(base, 0) + 1
+            seen[base] = count
+            unique.append(base if count == 1 else f"{base}_{count}")
+        return unique
 
     def _normalize_dataframe(self, dataframe: pd.DataFrame) -> pd.DataFrame:
         normalized = dataframe.fillna("").astype(str)

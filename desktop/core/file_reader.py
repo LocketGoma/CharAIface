@@ -3,26 +3,37 @@ import csv
 from io import StringIO
 from pathlib import Path
 
+import pandas as pd
+
 from shared.file_intake import render_attachment_intake_block
 from shared.file_types import (
     JSON_SUFFIXES,
     MARKDOWN_SUFFIXES,
     SOURCE_CODE_SUFFIXES,
+    SPREADSHEET_SUFFIXES,
+    SUPPORTED_FILE_SUFFIXES,
     TABLE_SUFFIXES,
+    file_kind_display_label,
     file_type_label,
     format_file_size,
+    supported_file_types_description,
 )
 
 
 MAX_FILE_BYTES = 1024 * 1024
 MIN_INLINE_CSV_ROWS = 2
+MAX_SPREADSHEET_SHEETS_IN_CONTEXT = 5
+MAX_SPREADSHEET_ROWS_PER_SHEET_IN_SUMMARY = 20
 TEXT_ENCODINGS = ("utf-8-sig", "utf-8", "utf-16", "cp949")
 UTF16_BOMS = (b"\xff\xfe", b"\xfe\xff")
 ALLOWED_CONTROL_CHARS = {"\n", "\r", "\t", "\f"}
 
 
 class FileReadError(Exception):
-    pass
+    def __init__(self, message: str, *, code: str = "read_failed", detail: str = "") -> None:
+        super().__init__(message)
+        self.code = code
+        self.detail = detail or message
 
 
 @dataclass(frozen=True)
@@ -38,7 +49,8 @@ class FileReadResult:
 
     @property
     def display_detail(self) -> str:
-        return f"{self.type_label} · {format_file_size(self.size_bytes)}"
+        kind_label = file_kind_display_label(self.suffix or self.name)
+        return f"{kind_label} · {format_file_size(self.size_bytes)}"
 
 
 def read_file_for_chat(path: str | Path) -> FileReadResult:
@@ -46,12 +58,46 @@ def read_file_for_chat(path: str | Path) -> FileReadResult:
     suffix = file_path.suffix.lower()
 
     if not file_path.exists():
-        raise FileReadError(f"File does not exist: {file_path}")
+        raise FileReadError(
+            f"File does not exist: {file_path}",
+            code="not_found",
+            detail=str(file_path),
+        )
     if not file_path.is_file():
-        raise FileReadError(f"Path is not a file: {file_path}")
+        raise FileReadError(
+            f"Path is not a file: {file_path}",
+            code="not_file",
+            detail=str(file_path),
+        )
+    try:
+        size_bytes = file_path.stat().st_size
+    except OSError as error:
+        raise FileReadError(
+            f"Could not read file metadata: {file_path.name}",
+            code="read_failed",
+            detail=file_path.name,
+        ) from error
 
-    if suffix == ".csv":
-        summary, model_context, truncated = _read_csv_summary(file_path)
+    if suffix not in SUPPORTED_FILE_SUFFIXES:
+        supported_types = supported_file_types_description()
+        raise FileReadError(
+            f"Unsupported file type: {suffix or '(none)'}. "
+            f"Supported types: {supported_types}.",
+            code="unsupported_type",
+            detail=supported_types,
+        )
+
+    if size_bytes > MAX_FILE_BYTES:
+        raise FileReadError(
+            f"File is too large. Limit is {format_file_size(MAX_FILE_BYTES)}.",
+            code="too_large",
+            detail=format_file_size(MAX_FILE_BYTES),
+        )
+
+    if suffix in SPREADSHEET_SUFFIXES:
+        summary, model_context, truncated = _read_spreadsheet_summary(file_path)
+    elif suffix in TABLE_SUFFIXES:
+        summary, model_context, truncated = _read_table_summary(file_path)
     else:
         summary, truncated = _read_text_summary(file_path)
         model_context = ""
@@ -60,7 +106,7 @@ def read_file_for_chat(path: str | Path) -> FileReadResult:
         path=file_path,
         name=file_path.name,
         suffix=suffix,
-        size_bytes=file_path.stat().st_size,
+        size_bytes=size_bytes,
         type_label=file_type_label(suffix or file_path.name),
         summary=summary,
         model_context=model_context,
@@ -111,38 +157,151 @@ def _read_text_summary(path: Path) -> tuple[str, bool]:
         truncated = _is_larger_than_limit(path)
         content = _decode_text_content(raw_content, truncated, path.name)
     except OSError as error:
-        raise FileReadError(f"Could not read file: {path.name}") from error
+        raise FileReadError(
+            f"Could not read file: {path.name}",
+            code="read_failed",
+            detail=path.name,
+        ) from error
 
     _raise_if_binary_text(content, path.name, truncated=truncated)
     return content, truncated
 
 
-def _read_csv_summary(path: Path) -> tuple[str, str, bool]:
+def _read_table_summary(path: Path) -> tuple[str, str, bool]:
     try:
         raw_content = _read_limited_bytes(path)
         truncated = _is_larger_than_limit(path)
         content = _decode_text_content(raw_content, truncated, path.name)
     except OSError as error:
-        raise FileReadError(f"Could not read file: {path.name}") from error
+        raise FileReadError(
+            f"Could not read file: {path.name}",
+            code="read_failed",
+            detail=path.name,
+        ) from error
 
     _raise_if_binary_text(content, path.name, truncated=truncated)
-    return content, _build_csv_model_context(content, path.name), truncated
+    delimiter = "\t" if path.suffix.lower() == ".tsv" else ","
+    parser_label = "tsv" if delimiter == "\t" else "csv"
+    model_context = _build_csv_model_context(
+        content,
+        path.name,
+        delimiter=delimiter,
+        parser_label=parser_label,
+    )
+    return content, model_context, truncated
 
 
-def _build_csv_model_context(content: str, name: str) -> str:
-    rows = _parse_csv_rows(content)
+def _read_spreadsheet_summary(path: Path) -> tuple[str, str, bool]:
+    if _is_larger_than_limit(path):
+        raise FileReadError(
+            f"File is too large. Limit is {format_file_size(MAX_FILE_BYTES)}.",
+            code="too_large",
+            detail=format_file_size(MAX_FILE_BYTES),
+        )
+
+    try:
+        workbook = pd.ExcelFile(path, engine="openpyxl")
+    except Exception as error:
+        raise FileReadError(
+            f"Could not read spreadsheet: {path.name}",
+            code="spreadsheet_read_failed",
+            detail=path.name,
+        ) from error
+
+    sheet_contexts: list[str] = []
+    summary_lines = [
+        f"Spreadsheet workbook: {path.name}",
+        f"Sheets: {', '.join(workbook.sheet_names)}",
+    ]
+    truncated = len(workbook.sheet_names) > MAX_SPREADSHEET_SHEETS_IN_CONTEXT
+
+    for sheet_name in workbook.sheet_names[:MAX_SPREADSHEET_SHEETS_IN_CONTEXT]:
+        try:
+            dataframe = pd.read_excel(
+                workbook,
+                sheet_name=sheet_name,
+                dtype=str,
+                keep_default_na=False,
+            )
+        except Exception as error:
+            sheet_contexts.append(
+                "Machine-readable file/data context:\n"
+                "- parser: xlsx\n"
+                "- parse_status: failed\n"
+                f"- filename: {path.name}\n"
+                f"- sheet_name: {sheet_name}\n"
+                f"- error: {error}"
+            )
+            continue
+
+        dataframe = _normalize_spreadsheet_dataframe(dataframe)
+        rows = [list(dataframe.columns)] + dataframe.values.tolist()
+        if len(dataframe.index) > MAX_SPREADSHEET_ROWS_PER_SHEET_IN_SUMMARY:
+            truncated = True
+        preview = dataframe.head(MAX_SPREADSHEET_ROWS_PER_SHEET_IN_SUMMARY)
+        summary_lines.append(
+            f"- {sheet_name}: {len(dataframe.index)} rows x {len(dataframe.columns)} columns"
+        )
+        if not preview.empty:
+            summary_lines.append(preview.to_csv(index=False).strip())
+
+        sheet_contexts.append(
+            _build_csv_model_context_from_rows(
+                rows,
+                f"{path.name}#{sheet_name}",
+                parser_label="xlsx",
+            )
+        )
+
+    model_context = (
+        "Machine-readable workbook context:\n"
+        "- parser: xlsx\n"
+        "- parse_status: ok\n"
+        f"- filename: {path.name}\n"
+        f"- sheet_count: {len(workbook.sheet_names)}\n"
+        f"- sheets: {', '.join(workbook.sheet_names)}\n\n"
+        + "\n\n".join(sheet_contexts)
+    ).strip()
+    return "\n".join(summary_lines), model_context, truncated
+
+
+def _normalize_spreadsheet_dataframe(dataframe: pd.DataFrame) -> pd.DataFrame:
+    normalized = dataframe.dropna(how="all").dropna(axis=1, how="all")
+    normalized = normalized.fillna("").astype(str)
+    normalized.columns = [
+        str(column).strip() or f"column_{index}"
+        for index, column in enumerate(normalized.columns, start=1)
+    ]
+    for column in normalized.columns:
+        normalized[column] = normalized[column].map(lambda value: str(value).strip())
+    return normalized
+
+
+def _build_csv_model_context(
+    content: str,
+    name: str,
+    *,
+    delimiter: str = ",",
+    parser_label: str = "csv",
+) -> str:
+    rows = _parse_csv_rows(content, delimiter=delimiter)
     if not rows:
         return (
             "Machine-readable file/data context:\n"
-            f"- parser: csv\n"
+            f"- parser: {parser_label}\n"
             f"- parse_status: failed\n"
             f"- filename: {name}"
         )
 
-    return _build_csv_model_context_from_rows(rows, name)
+    return _build_csv_model_context_from_rows(rows, name, parser_label=parser_label)
 
 
-def _build_csv_model_context_from_rows(rows: list[list[str]], name: str) -> str:
+def _build_csv_model_context_from_rows(
+    rows: list[list[str]],
+    name: str,
+    *,
+    parser_label: str = "csv",
+) -> str:
     column_count = max(len(row) for row in rows)
     has_header = _looks_like_header_row(rows[0])
     header = rows[0] if has_header else []
@@ -156,7 +315,7 @@ def _build_csv_model_context_from_rows(rows: list[list[str]], name: str) -> str:
 
     return (
         "Machine-readable file/data context:\n"
-        "- parser: csv\n"
+        f"- parser: {parser_label}\n"
         "- parse_status: ok\n"
         f"- filename: {name}\n"
         f"- header_row_detected: {str(has_header).lower()}\n"
@@ -185,9 +344,9 @@ def _build_csv_model_context_from_rows(rows: list[list[str]], name: str) -> str:
     ).strip()
 
 
-def _parse_csv_rows(content: str) -> list[list[str]]:
+def _parse_csv_rows(content: str, *, delimiter: str = ",") -> list[list[str]]:
     try:
-        parsed_rows = list(csv.reader(StringIO(content)))
+        parsed_rows = list(csv.reader(StringIO(content), delimiter=delimiter))
     except csv.Error:
         return []
     return [
@@ -468,7 +627,11 @@ def _content_tag_for_suffix(suffix: str) -> str:
 
 def _decode_text_content(raw_content: bytes, truncated: bool, name: str) -> str:
     if _has_binary_null_bytes(raw_content):
-        raise FileReadError(f"File appears to be binary: {name}")
+        raise FileReadError(
+            f"File appears to be binary: {name}",
+            code="binary_file",
+            detail=name,
+        )
 
     decode_errors = "replace" if truncated else "strict"
     last_error: UnicodeDecodeError | None = None
@@ -478,7 +641,11 @@ def _decode_text_content(raw_content: bytes, truncated: bool, name: str) -> str:
         except UnicodeDecodeError as error:
             last_error = error
 
-    raise FileReadError(f"Could not read file as text: {name}") from last_error
+    raise FileReadError(
+        f"Could not read file as text: {name}",
+        code="decode_failed",
+        detail=name,
+    ) from last_error
 
 
 def _has_binary_null_bytes(raw_content: bytes) -> bool:
@@ -501,4 +668,8 @@ def _raise_if_binary_text(content: str, name: str, *, truncated: bool) -> None:
         replacement_count = max(0, replacement_count - 1)
     binary_signal_count = control_count + replacement_count
     if binary_signal_count / len(content) > 0.05:
-        raise FileReadError(f"File appears to be binary: {name}")
+        raise FileReadError(
+            f"File appears to be binary: {name}",
+            code="binary_file",
+            detail=name,
+        )

@@ -28,7 +28,7 @@ DEFAULT_PLANNER_SYSTEM_PROMPT = (
     "Decide whether the assistant should call a backend tool before answering.\n"
     "Return strict JSON only. Do not use Markdown.\n\n"
     "Available tool:\n"
-    "- file_analyze: Reads and analyzes an attached file. It supports table summaries, CSV/TSV value frequencies, row appearance probabilities, JSON/text summaries, and source-code structure.\n\n"
+    "- file_analyze: Reads and analyzes an attached file. It supports table/spreadsheet summaries, CSV/TSV/XLSX value frequencies, row appearance probabilities, JSON/text summaries, and source-code structure.\n\n"
     "Call file_analyze when the user asks to inspect, analyze, calculate, summarize, aggregate, transform, or reason from the attached file.\n"
     "Do not call a tool for casual conversation or questions unrelated to the attached file.\n\n"
     "JSON schema:\n"
@@ -39,18 +39,22 @@ DEFAULT_PLANNER_SYSTEM_PROMPT = (
     "Use preferred_result='all_cell_value_frequency_csv' for general cell value frequency/probability CSV requests.\n"
     "Use preferred_result='column_summary_csv' for column overview, schema, missing value, example, or numeric-stat summary requests.\n"
     "Use preferred_result='per_column_value_frequency_csv' for counts or distributions grouped by each column.\n"
-    "Use response_mode='direct_tool_result' only when the user asks for raw CSV/table output that the tool result can provide directly.\n"
+    "For exact count, frequency, distribution, or probability requests, select the most specific preferred_result that already contains the computed result.\n"
+    "Use response_mode='direct_tool_result' only when preferred_result is not 'auto' and the user asks for raw CSV/table output that the selected tool result can provide directly.\n"
     "Otherwise use response_mode='model_final'."
 )
 DEFAULT_TOOL_RESULT_PREFIX = (
     "[Tool Result: file_analyze]\n"
     "The model requested this backend tool call, and the app executed it deterministically.\n"
     "Use the tool result below to answer the user's original request.\n"
+    "For exact counts, frequencies, distributions, probabilities, schema summaries, or table transformations, use the deterministic tool blocks instead of estimating from sample rows.\n"
+    "Follow the final response language instruction below. "
     "If the user requested CSV output, output only CSV text without explanations, Markdown, code fences, XML-like tags, or comments."
 )
 DEFAULT_TOOL_ERROR_PROMPT = (
     "[Tool Result: file_analyze]\n"
     "status: error\nerror: {error}\n\n"
+    "{language_instruction}\n"
     "The backend tool failed. Answer the user honestly and briefly."
 )
 
@@ -71,6 +75,16 @@ def _prompt_text(key: str, fallback: str) -> str:
     value = _load_prompt_config().get(key)
     text = str(value or "").strip()
     return text or fallback
+
+
+def _format_prompt_template(template: str, **values: Any) -> str:
+    try:
+        return template.format(**values)
+    except (KeyError, IndexError, ValueError):
+        text = template
+        for key, value in values.items():
+            text = text.replace("{" + key + "}", str(value))
+        return text
 
 
 @dataclass(frozen=True)
@@ -101,8 +115,10 @@ class FileToolLoop:
             app_language=app_language,
             call_model=call_model,
         )
+        used_default_tool_call = False
         if not tool_call or tool_call.get("tool") != "file_analyze":
-            return None
+            tool_call = self._default_file_analyze_tool_call()
+            used_default_tool_call = True
 
         tool_result = self._execute_file_analyze_tool_call(
             file_path=file_path,
@@ -120,6 +136,7 @@ class FileToolLoop:
                     "tool_name": "file_analyze",
                     "tool_status": tool_result.get("status"),
                     "tool_response_mode": "direct_tool_result",
+                    "tool_call_defaulted": used_default_tool_call,
                 },
             )
 
@@ -150,6 +167,7 @@ class FileToolLoop:
                 "tool_name": "file_analyze",
                 "tool_status": tool_result.get("status"),
                 "tool_response_mode": "model_final",
+                "tool_call_defaulted": used_default_tool_call,
             },
         )
 
@@ -163,11 +181,7 @@ class FileToolLoop:
         metadata = getattr(latest_user_message, "metadata", {}) or {}
         file_name = str(metadata.get("file_name") or Path(str(metadata.get("file_path") or "")).name)
         file_type = str(metadata.get("file_type") or Path(file_name).suffix)
-        original_user_content = str(
-            metadata.get("transient_original_user_content")
-            or latest_user_message.content
-            or ""
-        ).strip()
+        original_user_content = self._original_user_content(latest_user_message)
 
         planner_messages = [
             {
@@ -203,6 +217,31 @@ class FileToolLoop:
             arguments = {}
         decision["arguments"] = arguments
         return decision
+
+    def _original_user_content(self, message: ChatMessage) -> str:
+        metadata = getattr(message, "metadata", {}) or {}
+        return str(
+            metadata.get("transient_original_user_content")
+            or message.content
+            or ""
+        ).strip()
+
+    def _default_file_analyze_tool_call(self) -> dict[str, Any]:
+        return {
+            "tool": "file_analyze",
+            "arguments": {
+                "sample_size": 10,
+                "include_value_frequencies": True,
+                "save_result": False,
+                "output_format": "json",
+                "preferred_result": "auto",
+                "response_mode": "model_final",
+            },
+            "reason": (
+                "Attached file context is present, so the backend should analyze the file "
+                "before the assistant answers."
+            ),
+        }
 
     def _execute_file_analyze_tool_call(
         self,
@@ -254,23 +293,11 @@ class FileToolLoop:
         result = tool_result.get("result") if isinstance(tool_result.get("result"), dict) else {}
         analysis_info = result.get("analysis") if isinstance(result.get("analysis"), dict) else {}
         preferred_result = str(arguments.get("preferred_result") or "auto").strip()
-        candidates: list[str] = []
-        if preferred_result and preferred_result != "auto":
-            candidates.append(preferred_result)
-        candidates.extend(
-            [
-                "column_summary_csv",
-                "per_column_value_frequency_csv",
-                "numeric_value_frequency_csv",
-                "all_cell_value_frequency_csv",
-            ]
-        )
+        if not preferred_result or preferred_result == "auto":
+            return ""
 
-        for key in candidates:
-            content = str(analysis_info.get(key) or "").strip()
-            if content:
-                return content
-        return ""
+        content = str(analysis_info.get(preferred_result) or "").strip()
+        return content
 
     def _build_tool_result_prompt(
         self,
@@ -279,40 +306,75 @@ class FileToolLoop:
         tool_result: dict[str, Any],
         app_language: str,
     ) -> str:
+        language_instruction = self._final_response_language_instruction(app_language)
         if tool_result.get("status") != "ok":
-            return _prompt_text(
-                "tool_error_prompt",
-                DEFAULT_TOOL_ERROR_PROMPT,
-            ).format(error=tool_result.get("error", ""))
+            return _format_prompt_template(
+                _prompt_text(
+                    "tool_error_prompt",
+                    DEFAULT_TOOL_ERROR_PROMPT,
+                ),
+                error=tool_result.get("error", ""),
+                language_instruction=language_instruction,
+            )
 
         result = tool_result.get("result") if isinstance(tool_result.get("result"), dict) else {}
-        formatted_result = self._format_analysis_context(result)
+        formatted_result = self._format_analysis_context(
+            result,
+            language_instruction=language_instruction,
+        )
         return (
             _prompt_text("tool_result_prefix", DEFAULT_TOOL_RESULT_PREFIX)
             + "\n"
-            f"App language: {app_language}\n"
+            f"{language_instruction}\n"
+            f"App language code: {app_language}\n"
             f"Tool call reason: {tool_call.get('reason', '')}\n\n"
             f"{formatted_result}"
         ).strip()
 
-    def _format_analysis_context(self, analysis: dict[str, Any]) -> str:
+    def _format_analysis_context(
+        self,
+        analysis: dict[str, Any],
+        *,
+        language_instruction: str = "",
+    ) -> str:
         file_info = analysis.get("file") if isinstance(analysis.get("file"), dict) else {}
         analysis_info = (
             analysis.get("analysis") if isinstance(analysis.get("analysis"), dict) else {}
         )
         analysis_type = str(analysis_info.get("type") or "")
+        language_instruction = language_instruction.strip()
 
-        if analysis_type == "table":
+        if analysis_type in {"table", "workbook"}:
             lines = [
                 "[Backend File Analysis Tool Result]",
-                "The backend has already read and analyzed the attached table file. Treat these blocks as deterministic tool output.",
+                "The backend has already read and analyzed the attached table/spreadsheet file. Treat these blocks as deterministic tool output.",
+                language_instruction,
                 "Answer the user's request directly. Do not summarize these field names or explain the tool result.",
+                "For exact counts, frequencies, distributions, probabilities, or schema summaries, use the deterministic CSV blocks below and do not estimate from sample rows.",
                 "For CSV output requests, return only CSV text without explanations, Markdown, or comments.",
                 f"- filename: {file_info.get('name', '')}",
                 f"- table_engine: {analysis_info.get('engine', '')}",
                 f"- row_count: {analysis_info.get('row_count', '')}",
                 f"- column_count: {analysis_info.get('column_count', '')}",
             ]
+            if analysis_type == "workbook":
+                lines.extend(
+                    [
+                        f"- workbook_sheet_count: {analysis_info.get('sheet_count', '')}",
+                        f"- primary_sheet: {analysis_info.get('primary_sheet', '')}",
+                    ]
+                )
+                sheet_inventory = self._format_workbook_sheet_inventory(analysis_info)
+                if sheet_inventory:
+                    lines.extend(
+                        [
+                            "",
+                            "Workbook sheets:",
+                            sheet_inventory,
+                            "",
+                            "The CSV/tool blocks below describe primary_sheet unless a block explicitly names another sheet.",
+                        ]
+                    )
             numeric_frequency_csv = str(
                 analysis_info.get("numeric_value_frequency_csv") or ""
             ).strip()
@@ -395,10 +457,29 @@ class FileToolLoop:
         return (
             "[Backend File Analysis Tool Result]\n"
             "The backend has already read and analyzed the attached file. Treat this as deterministic tool data.\n"
+            f"{language_instruction}\n"
+            "Use deterministic fields from FILE_ANALYSIS_JSON for exact requests; do not invent values or infer totals from samples.\n"
             "Answer the user's request directly. Do not summarize these field names or explain the tool result.\n"
             "<FILE_ANALYSIS_JSON>\n"
             f"{json.dumps(compact_analysis, ensure_ascii=False)}\n"
             "</FILE_ANALYSIS_JSON>"
+        )
+
+    def _final_response_language_instruction(self, app_language: str) -> str:
+        normalized = str(app_language or "").strip().lower()
+        if normalized.startswith("ko"):
+            return (
+                "Final response language: Korean. "
+                "Unless the user explicitly requested another language or raw data only, write the final answer in Korean."
+            )
+        if normalized.startswith("ja"):
+            return (
+                "Final response language: Japanese. "
+                "Unless the user explicitly requested another language or raw data only, write the final answer in Japanese."
+            )
+        return (
+            "Final response language: English. "
+            "Unless the user explicitly requested another language or raw data only, write the final answer in English."
         )
 
     def _format_tool_call_trace(self, tool_call: dict[str, Any]) -> str:
@@ -406,6 +487,33 @@ class FileToolLoop:
             "[Tool Call]\n"
             f"{json.dumps({'tool': 'file_analyze', 'arguments': tool_call.get('arguments', {})}, ensure_ascii=False)}"
         )
+
+    def _format_workbook_sheet_inventory(self, analysis_info: dict[str, Any]) -> str:
+        sheets = analysis_info.get("sheets")
+        if not isinstance(sheets, list):
+            return ""
+
+        lines: list[str] = []
+        for index, sheet in enumerate(sheets[:20], start=1):
+            if not isinstance(sheet, dict):
+                continue
+            sheet_name = str(sheet.get("sheet_name") or f"sheet_{index}")
+            row_count = sheet.get("row_count", "")
+            column_count = sheet.get("column_count", "")
+            columns = sheet.get("columns")
+            column_text = ""
+            if isinstance(columns, list) and columns:
+                visible_columns = [str(column) for column in columns[:8]]
+                suffix = ", ..." if len(columns) > len(visible_columns) else ""
+                column_text = f"; columns: {', '.join(visible_columns)}{suffix}"
+            lines.append(
+                f"- {sheet_name}: {row_count} rows x {column_count} columns{column_text}"
+            )
+
+        if len(sheets) > 20:
+            lines.append(f"- ... {len(sheets) - 20} more sheet(s) omitted from inventory")
+
+        return "\n".join(lines)
 
     def _parse_tool_call_json(self, content: str) -> dict[str, Any] | None:
         text = str(content or "").strip()

@@ -33,6 +33,14 @@ chat.file.attach.failed,파일을 읽을 수 없습니다. {error},Could not rea
 chat.file.attach.title,파일 첨부,Attach File
 chat.file.attached,첨부됨: {name},Attached: {name}
 chat.file.default_prompt,첨부한 파일을 읽고 요약해줘.,Read and summarize the attached file.
+chat.file.error.binary_file,바이너리 파일은 첨부할 수 없습니다. {detail},Binary files cannot be attached. {detail}
+chat.file.error.decode_failed,텍스트 인코딩을 읽을 수 없습니다. {detail},Could not decode the text file. {detail}
+chat.file.error.not_file,파일이 아닌 경로입니다. {detail},The selected path is not a file. {detail}
+chat.file.error.not_found,파일을 찾을 수 없습니다. {detail},File not found. {detail}
+chat.file.error.read_failed,파일을 읽는 중 오류가 발생했습니다. {detail},An error occurred while reading the file. {detail}
+chat.file.error.spreadsheet_read_failed,엑셀 파일을 읽을 수 없습니다. 파일이 손상되었거나 지원되지 않는 형식일 수 있습니다. {detail},Could not read the Excel file. It may be damaged or unsupported. {detail}
+chat.file.error.too_large,파일이 너무 큽니다. 최대 크기: {detail},The file is too large. Maximum size: {detail}
+chat.file.error.unsupported_type,지원하지 않는 파일 형식입니다. 지원 형식: {detail},Unsupported file type. Supported types: {detail}
 chat.file.message_prefix,[파일 첨부됨 : {name}],[File attached: {name}]
 chat.initial_message,CharAIface 기본 화면입니다. 아직 실제 AI 응답 연결 전입니다.,This is the CharAIface default screen. Real AI responses are not connected yet.
 chat.initial_notice.model_required,안내 : 안녕하세요! {app_name}의 {character_name} 입니다! 사용을 위해서는 로컬 AI 모델 설치가 필요합니다. 가이드를 따라주세요,"Notice: Hello! I'm {character_name} from {app_name}! To use the app, a local AI model must be installed. Please follow the guide."
