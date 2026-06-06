@@ -248,6 +248,26 @@ QLineEdit#PaletteColorInput {{
     font-size: 9pt;
     padding: 3px 6px;
 }}
+QTabWidget#StyleTabs::pane {{
+    background-color: {p.input_bg};
+    border: 1px solid {p.input_border};
+    border-radius: 8px;
+    top: -1px;
+}}
+QTabWidget#StyleTabs QTabBar::tab {{
+    background-color: {p.panel_bg};
+    color: {p.text_secondary};
+    border: 1px solid {p.input_border};
+    border-bottom: none;
+    border-top-left-radius: 6px;
+    border-top-right-radius: 6px;
+    padding: 5px 10px;
+    margin-right: 2px;
+}}
+QTabWidget#StyleTabs QTabBar::tab:selected {{
+    background-color: {p.input_bg};
+    color: {p.text_primary};
+}}
 QPushButton#PaletteSwatchButton {{
     border: 1px solid {p.border};
     border-radius: 6px;

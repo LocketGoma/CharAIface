@@ -6,6 +6,7 @@ import shutil
 import tempfile
 import zipfile
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -52,6 +53,7 @@ def import_charpack(
     *,
     builtin_character_ids: set[str] | None = None,
     replace_existing: bool = False,
+    backup_existing: bool = True,
 ) -> Path:
     source = Path(source_path)
     destination_root = Path(user_characters_dir)
@@ -78,10 +80,26 @@ def import_charpack(
             archive.extractall(temp_dir)
 
             if destination.exists():
-                shutil.rmtree(destination)
+                if backup_existing:
+                    backup_dir = _backup_existing_pack(destination_root, destination)
+                    shutil.move(str(destination), str(backup_dir))
+                else:
+                    shutil.rmtree(destination)
             shutil.move(str(temp_dir), str(destination))
 
     return destination
+
+
+def _backup_existing_pack(destination_root: Path, destination: Path) -> Path:
+    backups_root = destination_root / ".backups"
+    backups_root.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    backup_dir = backups_root / f"{destination.name}-{timestamp}"
+    counter = 2
+    while backup_dir.exists():
+        backup_dir = backups_root / f"{destination.name}-{timestamp}-{counter}"
+        counter += 1
+    return backup_dir
 
 
 def export_folder_to_charpack(

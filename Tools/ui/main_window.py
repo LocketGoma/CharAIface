@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QScrollArea,
+    QTabWidget,
     QTextEdit,
     QToolBar,
     QVBoxLayout,
@@ -51,6 +52,9 @@ MINIMUM_WINDOW_SIZE = QSize(960, 680)
 SCREEN_MARGIN = 140
 EDITOR_PANEL_HEIGHT = 342
 TIMELINE_SCROLL_HEIGHT = 294
+EDITOR_PANEL_MIN_HEIGHT = 238
+TIMELINE_SCROLL_MIN_HEIGHT = 176
+STYLE_TABS_MIN_HEIGHT = 168
 
 
 class CharacterSetGeneratorWindow(QMainWindow):
@@ -64,7 +68,6 @@ class CharacterSetGeneratorWindow(QMainWindow):
         self.palette_swatches: dict[str, QPushButton] = {}
         self.images: list[ReactionImage] = []
         self.selected_image: ReactionImage | None = None
-        self.short_style_prompt = ""
         # TODO: expose this as a proper Options setting once the Options dialog exists.
         self.animate_timeline_images = False
 
@@ -143,7 +146,8 @@ class CharacterSetGeneratorWindow(QMainWindow):
 
         editor_panel = QFrame()
         editor_panel.setObjectName("EditorPanel")
-        editor_panel.setFixedHeight(EDITOR_PANEL_HEIGHT)
+        editor_panel.setMinimumHeight(EDITOR_PANEL_MIN_HEIGHT)
+        editor_panel.setMaximumHeight(EDITOR_PANEL_HEIGHT)
         editor_layout = QHBoxLayout(editor_panel)
         editor_layout.setContentsMargins(10, 10, 10, 10)
         editor_layout.setSpacing(10)
@@ -168,7 +172,8 @@ class CharacterSetGeneratorWindow(QMainWindow):
         timeline_layout.addLayout(editor_header)
 
         self.timeline_scroll = QScrollArea()
-        self.timeline_scroll.setFixedHeight(TIMELINE_SCROLL_HEIGHT)
+        self.timeline_scroll.setMinimumHeight(TIMELINE_SCROLL_MIN_HEIGHT)
+        self.timeline_scroll.setMaximumHeight(TIMELINE_SCROLL_HEIGHT)
         self.timeline_scroll.setWidgetResizable(False)
         self.timeline_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.timeline_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -228,6 +233,8 @@ class CharacterSetGeneratorWindow(QMainWindow):
         metadata_layout.addWidget(metadata_title)
 
         form = QFormLayout()
+        form.setHorizontalSpacing(10)
+        form.setVerticalSpacing(8)
         self.id_input = QLineEdit("example_character")
         self.name_input = QLineEdit("Example Character")
         self.version_input = QLineEdit("1.0.0")
@@ -256,10 +263,27 @@ class CharacterSetGeneratorWindow(QMainWindow):
         metadata_layout.addLayout(form)
 
         self.style_input = QTextEdit()
-        self.style_input.setPlaceholderText(self.localization.t("metadata.style"))
-        self.style_input.setPlainText("Respond in this character's voice.")
-        metadata_layout.addWidget(QLabel(self.localization.t("metadata.style")))
-        metadata_layout.addWidget(self.style_input, 1)
+        self.style_input.setMinimumHeight(112)
+        self.style_input.setPlaceholderText(
+            self.localization.t("metadata.style_support.placeholder")
+        )
+        self.style_input.setPlainText("")
+
+        self.core_style_input = QTextEdit()
+        self.core_style_input.setMinimumHeight(112)
+        self.core_style_input.setPlaceholderText(
+            self.localization.t("metadata.style_core.placeholder")
+        )
+
+        self.style_tabs = QTabWidget()
+        self.style_tabs.setObjectName("StyleTabs")
+        self.style_tabs.setMinimumHeight(STYLE_TABS_MIN_HEIGHT)
+        self.style_tabs.addTab(
+            self.core_style_input,
+            self.localization.t("metadata.style_core"),
+        )
+        self.style_tabs.addTab(self.style_input, self.localization.t("metadata.style_support"))
+        metadata_layout.addWidget(self.style_tabs, 1)
         return metadata
 
     def _create_palette_panel(self) -> QFrame:
@@ -389,8 +413,8 @@ class CharacterSetGeneratorWindow(QMainWindow):
         self.version_input.setText("1.0.0")
         self.author_input.setText("")
         self.description_input.setText("")
-        self.style_input.setPlainText("Respond in this character's voice.")
-        self.short_style_prompt = ""
+        self.core_style_input.setPlainText("Respond in this character's voice.")
+        self.style_input.setPlainText("")
         self.current_theme_id = "dark"
         self.palette_overrides.clear()
         theme_index = self.theme_combo.findData(self.current_theme_id)
@@ -483,12 +507,19 @@ class CharacterSetGeneratorWindow(QMainWindow):
             version=self.version_input.text().strip() or "1.0.0",
             author=self.author_input.text().strip(),
             description=self.description_input.text().strip(),
-            style_prompt=self.style_input.toPlainText(),
+            style_prompt=self._full_style_prompt(),
             images=self.images,
-            short_style_prompt=self.short_style_prompt,
+            short_style_prompt=self.core_style_input.toPlainText(),
             theme_base=self.current_theme_id,
             palette_override=self.palette_overrides.copy(),
         )
+
+    def _full_style_prompt(self) -> str:
+        core_style = self.core_style_input.toPlainText().strip()
+        support_style = self.style_input.toPlainText().strip()
+        if core_style and support_style:
+            return f"{core_style}\n\n{support_style}"
+        return core_style or support_style
 
     def _apply_draft(self, draft: CharacterPackDraft) -> None:
         self.id_input.setText(draft.character_id)
@@ -496,8 +527,13 @@ class CharacterSetGeneratorWindow(QMainWindow):
         self.version_input.setText(draft.version)
         self.author_input.setText(draft.author)
         self.description_input.setText(draft.description)
-        self.style_input.setPlainText(draft.style_prompt)
-        self.short_style_prompt = draft.short_style_prompt
+        core_style = draft.short_style_prompt or draft.style_prompt
+        support_style = self._support_style_from_full_style(
+            full_style=draft.style_prompt,
+            core_style=core_style,
+        )
+        self.core_style_input.setPlainText(core_style)
+        self.style_input.setPlainText(support_style)
         self.current_theme_id = draft.theme_base
         theme_index = self.theme_combo.findData(self.current_theme_id)
         if theme_index >= 0:
@@ -514,6 +550,17 @@ class CharacterSetGeneratorWindow(QMainWindow):
             self.select_reaction_image(self.images[0])
         else:
             self.preview.set_image(None)
+
+    def _support_style_from_full_style(self, *, full_style: str, core_style: str) -> str:
+        full = str(full_style or "").strip()
+        core = str(core_style or "").strip()
+        if not full or not core:
+            return "" if core else full
+        if full == core:
+            return ""
+        if full.startswith(core):
+            return full[len(core):].strip()
+        return full
 
     def _rebuild_timeline(self) -> None:
         self.timeline_builder = ReactionTimeline(

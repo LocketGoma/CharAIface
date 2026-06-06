@@ -173,11 +173,25 @@ settings.character.reload,캐릭터 다시 불러오기,Reload Characters
 settings.character.reload.completed,캐릭터팩 {count}개를 다시 불러왔습니다.,Reloaded {count} character pack(s).
 settings.character.reload_all,캐릭터 셋 전체 다시 로드,Reload All Character Sets
 settings.character.import_charpack,캐릭터팩 가져오기,Import Character Pack
+settings.character.export_charpack,캐릭터팩 내보내기,Export Character Pack
 settings.character.charpack_filter,CharAIface 캐릭터팩 (*.charpack),CharAIface Character Pack (*.charpack)
 settings.character.import.completed.title,캐릭터팩 가져오기 완료,Character Pack Imported
 settings.character.import.completed,캐릭터팩을 가져왔습니다: {name} ({character_id}),Imported character pack: {name} ({character_id})
+settings.character.import.apply.title,캐릭터팩 적용,Apply Character Pack
+settings.character.import.apply,가져온 캐릭터팩을 바로 선택할까요?  {name} ({character_id}),Select the imported character pack now?  {name} ({character_id})
+settings.character.import.builtin_conflict,캐릭터 ID "{character_id}"는 기본 캐릭터팩에서 사용 중입니다. 기본 캐릭터 ID는 사용자 캐릭터팩으로 덮어쓸 수 없습니다.,"Character ID ""{character_id}"" is used by a built-in character pack. Built-in character IDs cannot be overwritten by user character packs."
+settings.character.import.replace.title,캐릭터팩 교체,Replace Character Pack
+settings.character.import.replace,"같은 ID의 사용자 캐릭터팩이 이미 있습니다. 기존 버전: {existing_version} 가져올 버전: {incoming_version} {version_hint} 기존 캐릭터팩은 백업 후 교체됩니다. 계속할까요?","A user character pack with the same ID already exists. Existing version: {existing_version} Incoming version: {incoming_version} {version_hint} The existing character pack will be backed up before replacement. Continue?"
+settings.character.import.version.newer,가져올 버전이 더 높아 업데이트로 처리할 수 있습니다.,The incoming version is newer and can be treated as an update.
+settings.character.import.version.older,가져올 버전이 기존 버전보다 낮습니다.,The incoming version is older than the existing version.
+settings.character.import.version.same,가져올 버전이 기존 버전과 같습니다.,The incoming version is the same as the existing version.
 settings.character.import.failed.title,캐릭터팩 가져오기 실패,Character Pack Import Failed
 settings.character.import.failed,캐릭터팩을 가져올 수 없습니다.  {error},Could not import the character pack.  {error}
+settings.character.export.completed.title,캐릭터팩 내보내기 완료,Character Pack Exported
+settings.character.export.completed,캐릭터팩을 내보냈습니다: {name} {path},Exported character pack: {name} {path}
+settings.character.export.failed.title,캐릭터팩 내보내기 실패,Character Pack Export Failed
+settings.character.export.failed,캐릭터팩을 내보낼 수 없습니다.  {error},Could not export the character pack.  {error}
+settings.character.export.builtin_blocked,기본 캐릭터팩은 내보낼 수 없습니다. 사용자 캐릭터팩만 내보낼 수 있습니다.,Built-in character packs cannot be exported. Only user character packs can be exported.
 settings.character.select,캐릭터,Character
 settings.character.theme,테마,Theme
 settings.character.theme_base,Base,Base

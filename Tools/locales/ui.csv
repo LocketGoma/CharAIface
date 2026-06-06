@@ -29,6 +29,10 @@ metadata.version,버전,Version
 metadata.author,제작자,Author
 metadata.description,설명,Description
 metadata.style,스타일 프롬프트,Style Prompt
+metadata.style_core,핵심 영역,Core
+metadata.style_core.placeholder,캐릭터 스타일에 대한 핵심 설명. 꼭 필요한 사항만 작성하세요.,Core description of the character style. Include only essential details.
+metadata.style_support,보조 영역,Support
+metadata.style_support.placeholder,캐릭터 스타일을 보조하기 위한 설명. 필요한 만큼 작성하세요.,Supporting description for the character style. Add as much detail as needed.
 theme.label,테마,Theme
 theme.light,Light,Light
 theme.dark,Dark,Dark

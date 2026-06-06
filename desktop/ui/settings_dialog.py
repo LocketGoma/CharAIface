@@ -26,7 +26,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from desktop.characters.character_pack_archive import import_charpack, inspect_charpack
+from desktop.characters.character_pack_archive import (
+    export_folder_to_charpack,
+    import_charpack,
+    inspect_charpack,
+)
 from backend.app.services.cloud_auth_manager import (
     CloudAuthManager,
     CloudCredentialConfig,
@@ -283,6 +287,11 @@ class SettingsDialog(QDialog):
         )
         self.character_import_button.clicked.connect(self._import_character_pack)
 
+        self.character_export_button = QPushButton(
+            self.localization.t("settings.character.export_charpack")
+        )
+        self.character_export_button.clicked.connect(self._export_character_pack)
+
         self.character_info_label = QLabel()
         self.character_info_label.setWordWrap(True)
         self.character_info_label.setObjectName("CharacterInfoLabel")
@@ -296,6 +305,7 @@ class SettingsDialog(QDialog):
         character_button_layout.setContentsMargins(0, 0, 0, 0)
         character_button_layout.setSpacing(8)
         character_button_layout.addWidget(self.character_import_button)
+        character_button_layout.addWidget(self.character_export_button)
         character_button_layout.addWidget(self.character_reload_button)
         form_layout.addRow("", character_button_row)
 
@@ -1557,6 +1567,7 @@ class SettingsDialog(QDialog):
             return
 
         source_path = Path(file_name)
+        previous_character_id = self.character_combo.currentData()
         try:
             info = inspect_charpack(source_path)
             builtin_character_ids = {
@@ -1564,12 +1575,48 @@ class SettingsDialog(QDialog):
                 for pack in self.character_registry.packs
                 if self.character_registry.is_builtin(pack.id)
             }
-            imported_dir = import_charpack(
+            if info.character_id in builtin_character_ids:
+                QMessageBox.warning(
+                    self,
+                    self.localization.t("settings.character.import.failed.title"),
+                    self.localization.t(
+                        "settings.character.import.builtin_conflict",
+                        character_id=info.character_id,
+                    ),
+                )
+                return
+
+            existing_pack = self.character_registry.get_pack(info.character_id)
+            replace_existing = False
+            if existing_pack is not None and self.character_registry.is_user_pack(info.character_id):
+                decision = QMessageBox.question(
+                    self,
+                    self.localization.t("settings.character.import.replace.title"),
+                    self.localization.t(
+                        "settings.character.import.replace",
+                        name=info.name,
+                        character_id=info.character_id,
+                        existing_version=existing_pack.version,
+                        incoming_version=info.version,
+                        version_hint=self._character_import_version_hint(
+                            existing_pack.version,
+                            info.version,
+                        ),
+                    ),
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+                    QMessageBox.StandardButton.Cancel,
+                )
+                if decision != QMessageBox.StandardButton.Yes:
+                    return
+                replace_existing = True
+
+            import_charpack(
                 source_path,
                 self.character_registry.user_characters_dir,
                 builtin_character_ids=builtin_character_ids,
+                replace_existing=replace_existing,
             )
-            self._refresh_character_combo(selected_character_id=imported_dir.name)
+            self._refresh_character_combo(selected_character_id=previous_character_id)
         except Exception as error:
             QMessageBox.critical(
                 self,
@@ -1590,6 +1637,99 @@ class SettingsDialog(QDialog):
                 character_id=info.character_id,
             ),
         )
+
+        apply_now = QMessageBox.question(
+            self,
+            self.localization.t("settings.character.import.apply.title"),
+            self.localization.t(
+                "settings.character.import.apply",
+                name=info.name,
+                character_id=info.character_id,
+            ),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if apply_now == QMessageBox.StandardButton.Yes:
+            index = self.character_combo.findData(info.character_id)
+            if index >= 0:
+                self.character_combo.setCurrentIndex(index)
+
+    def _export_character_pack(self) -> None:
+        character_id = self.character_combo.currentData()
+        pack = self.character_registry.get_pack(character_id)
+        if pack is None:
+            QMessageBox.warning(
+                self,
+                self.localization.t("settings.character.export.failed.title"),
+                self.localization.t("settings.character.not_found"),
+            )
+            return
+
+        if self.character_registry.is_builtin(pack.id):
+            QMessageBox.information(
+                self,
+                self.localization.t("settings.character.export.failed.title"),
+                self.localization.t("settings.character.export.builtin_blocked"),
+            )
+            return
+
+        file_name, _selected_filter = QFileDialog.getSaveFileName(
+            self,
+            self.localization.t("settings.character.export_charpack"),
+            f"{pack.id}.charpack",
+            self.localization.t("settings.character.charpack_filter"),
+        )
+        if not file_name:
+            return
+
+        try:
+            export_path = export_folder_to_charpack(pack.root_dir, file_name)
+        except Exception as error:
+            QMessageBox.critical(
+                self,
+                self.localization.t("settings.character.export.failed.title"),
+                self.localization.t(
+                    "settings.character.export.failed",
+                    error=str(error),
+                ),
+            )
+            return
+
+        QMessageBox.information(
+            self,
+            self.localization.t("settings.character.export.completed.title"),
+            self.localization.t(
+                "settings.character.export.completed",
+                name=pack.name,
+                path=str(export_path),
+            ),
+        )
+
+    def _character_import_version_hint(
+        self,
+        existing_version: str,
+        incoming_version: str,
+    ) -> str:
+        comparison = self._compare_version_text(existing_version, incoming_version)
+        if comparison < 0:
+            return self.localization.t("settings.character.import.version.newer")
+        if comparison > 0:
+            return self.localization.t("settings.character.import.version.older")
+        return self.localization.t("settings.character.import.version.same")
+
+    def _compare_version_text(self, existing_version: str, incoming_version: str) -> int:
+        existing_parts = self._version_parts(existing_version)
+        incoming_parts = self._version_parts(incoming_version)
+        if existing_parts == incoming_parts:
+            return 0
+        return -1 if incoming_parts > existing_parts else 1
+
+    def _version_parts(self, version: str) -> tuple[int, ...]:
+        parts = []
+        for chunk in str(version or "").replace("-", ".").split("."):
+            digits = "".join(character for character in chunk if character.isdigit())
+            parts.append(int(digits or 0))
+        return tuple(parts or [0])
 
     def _on_avatar_opacity_changed(self, value: int) -> None:
         snapped_value = round(value / 10) * 10
