@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+import hashlib
 import json
 from pathlib import Path
 from typing import Any, Literal
@@ -41,7 +43,11 @@ ChatRoute = Literal[
 DEFAULT_LOCAL_MODEL = "qwen2.5:3b"
 DEFAULT_LOCAL_AI_BASE_URL = "http://127.0.0.1:11434"
 OLLAMA_CHAT_TIMEOUT_SECONDS = 120.0
-CLOUD_AI_CHAT_TIMEOUT_SECONDS = 120.0
+CLOUD_AI_CHAT_TIMEOUT_SECONDS = 30.0
+# TODO: Move this into user/provider settings after measuring typical response lengths.
+CLOUD_AI_MAX_OUTPUT_TOKENS = 1000
+AUTO_WEB_SEARCH_TIMEOUT_SECONDS = 8.0
+AUTO_WEB_SEARCH_MAX_RESULTS = 3
 MAX_CHAT_HISTORY_MESSAGES = 24
 
 ROUTE_POLICY_HANDLERS = {
@@ -238,11 +244,13 @@ class ChatService:
         if not cloud_available:
             return "local_ollama"
         cloud_weight = self._cloud_ai_usage_weight(settings)
-        if cloud_weight >= 75:
-            return "cloud_ai"
-        if cloud_weight <= 20:
+        if cloud_weight <= 0:
             return "local_ollama"
+        if cloud_weight >= 100:
+            return "cloud_ai"
         if self._should_auto_use_cloud(request):
+            return "cloud_ai"
+        if self._weighted_auto_use_cloud(request, cloud_weight):
             return "cloud_ai"
         return "local_ollama"
 
@@ -315,6 +323,23 @@ class ChatService:
             "traceback", "exception", "stack trace", "architecture", "refactor",
             "optimize", "debug", "analyze", "compare", "review",
         )
+        explicit_cloud_keywords += (
+            "\ud074\ub77c\uc6b0\ub4dc",  # 클라우드
+            "\uc720\ub8cc\ubaa8\ub378",  # 유료모델
+            "\uc720\ub8cc \ubaa8\ub378",  # 유료 모델
+            "\uc815\ud655",  # 정확
+            "\uc790\uc138",  # 자세
+            "\ubd84\uc11d",  # 분석
+            "\uc124\uacc4",  # 설계
+            "\uc810\uac80",  # 점검
+            "\ub514\ubc84\uadf8",  # 디버그
+            "\uc624\ub958",  # 오류
+            "\uc5d0\ub7ec",  # 에러
+            "\ub85c\uadf8",  # 로그
+            "\uad6c\ud604",  # 구현
+            "\ucf54\ub4dc",  # 코드
+            "\ud504\ub85c\uadf8\ub7a8",  # 프로그램
+        )
         if any(keyword in lowered for keyword in explicit_cloud_keywords):
             return True
 
@@ -326,6 +351,24 @@ class ChatService:
             return False
 
         return False
+
+    def _weighted_auto_use_cloud(self, request: ChatRequest, cloud_weight: int) -> bool:
+        latest_user_message = self._find_latest_user_message(request)
+        if latest_user_message is None:
+            return False
+
+        text = latest_user_message.content.strip()
+        if not text:
+            return False
+
+        # Very short casual messages should stay local unless the user strongly
+        # prefers cloud in auto routing.
+        if cloud_weight < 75 and len(text) <= 120 and not any(char in text for char in "{}[]();=<>/"):
+            return False
+
+        bucket_source = f"{latest_user_message.id}:{text}".encode("utf-8", errors="ignore")
+        bucket = int.from_bytes(hashlib.sha256(bucket_source).digest()[:2], "big") % 100
+        return bucket < cloud_weight
 
     def _response_has_error(self, response: ChatResponse) -> bool:
         metadata = getattr(response.message, "metadata", {}) or {}
@@ -438,6 +481,10 @@ class ChatService:
         content = file_export_response.repair_refusal(
             content=content,
             request_content=latest_user_message.content,
+        )
+        content = self.web_search_context.normalize_weather_units_in_response(
+            content,
+            web_search_context,
         )
 
         return self._create_assistant_response(
@@ -604,6 +651,10 @@ class ChatService:
             content=content,
             request_content=latest_user_message.content,
         )
+        content = self.web_search_context.normalize_weather_units_in_response(
+            content,
+            web_search_context,
+        )
 
         return self._create_assistant_response(
             content=content,
@@ -676,7 +727,7 @@ class ChatService:
         model: str,
         messages: list[dict[str, str]],
     ) -> str:
-        return self._call_openai_compatible_chat(
+        return self._call_openai_responses_chat(
             base_url=cloud_provider_base_url("openai", base_url),
             api_key=api_key,
             model=model,
@@ -767,6 +818,7 @@ class ChatService:
                 "model": model,
                 "messages": messages,
                 "temperature": 0.6,
+                "max_tokens": CLOUD_AI_MAX_OUTPUT_TOKENS,
             },
             timeout=CLOUD_AI_CHAT_TIMEOUT_SECONDS,
         )
@@ -792,6 +844,69 @@ class ChatService:
             return "\n".join(text_parts).strip()
 
         return str(content).strip()
+
+    def _call_openai_responses_chat(
+        self,
+        base_url: str,
+        api_key: str,
+        model: str,
+        messages: list[dict[str, str]],
+    ) -> str:
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+        input_messages: list[dict[str, str]] = []
+        for message in messages:
+            role = str(message.get("role") or "").strip()
+            content = str(message.get("content") or "").strip()
+            if role not in {"system", "developer", "user", "assistant"} or not content:
+                continue
+            input_messages.append({"role": role, "content": content})
+
+        response = httpx.post(
+            f"{base_url.rstrip('/')}/responses",
+            headers=headers,
+            json={
+                "model": model,
+                "input": input_messages,
+                "max_output_tokens": CLOUD_AI_MAX_OUTPUT_TOKENS,
+            },
+            timeout=CLOUD_AI_CHAT_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+
+        data = response.json()
+        return self._extract_openai_responses_text(data)
+
+    def _extract_openai_responses_text(self, data: dict[str, Any]) -> str:
+        output_text = data.get("output_text")
+        if isinstance(output_text, str) and output_text.strip():
+            return output_text.strip()
+
+        text_parts: list[str] = []
+        output_items = data.get("output") or []
+        if not isinstance(output_items, list):
+            return ""
+
+        for item in output_items:
+            if not isinstance(item, dict):
+                continue
+            content_items = item.get("content") or []
+            if isinstance(content_items, str):
+                text_parts.append(content_items)
+                continue
+            if not isinstance(content_items, list):
+                continue
+            for content_item in content_items:
+                if isinstance(content_item, dict):
+                    text = content_item.get("text") or content_item.get("content") or ""
+                    if text:
+                        text_parts.append(str(text))
+                elif content_item:
+                    text_parts.append(str(content_item))
+
+        return "\n".join(part.strip() for part in text_parts if part.strip()).strip()
 
     def _call_anthropic_chat(
         self,
@@ -1122,6 +1237,12 @@ class ChatService:
             request=request,
         )
         config = self.web_search_context.config_from_settings(settings)
+        if not manual_requested:
+            config = replace(
+                config,
+                max_results=min(config.max_results, AUTO_WEB_SEARCH_MAX_RESULTS),
+                timeout_seconds=min(config.timeout_seconds, AUTO_WEB_SEARCH_TIMEOUT_SECONDS),
+            )
         query = self.web_search_context.normalize_query_for_region(
             query=query,
             original_text=text,

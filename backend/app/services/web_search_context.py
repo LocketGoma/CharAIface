@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -26,21 +27,25 @@ class WebSearchContextBuilder:
         self.markers = self._load_markers()
 
     def _load_markers(self) -> dict[str, tuple[str, ...]]:
+        markers: dict[str, tuple[str, ...]] = {}
+        self._merge_marker_file(markers, self.markers_path)
+        return markers
+
+    def _merge_marker_file(self, markers: dict[str, tuple[str, ...]], path: Path) -> None:
         try:
-            data = json.loads(self.markers_path.read_text(encoding="utf-8"))
+            data = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError) as error:
-            print(f"[WebSearchContextBuilder] Failed to load {CHAT_SERVICE_MARKERS_FILENAME}: {error}")
-            return {}
+            print(f"[WebSearchContextBuilder] Failed to load {path.name}: {error}")
+            return
 
         if not isinstance(data, dict):
-            return {}
+            return
 
-        markers: dict[str, tuple[str, ...]] = {}
         for category, raw_values in data.items():
             if not isinstance(category, str) or not isinstance(raw_values, list):
                 continue
 
-            values: list[str] = []
+            values: list[str] = list(markers.get(category, ()))
             for value in raw_values:
                 if not isinstance(value, str):
                     continue
@@ -49,8 +54,6 @@ class WebSearchContextBuilder:
                     values.append(normalized)
 
             markers[category] = tuple(dict.fromkeys(values))
-
-        return markers
 
     def resolve_contextual_query(
         self,
@@ -150,7 +153,7 @@ class WebSearchContextBuilder:
         country_code = str(getattr(config, "country_code", "") or "").upper()
         location = str(getattr(config, "location", "") or "").strip()
 
-        if self.has_any_marker(lowered, self.markers_for("web_search_weather_topic")):
+        if self.looks_like_weather_request(lowered):
             additions: list[str] = []
             if country_code == "KR" and not self.has_any_marker(
                 lowered,
@@ -175,6 +178,8 @@ class WebSearchContextBuilder:
             if self.has_any_marker(compact, self.markers_for("web_search_relative_tomorrow")):
                 additions.append((now + timedelta(days=1)).strftime("%Y-%m-%d"))
             elif self.has_any_marker(compact, self.markers_for("web_search_relative_today")):
+                additions.append(now.strftime("%Y-%m-%d"))
+            elif self.has_relative_time_reference(compact):
                 additions.append(now.strftime("%Y-%m-%d"))
 
             unit_hint = self.weather_unit_query_hint(settings)
@@ -218,6 +223,9 @@ class WebSearchContextBuilder:
         if self.looks_like_explicit_request(compact):
             return True
 
+        if self.looks_like_current_info_request(compact):
+            return True
+
         if not self.has_any_marker(compact, self.markers_for("web_search_current")):
             return False
 
@@ -255,6 +263,47 @@ class WebSearchContextBuilder:
         if not self.has_any_marker(text, self.markers_for("web_search_explanation_only")):
             return False
         return not self.looks_like_explicit_request(text)
+
+    def looks_like_current_info_request(self, text: str) -> bool:
+        compact = self.compact_text(text)
+        if not compact or self.looks_like_explanation_only_request(compact):
+            return False
+        if not self.has_relative_time_reference(compact):
+            return False
+        return self.looks_like_answer_request(compact) or len(compact) <= 40
+
+    def looks_like_weather_request(self, text: str) -> bool:
+        return bool(
+            re.search(
+                r"(\b(weather|forecast)\b|날씨|기상|예보)",
+                self.compact_text(text),
+                flags=re.IGNORECASE,
+            )
+        )
+
+    def has_relative_time_reference(self, text: str) -> bool:
+        return bool(
+            re.search(
+                r"(\b(today|tomorrow|current|now|latest|recent|this\s+week|this\s+month)\b|"
+                r"\d{4}[-./]\d{1,2}[-./]\d{1,2}|"
+                r"오늘|내일|현재|지금|최신|최근|이번\s*주|이번\s*달|이번\s*분기|올해)",
+                text,
+                flags=re.IGNORECASE,
+            )
+        )
+
+    def looks_like_answer_request(self, text: str) -> bool:
+        if "?" in text:
+            return True
+        return bool(
+            re.search(
+                r"(\b(tell me|what is|what are|find|check|summarize)\b|"
+                r"알려\s*줘|알려줘|찾아\s*줘|찾아줘|확인\s*해\s*줘|확인해줘|"
+                r"정리\s*해\s*줘|정리해줘|요약\s*해\s*줘|요약해줘|어때|뭐야|뭔가)",
+                text,
+                flags=re.IGNORECASE,
+            )
+        )
 
     def config_from_settings(self, settings: dict[str, Any]) -> WebSearchConfig:
         provider = str(settings.get("web_search_provider") or "tavily").strip().lower()
@@ -499,15 +548,56 @@ class WebSearchContextBuilder:
         if app_language.startswith("ko"):
             return (
                 "단위 표기 우선순위: 섭씨/미터법을 우선 사용하라. "
-                "날씨 온도는 섭씨(°C)를 먼저 쓰고, 거리/길이/무게는 가능한 경우 미터법을 우선하라. "
-                "단, 원문 출처나 공식 규격에서 특정 단위 자체가 의미를 가지는 경우에는 그 원 단위를 보존하고 임의 변환하지 마라. "
-                "날씨 출처의 숫자가 화씨로 보이면 숫자만 유지한 채 °C로 바꾸지 말고, 섭씨로 환산한 근사치를 표시하라."
+                "날씨 답변에서는 사용자가 명시적으로 요청하지 않는 한 화씨(°F)를 쓰지 말고 섭씨(°C)만 사용하라. "
+                "검색 결과가 화씨를 포함하면 섭씨로 환산한 근사치만 표시하고, 화씨 원문 숫자를 병기하지 마라. "
+                "화씨 숫자만 유지한 채 °C로 바꾸는 것은 금지한다."
             )
         return (
             "Unit preference: prefer Celsius and metric units. "
-            "For weather, put Celsius (°C) first; prefer metric units for distance, length, and weight when appropriate. "
-            "However, preserve source-specific or official units when the original unit itself is meaningful; do not force a conversion. "
-            "If a weather source number appears to be Fahrenheit, do not keep the number and only relabel it as °C; show the approximate converted Celsius value."
+            "For weather answers, use Celsius (°C) only unless the user explicitly asks for Fahrenheit. "
+            "If search results include Fahrenheit, show only the approximate Celsius conversion and do not include the original Fahrenheit value. "
+            "Never keep a Fahrenheit number and merely relabel it as °C."
+        )
+
+    def normalize_weather_units_in_response(
+        self,
+        content: str,
+        web_search_context: dict[str, Any] | None,
+    ) -> str:
+        if not content or not web_search_context or not web_search_context.get("used"):
+            return content
+        if str(web_search_context.get("preferred_unit_system") or "metric") != "metric":
+            return content
+
+        query = str(web_search_context.get("query") or "")
+        if not self.looks_like_weather_request(query):
+            return content
+
+        normalized = re.sub(
+            r"\s*/\s*(?:체감\s*)?(?:온도\s*)?(?:약\s*)?\d+(?:\.\d+)?\s*°F",
+            "",
+            content,
+            flags=re.IGNORECASE,
+        )
+        normalized = re.sub(
+            r"\(?\s*(?:화씨|fahrenheit)\s*(?:약\s*)?\d+(?:\.\d+)?\s*(?:°F)?\s*\)?",
+            "",
+            normalized,
+            flags=re.IGNORECASE,
+        )
+
+        def convert_suspicious_celsius(match: re.Match[str]) -> str:
+            value = float(match.group(1))
+            suffix = match.group(2)
+            if value < 55:
+                return match.group(0)
+            celsius = round((value - 32) * 5 / 9)
+            return f"{celsius}°C{suffix}"
+
+        return re.sub(
+            r"(\d+(?:\.\d+)?)\s*°C(\s*[~～-]?)",
+            convert_suspicious_celsius,
+            normalized,
         )
 
     def format_result_lines(

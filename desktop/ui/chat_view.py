@@ -1,5 +1,6 @@
 from html import escape
 from pathlib import Path
+from datetime import datetime, timezone
 import re
 
 from PySide6.QtCore import QPoint, QSize, Qt, QTimer, QUrl, Signal
@@ -27,6 +28,7 @@ PAID_MODEL_LABEL = " (유료 모델 사용) "
 TYPEWRITER_INTERVAL_MS = 25
 TYPEWRITER_MAX_INTERVAL_MS = 100
 TYPEWRITER_MAX_TICKS = 160
+MESSAGE_LABEL_HEIGHT_SAFETY_MARGIN = 6
 
 
 class SelectableMessageLabel(QLabel):
@@ -41,6 +43,24 @@ class SelectableMessageLabel(QLabel):
             | Qt.TextInteractionFlag.LinksAccessibleByKeyboard
         )
         self.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+        self.setSizePolicy(
+            QSizePolicy.Policy.Preferred,
+            QSizePolicy.Policy.Minimum,
+        )
+
+    def heightForWidth(self, width: int) -> int:
+        height = super().heightForWidth(width)
+        if height < 0:
+            return height
+        return height + MESSAGE_LABEL_HEIGHT_SAFETY_MARGIN
+
+    def sizeHint(self) -> QSize:
+        hint = super().sizeHint()
+        return QSize(hint.width(), hint.height() + MESSAGE_LABEL_HEIGHT_SAFETY_MARGIN)
+
+    def minimumSizeHint(self) -> QSize:
+        hint = super().minimumSizeHint()
+        return QSize(hint.width(), hint.height() + MESSAGE_LABEL_HEIGHT_SAFETY_MARGIN)
 
 
 class ChatContainer(QWidget):
@@ -88,6 +108,7 @@ class ChatView(QScrollArea):
         self._copy_action_text = ""
         self._regenerate_action_text = ""
         self._cancel_response_action_text = ""
+        self._developer_mode = False
 
         self.setWidgetResizable(True)
 
@@ -191,6 +212,9 @@ class ChatView(QScrollArea):
         interval = max(10, min(TYPEWRITER_MAX_INTERVAL_MS, interval))
         self._typewriter_interval_ms = round(interval / 10) * 10
 
+    def set_developer_mode(self, enabled: bool) -> None:
+        self._developer_mode = bool(enabled)
+
     def add_message(self, role: str, text: str) -> None:
         message = ChatMessage(
             role=self._normalize_role(role),
@@ -216,6 +240,8 @@ class ChatView(QScrollArea):
             for label in labels:
                 if label.objectName() in {"UserMessageBubble", "AssistantMessageBubble"}:
                     label.setMaximumWidth(max_width)
+                    label.updateGeometry()
+            row.updateGeometry()
 
     def add_chat_message(self, message: ChatMessage, *, animate: bool = False) -> QWidget:
         message_index = len(self._message_widgets)
@@ -264,6 +290,7 @@ class ChatView(QScrollArea):
             )
         else:
             label.setText(self._build_message_html(message))
+        label.updateGeometry()
 
         actions = self._create_message_actions(message, message_index, row)
 
@@ -493,7 +520,42 @@ class ChatView(QScrollArea):
         content += self._local_export_link_html(message)
 
         style = self._message_html_style()
-        return f'<div style="{style}"><b>{display_role}</b><br>{content}</div>'
+        developer_meta = self._developer_message_meta_html(message)
+        return f'<div style="{style}"><b>{display_role}</b>{developer_meta}<br>{content}</div>'
+
+    def _developer_message_meta_html(self, message: ChatMessage) -> str:
+        if not self._developer_mode or message.role != "assistant":
+            return ""
+
+        metadata = message.metadata or {}
+        cloud_state = "ON" if metadata.get("paid_model_used") or metadata.get("route") == "cloud_ai" else "OFF"
+        if metadata.get("cloud_ai_fallback_to_local"):
+            cloud_state += " (fallback)"
+        model = str(metadata.get("model") or "unknown")
+        answered_at = self._format_message_time(message.created_at)
+        escaped = " | ".join(
+            [
+                f"Cloud: {escape(cloud_state)}",
+                f"Model: {escape(model)}",
+                f"Time: {escape(answered_at)}",
+            ]
+        )
+        return (
+            "<br>"
+            "<span style=\"font-size:8pt; color:#7a6170; font-weight:normal;\">"
+            f"{escaped}"
+            "</span>"
+        )
+
+    def _format_message_time(self, created_at: str) -> str:
+        try:
+            value = str(created_at or "").replace("Z", "+00:00")
+            parsed = datetime.fromisoformat(value)
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return parsed.astimezone().strftime("%H:%M:%S")
+        except ValueError:
+            return str(created_at or "").strip()
 
     def _local_export_link_html(self, message: ChatMessage) -> str:
         metadata = message.metadata or {}
@@ -557,12 +619,14 @@ class ChatView(QScrollArea):
                     plain_text_only=True,
                 )
             )
+            label.updateGeometry()
             self._scroll_to_bottom()
 
             if state["index"] >= total_length:
                 self._stop_typewriter_animation(message_id)
                 label.raw_text = content
                 label.setText(self._build_message_html(message))
+                label.updateGeometry()
                 self._scroll_to_bottom_later()
                 self.assistant_message_display_finished.emit(message_id)
 
