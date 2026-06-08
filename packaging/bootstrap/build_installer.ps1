@@ -1,19 +1,17 @@
-# CharAIface Windows PyInstaller build helper
+# CharAIface bootstrap installer build helper
 
 $ErrorActionPreference = "Stop"
 
 $ScriptPath = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = Resolve-Path (Join-Path $ScriptPath "..\..")
 $VenvPython = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
-$SpecPath = Join-Path $ScriptPath "CharAIface.spec"
-$DistPath = Join-Path $ProjectRoot "dist\windows"
-$WorkPath = Join-Path $ProjectRoot "build\windows"
-$PyInstallerConfigDir = Join-Path $ProjectRoot "build\pyinstaller-config\windows"
-$PackagingBuiltinRoot = Join-Path $ProjectRoot "build\packaging-assets\windows\resources\builtin"
+$SpecPath = Join-Path $ScriptPath "CharAIfaceInstaller.spec"
+$DistPath = Join-Path $ProjectRoot "dist\bootstrap"
+$WorkPath = Join-Path $ProjectRoot "build\bootstrap-installer\pyinstaller"
+$PyInstallerConfigDir = Join-Path $ProjectRoot "build\pyinstaller-config\bootstrap"
 
 if (!(Test-Path $VenvPython)) {
     Write-Host "[ERROR] .venv Python was not found: $VenvPython" -ForegroundColor Red
-    Write-Host "Run .\run_windows.ps1 once or create the virtual environment first."
     exit 1
 }
 
@@ -28,16 +26,11 @@ Set-Location $ProjectRoot
 New-Item -ItemType Directory -Force -Path $PyInstallerConfigDir | Out-Null
 $env:PYINSTALLER_CONFIG_DIR = $PyInstallerConfigDir
 
-& $VenvPython "$ProjectRoot\packaging\prepare_packaging_assets.py" `
-    --source "$ProjectRoot\resources\builtin" `
-    --target $PackagingBuiltinRoot
-
+& $VenvPython "$ProjectRoot\packaging\bootstrap\build_installer_payload.py"
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "[ERROR] Packaging asset preparation failed." -ForegroundColor Red
+    Write-Host "[ERROR] Installer payload build failed." -ForegroundColor Red
     exit $LASTEXITCODE
 }
-
-$env:CHARAIFACE_PACKAGING_BUILTIN_ROOT = $PackagingBuiltinRoot
 
 & $VenvPython -m PyInstaller `
     --noconfirm `
@@ -47,8 +40,8 @@ $env:CHARAIFACE_PACKAGING_BUILTIN_ROOT = $PackagingBuiltinRoot
     $SpecPath
 
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "[ERROR] PyInstaller build failed." -ForegroundColor Red
+    Write-Host "[ERROR] Bootstrap installer build failed." -ForegroundColor Red
     exit $LASTEXITCODE
 }
 
-Write-Host "[CharAIface] Windows build completed: $DistPath\CharAIface"
+Write-Host "[CharAIface] Bootstrap installer built: $DistPath\CharAIfaceInstaller.exe"

@@ -25,8 +25,22 @@ class CharacterPackScanResult:
 
 
 class CharacterPackScanner:
-    def __init__(self, characters_dir: str | Path) -> None:
+    def __init__(
+        self,
+        characters_dir: str | Path,
+        *,
+        include_folder_packs: bool = True,
+        include_charpack_files: bool = False,
+        charpack_extract_dir: str | Path | None = None,
+    ) -> None:
         self.characters_dir = Path(characters_dir)
+        self.include_folder_packs = include_folder_packs
+        self.include_charpack_files = include_charpack_files
+        self.charpack_extract_dir = (
+            Path(charpack_extract_dir)
+            if charpack_extract_dir is not None
+            else None
+        )
 
     def scan(self) -> CharacterPackScanResult:
         valid_packs: list[CharacterPack] = []
@@ -65,6 +79,37 @@ class CharacterPackScanner:
                     }
                 )
 
+        for archive_path in self._iter_candidate_charpack_files():
+            try:
+                pack_dir = self._extract_charpack(archive_path)
+                pack = self._load_pack(pack_dir)
+
+                pack_key = _character_id_key(pack.id)
+                if pack_key in seen_ids:
+                    invalid_packs.append(
+                        {
+                            "folder": archive_path.name,
+                            "path": str(archive_path),
+                            "messages": [
+                                f'Duplicate character id "{pack.id}". '
+                                "Character id matching is case-insensitive."
+                            ],
+                        }
+                    )
+                    continue
+
+                seen_ids.add(pack_key)
+                valid_packs.append(pack)
+
+            except Exception as error:
+                invalid_packs.append(
+                    {
+                        "folder": archive_path.name,
+                        "path": str(archive_path),
+                        "messages": [str(error)],
+                    }
+                )
+
         valid_packs.sort(key=lambda pack: pack.name.casefold())
 
         return CharacterPackScanResult(
@@ -85,6 +130,9 @@ class CharacterPackScanner:
         """
         candidate_dirs: list[Path] = []
 
+        if not self.include_folder_packs:
+            return candidate_dirs
+
         if (self.characters_dir / "manifest.json").is_file():
             candidate_dirs.append(self.characters_dir)
 
@@ -98,6 +146,29 @@ class CharacterPackScanner:
             candidate_dirs.append(pack_dir)
 
         return candidate_dirs
+
+    def _iter_candidate_charpack_files(self) -> list[Path]:
+        if not self.include_charpack_files:
+            return []
+        if not self.characters_dir.exists():
+            return []
+        return [
+            path
+            for path in sorted(self.characters_dir.iterdir())
+            if path.is_file()
+            and not path.name.startswith(".")
+            and path.suffix.lower() == ".charpack"
+        ]
+
+    def _extract_charpack(self, archive_path: Path) -> Path:
+        if self.charpack_extract_dir is None:
+            raise ValueError("charpack_extract_dir is required to scan .charpack files")
+
+        from desktop.characters.character_pack_archive import extract_charpack_to_directory
+
+        target_name = _safe_extract_dir_name(archive_path)
+        target_dir = self.charpack_extract_dir / target_name
+        return extract_charpack_to_directory(archive_path, target_dir)
 
     def _load_pack(self, pack_dir: Path) -> CharacterPack:
         manifest_path = pack_dir / "manifest.json"
@@ -174,3 +245,14 @@ class CharacterPackScanner:
 
 def _character_id_key(character_id: str | None) -> str:
     return str(character_id or "").casefold()
+
+
+def _safe_extract_dir_name(path: Path) -> str:
+    stem = path.stem.strip() or "character_pack"
+    safe = "".join(
+        char
+        if char.isalnum() or char in {"-", "_"}
+        else "_"
+        for char in stem
+    ).strip("._-")
+    return safe or "character_pack"

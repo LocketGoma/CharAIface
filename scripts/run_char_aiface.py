@@ -291,8 +291,10 @@ def _run_desktop() -> int:
 def _run_backend_only() -> int:
     import uvicorn
 
+    from backend.app.main import app
+
     uvicorn.run(
-        BACKEND_MODULE,
+        app,
         host=BACKEND_HOST,
         port=BACKEND_PORT,
         log_level="info",

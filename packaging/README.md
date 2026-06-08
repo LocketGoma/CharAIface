@@ -2,25 +2,59 @@
 
 This folder contains alpha packaging scaffolding for CharAIface.
 
-The goal is to build packages that include the Python runtime and Python
-dependencies so end users do not need to install Python, create a virtual
-environment, or run `pip install`.
+The release goal is a small bootstrap bundle: users download one zip file from
+GitHub Releases, extract it, and run the included installer.  The installer uses
+the runtime archive placed next to it, combines that runtime with the embedded
+app payload, and creates the local runnable CharAIface installation.
 
 ## Current Direction
 
-The first packaging target is PyInstaller one-folder output.
+The preferred release target is the bootstrap installer in `packaging/bootstrap`.
+The existing PyInstaller one-folder output remains useful for smoke tests,
+runtime inspection, and emergency alpha builds.
 
 Recommended order:
 
-1. Windows one-folder build
-2. Windows zip smoke test
-3. macOS `.app` bundle build
-4. macOS dmg packaging
-5. Optional Windows installer with Inno Setup or NSIS
+1. Build and test the bootstrap installer payload
+2. Prepare OS-specific standalone runtime roots
+3. Archive those runtimes with `packaging/runtime/build_runtime_archive.py`
+4. Build a small installer executable
+5. Bundle the installer executable and matching runtime archive into one zip
+6. Upload only that zip as the user-facing GitHub Release download
 
-One-file builds are intentionally not the first target. CharAIface includes
-PySide6, FastAPI, pandas, tree-sitter packages, and resource files; one-folder
-output is easier to inspect and debug during alpha.
+Fat PyInstaller app bundles are intentionally not the final release shape.
+CharAIface includes PySide6, FastAPI, pandas, tree-sitter packages, and resource
+files; putting everything into the user-facing installer makes the installer too
+large.
+
+## Bootstrap Installer Direction
+
+The bootstrap installer flow is:
+
+```text
+GitHub Release
+  user downloads: CharAIface-bootstrap-<platform>.zip
+
+Extracted bundle
+  CharAIfaceInstaller
+  charaiface-runtime-<platform>.zip
+
+CharAIfaceInstaller
+  detects OS/architecture
+  uses the adjacent runtime archive
+  falls back to runtime download only when no local archive is present
+  verifies SHA-256 checksum
+  extracts runtime into the install directory
+  copies embedded app code/resources
+  writes a local launcher
+
+User
+  runs the reconstructed local launcher
+```
+
+The runtime archive can still be hosted as a release asset or another static
+download URL as a fallback, but the preferred alpha release shape is one zip
+that already contains both the installer and runtime archive.
 
 ## Included Runtime Files
 
@@ -89,7 +123,9 @@ After building, manually verify:
 
 ## Known Alpha Limitations
 
-- Installer generation is not configured yet.
+- Runtime archive generation is not finalized yet.
+- Installer UI is not configured yet; the current bootstrap installer is CLI-first
+  and prompts for an install directory when run interactively.
 - macOS signing and notarization are not configured yet.
 - DMG generation is documented as a follow-up step.
 - App data currently follows the existing resource/data layout; this may be

@@ -93,6 +93,27 @@ def import_charpack(
     return destination
 
 
+def extract_charpack_to_directory(
+    source_path: str | Path,
+    destination: str | Path,
+) -> Path:
+    source = Path(source_path)
+    target = Path(destination)
+
+    with zipfile.ZipFile(source, "r") as archive:
+        _validate_archive_entries(archive)
+        manifest_data = json.loads(archive.read("manifest.json").decode("utf-8"))
+        manifest = _validate_archive_manifest(manifest_data)
+        _validate_archive_manifest_files(archive, manifest)
+
+        if target.exists():
+            shutil.rmtree(target)
+        target.mkdir(parents=True, exist_ok=True)
+        archive.extractall(target)
+
+    return target
+
+
 def _backup_existing_pack(destination_root: Path, destination: Path) -> Path:
     backups_root = destination_root / ".backups"
     backups_root.mkdir(parents=True, exist_ok=True)

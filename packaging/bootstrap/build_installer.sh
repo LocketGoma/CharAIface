@@ -4,15 +4,13 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 VENV_PYTHON="$PROJECT_ROOT/.venv/bin/python"
-SPEC_PATH="$SCRIPT_DIR/CharAIface.spec"
-DIST_PATH="$PROJECT_ROOT/dist/macos"
-WORK_PATH="$PROJECT_ROOT/build/macos"
-PYINSTALLER_CONFIG_DIR="$PROJECT_ROOT/build/pyinstaller-config/macos"
-PACKAGING_BUILTIN_ROOT="$PROJECT_ROOT/build/packaging-assets/macos/resources/builtin"
+SPEC_PATH="$SCRIPT_DIR/CharAIfaceInstaller.spec"
+DIST_PATH="$PROJECT_ROOT/dist/bootstrap"
+WORK_PATH="$PROJECT_ROOT/build/bootstrap-installer/pyinstaller"
+PYINSTALLER_CONFIG_DIR="$PROJECT_ROOT/build/pyinstaller-config/bootstrap"
 
 if [[ ! -x "$VENV_PYTHON" ]]; then
   echo "[ERROR] .venv Python was not found: $VENV_PYTHON"
-  echo "Run ./run_macos.sh once or create the virtual environment first."
   exit 1
 fi
 
@@ -26,10 +24,7 @@ cd "$PROJECT_ROOT"
 mkdir -p "$PYINSTALLER_CONFIG_DIR"
 export PYINSTALLER_CONFIG_DIR
 
-"$VENV_PYTHON" "$PROJECT_ROOT/packaging/prepare_packaging_assets.py" \
-  --source "$PROJECT_ROOT/resources/builtin" \
-  --target "$PACKAGING_BUILTIN_ROOT"
-export CHARAIFACE_PACKAGING_BUILTIN_ROOT="$PACKAGING_BUILTIN_ROOT"
+"$VENV_PYTHON" "$PROJECT_ROOT/packaging/bootstrap/build_installer_payload.py"
 
 "$VENV_PYTHON" -m PyInstaller \
   --noconfirm \
@@ -38,4 +33,4 @@ export CHARAIFACE_PACKAGING_BUILTIN_ROOT="$PACKAGING_BUILTIN_ROOT"
   --workpath "$WORK_PATH" \
   "$SPEC_PATH"
 
-echo "[CharAIface] macOS build completed: $DIST_PATH/CharAIface.app"
+echo "[CharAIface] Bootstrap installer built: $DIST_PATH/CharAIfaceInstaller"

@@ -1,5 +1,5 @@
 import sys
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QApplication
 
@@ -13,6 +13,24 @@ from desktop.utils.single_instance import (
     FrontendSingleInstanceServer,
     request_existing_frontend_activation,
 )
+
+
+class CharAIfaceApplication(QApplication):
+    def __init__(self, argv: list[str]) -> None:
+        super().__init__(argv)
+        self._main_window: MainWindow | None = None
+
+    def set_main_window(self, window: MainWindow) -> None:
+        self._main_window = window
+
+    def event(self, event) -> bool:
+        if (
+            sys.platform == "darwin"
+            and event.type() == QEvent.Type.Quit
+            and self._main_window is not None
+        ):
+            self._main_window.prepare_application_quit()
+        return super().event(event)
 
 
 def _ensure_valid_application_font(app: QApplication) -> None:
@@ -65,7 +83,7 @@ def main() -> int:
     if request_existing_frontend_activation():
         return 0
 
-    app = QApplication(sys.argv)
+    app = CharAIfaceApplication(sys.argv)
     app.setApplicationName("CharAIface")
     app.setApplicationDisplayName("CharAIface")
     app.setOrganizationName("LocketGoma")
@@ -106,6 +124,7 @@ def main() -> int:
     )
     if not app_icon.isNull():
         window.setWindowIcon(app_icon)
+    app.set_main_window(window)
 
     app.applicationStateChanged.connect(
         lambda state: _restore_window_when_app_activated(window, state)

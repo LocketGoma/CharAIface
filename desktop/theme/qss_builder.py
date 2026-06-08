@@ -1,4 +1,9 @@
+from shared.runtime_paths import resource_path
+
 from desktop.theme.theme_model import ThemeDefinition
+
+
+COMBO_ARROW_ICON = resource_path("app", "icons", "combo_arrow_down.svg").as_posix()
 
 
 def build_qss(theme: ThemeDefinition) -> str:
@@ -420,7 +425,7 @@ def build_qss(theme: ThemeDefinition) -> str:
     }}
 
     QComboBox::down-arrow {{
-        image: url(resources/app/icons/combo_arrow_down.svg);
+        image: url("{COMBO_ARROW_ICON}");
         width: 12px;
         height: 8px;
     }}

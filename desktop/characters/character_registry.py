@@ -1,4 +1,5 @@
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from desktop.characters.character_pack import CharacterPack
 from desktop.characters.character_scanner import CharacterPackScanner
@@ -26,6 +27,7 @@ class CharacterRegistry:
         self._user_pack_ids: set[str] = set()
         self._invalid_packs: list[dict] = []
         self._warnings: list[str] = []
+        self._builtin_charpack_temp_dir: TemporaryDirectory[str] | None = None
 
     @property
     def packs(self) -> list[CharacterPack]:
@@ -45,6 +47,7 @@ class CharacterRegistry:
         self._user_pack_ids.clear()
         self._invalid_packs.clear()
         self._warnings.clear()
+        self._reset_builtin_charpack_temp_dir()
 
         self._load_builtin_characters()
         self._load_user_characters()
@@ -78,7 +81,13 @@ class CharacterRegistry:
         return _character_id_key(character_id) in self._user_pack_ids
 
     def _load_builtin_characters(self) -> None:
-        scanner = CharacterPackScanner(characters_dir=self.builtin_characters_dir)
+        extract_dir = self._builtin_charpack_extract_dir()
+        scanner = CharacterPackScanner(
+            characters_dir=self.builtin_characters_dir,
+            include_folder_packs=False,
+            include_charpack_files=True,
+            charpack_extract_dir=extract_dir,
+        )
         result = scanner.scan()
 
         self._invalid_packs.extend(
@@ -160,6 +169,17 @@ class CharacterRegistry:
             self._warnings.append(
                 f"[{source}] {pack.id}: {warning}"
             )
+
+    def _reset_builtin_charpack_temp_dir(self) -> None:
+        if self._builtin_charpack_temp_dir is not None:
+            self._builtin_charpack_temp_dir.cleanup()
+            self._builtin_charpack_temp_dir = None
+
+    def _builtin_charpack_extract_dir(self) -> Path:
+        self._builtin_charpack_temp_dir = TemporaryDirectory(
+            prefix="charaiface_builtin_charpacks_"
+        )
+        return Path(self._builtin_charpack_temp_dir.name)
 
     def _with_source(self, invalid_packs: list[dict], source: str) -> list[dict]:
         result: list[dict] = []
