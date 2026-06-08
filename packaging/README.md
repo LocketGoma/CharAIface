@@ -2,59 +2,54 @@
 
 This folder contains alpha packaging scaffolding for CharAIface.
 
-The release goal is a small bootstrap bundle: users download one zip file from
-GitHub Releases, extract it, and run the included installer.  The installer uses
-the runtime archive placed next to it, combines that runtime with the embedded
-app payload, and creates the local runnable CharAIface installation.
+The release goal is a normal self-contained desktop installer. Users should not
+need to install Python, create a virtual environment, or download a separate
+runtime package. The installer or app bundle includes the Python runtime and all
+project dependencies.
 
 ## Current Direction
 
-The preferred release target is the bootstrap installer in `packaging/bootstrap`.
-The existing PyInstaller one-folder output remains useful for smoke tests,
-runtime inspection, and emergency alpha builds.
+The preferred alpha target is:
+
+- macOS: PyInstaller `.app` bundle wrapped in a DMG.
+- Windows: PyInstaller one-folder build wrapped in an installer such as Inno Setup.
+
+This is intentionally larger than a bootstrap installer, but it is simpler and
+more typical for Python desktop apps at this stage.
 
 Recommended order:
 
-1. Build and test the bootstrap installer payload
-2. Prepare OS-specific standalone runtime roots
-3. Archive those runtimes with `packaging/runtime/build_runtime_archive.py`
-4. Build a small installer executable
-5. Bundle the installer executable and matching runtime archive into one zip
-6. Upload only that zip as the user-facing GitHub Release download
+1. Build the platform PyInstaller output
+2. Smoke-test the generated app/folder
+3. Wrap the output in the platform installer format
+4. Upload that installer artifact as the user-facing GitHub Release download
 
-Fat PyInstaller app bundles are intentionally not the final release shape.
-CharAIface includes PySide6, FastAPI, pandas, tree-sitter packages, and resource
-files; putting everything into the user-facing installer makes the installer too
-large.
+CharAIface includes PySide6, FastAPI, pandas, openpyxl, tree-sitter packages,
+and resource files. A self-contained installer will be larger than a native app,
+but it avoids asking users to install Python or manage dependencies.
 
-## Bootstrap Installer Direction
+## Packaging Direction
 
-The bootstrap installer flow is:
+The macOS flow is:
 
 ```text
-GitHub Release
-  user downloads: CharAIface-bootstrap-<platform>.zip
+build_macos.sh
+  creates dist/macos/CharAIface.app
 
-Extracted bundle
-  CharAIfaceInstaller
-  charaiface-runtime-<platform>.zip
-
-CharAIfaceInstaller
-  detects OS/architecture
-  uses the adjacent runtime archive
-  falls back to runtime download only when no local archive is present
-  verifies SHA-256 checksum
-  extracts runtime into the install directory
-  copies embedded app code/resources
-  writes a local launcher
-
-User
-  runs the reconstructed local launcher
+build_dmg.sh
+  creates dist/macos/CharAIface-macos.dmg
 ```
 
-The runtime archive can still be hosted as a release asset or another static
-download URL as a fallback, but the preferred alpha release shape is one zip
-that already contains both the installer and runtime archive.
+The Windows flow is:
+
+```text
+build_windows.ps1
+  creates dist/windows/CharAIface/
+
+Inno Setup
+  reads packaging/windows/CharAIface.iss
+  creates dist/windows-installer/CharAIfaceSetup.exe
+```
 
 ## Included Runtime Files
 
@@ -123,10 +118,7 @@ After building, manually verify:
 
 ## Known Alpha Limitations
 
-- Runtime archive generation is not finalized yet.
-- Installer UI is not configured yet; the current bootstrap installer is CLI-first
-  and prompts for an install directory when run interactively.
 - macOS signing and notarization are not configured yet.
-- DMG generation is documented as a follow-up step.
+- Windows installer signing is not configured yet.
 - App data currently follows the existing resource/data layout; this may be
   split into a user data directory before public release.

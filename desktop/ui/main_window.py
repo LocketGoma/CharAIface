@@ -316,7 +316,6 @@ class MainWindow(QMainWindow):
             project_root
             / "resources"
             / "builtin"
-            / "characters"
         )
 
         user_characters_dir = (

@@ -1,6 +1,7 @@
 # macOS Packaging
 
-macOS packaging starts with a PyInstaller `.app` bundle build.
+macOS packaging uses a self-contained PyInstaller `.app` bundle wrapped in a DMG.
+The `.app` contains the Python runtime and project dependencies.
 
 ## Requirements
 
@@ -31,13 +32,22 @@ dist/macos/CharAIface.app
 
 ## DMG
 
-DMG generation is intentionally left as a follow-up step. For alpha packaging,
-first confirm that the `.app` bundle runs correctly.
+After the `.app` bundle is smoke-tested, create the DMG:
 
-Possible later tools:
+```bash
+./packaging/macos/build_dmg.sh
+```
 
-- `create-dmg`
-- `hdiutil`
+Expected output:
+
+```text
+dist/macos/CharAIface-macos.dmg
+```
+
+The DMG contains:
+
+- `CharAIface.app`
+- an `Applications` shortcut
 
 ## Signing and Notarization
 

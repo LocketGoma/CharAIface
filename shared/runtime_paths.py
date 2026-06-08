@@ -17,6 +17,21 @@ def runtime_root() -> Path:
     In source checkouts this is the repository root. In PyInstaller builds this
     is the extraction/content root exposed through sys._MEIPASS.
     """
+    if is_frozen() and sys.platform == "darwin":
+        executable = Path(sys.executable).resolve()
+        contents_dir = next(
+            (
+                parent
+                for parent in executable.parents
+                if parent.name == "Contents" and parent.parent.suffix == ".app"
+            ),
+            None,
+        )
+        if contents_dir is not None:
+            resources_dir = contents_dir / "Resources"
+            if resources_dir.exists():
+                return resources_dir.resolve()
+
     frozen_root = getattr(sys, "_MEIPASS", None)
     if frozen_root:
         return Path(frozen_root).resolve()

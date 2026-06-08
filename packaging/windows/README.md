@@ -1,6 +1,7 @@
 # Windows Packaging
 
-Windows packaging starts with a PyInstaller one-folder build.
+Windows packaging starts with a self-contained PyInstaller one-folder build. The
+folder contains the Python runtime and project dependencies.
 
 ## Requirements
 
@@ -31,12 +32,23 @@ dist\windows\CharAIface\
   _internal\
 ```
 
-## Distribution
+## Installer
 
-For alpha testing, zip the `dist\windows\CharAIface` folder.
+For alpha testing, the `dist\windows\CharAIface` folder can still be zipped.
+For a normal installer, use Inno Setup with:
 
-Installer support can be added later with Inno Setup or NSIS after the one-folder
-build is stable.
+```powershell
+ISCC.exe .\packaging\windows\CharAIface.iss
+```
+
+Expected output:
+
+```text
+dist\windows-installer\CharAIfaceSetup.exe
+```
+
+The installer includes the full PyInstaller output; users do not need to install
+Python separately.
 
 ## Smoke Test
 
