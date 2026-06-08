@@ -1502,11 +1502,11 @@ class SettingsDialog(QDialog):
             display_name = f"{pack.name} ({source_label})"
             self.character_combo.addItem(display_name, pack.id)
 
-        index = self.character_combo.findData(self.settings.selected_character_id)
+        index = self._find_character_combo_index(self.settings.selected_character_id)
         if index < 0:
             default_pack = self.character_registry.get_default_pack()
             if default_pack is not None:
-                index = self.character_combo.findData(default_pack.id)
+                index = self._find_character_combo_index(default_pack.id)
 
         if index >= 0:
             self.character_combo.setCurrentIndex(index)
@@ -1531,11 +1531,11 @@ class SettingsDialog(QDialog):
             )
             self.character_combo.addItem(f"{pack.name} ({source_label})", pack.id)
 
-        index = self.character_combo.findData(current_character_id)
+        index = self._find_character_combo_index(current_character_id)
         if index < 0:
             default_pack = self.character_registry.get_default_pack()
             if default_pack is not None:
-                index = self.character_combo.findData(default_pack.id)
+                index = self._find_character_combo_index(default_pack.id)
 
         if index >= 0:
             self.character_combo.setCurrentIndex(index)
@@ -1543,6 +1543,17 @@ class SettingsDialog(QDialog):
         self.character_combo.blockSignals(False)
         self._update_character_info_label()
         self._refresh_theme_palette_view()
+
+    def _find_character_combo_index(self, character_id: str | None) -> int:
+        target_key = str(character_id or "").casefold()
+        if not target_key:
+            return -1
+
+        for index in range(self.character_combo.count()):
+            item_key = str(self.character_combo.itemData(index) or "").casefold()
+            if item_key == target_key:
+                return index
+        return -1
 
     def _reload_character_packs(self) -> None:
         self._refresh_character_combo()
@@ -1650,7 +1661,7 @@ class SettingsDialog(QDialog):
             QMessageBox.StandardButton.Yes,
         )
         if apply_now == QMessageBox.StandardButton.Yes:
-            index = self.character_combo.findData(info.character_id)
+            index = self._find_character_combo_index(info.character_id)
             if index >= 0:
                 self.character_combo.setCurrentIndex(index)
 

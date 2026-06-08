@@ -1,5 +1,5 @@
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from desktop.characters.character_pack import CharacterPack
 from shared.schema.character import CharacterPackManifest
@@ -39,19 +39,21 @@ class CharacterPackScanner:
             try:
                 pack = self._load_pack(pack_dir)
 
-                if pack.id in seen_ids:
+                pack_key = _character_id_key(pack.id)
+                if pack_key in seen_ids:
                     invalid_packs.append(
                         {
                             "folder": pack_dir.name,
                             "path": str(pack_dir),
                             "messages": [
-                                f'Duplicate character id "{pack.id}". Character id must be unique.'
+                                f'Duplicate character id "{pack.id}". '
+                                "Character id matching is case-insensitive."
                             ],
                         }
                     )
                     continue
 
-                seen_ids.add(pack.id)
+                seen_ids.add(pack_key)
                 valid_packs.append(pack)
 
             except Exception as error:
@@ -63,7 +65,7 @@ class CharacterPackScanner:
                     }
                 )
 
-        valid_packs.sort(key=lambda pack: pack.name.lower())
+        valid_packs.sort(key=lambda pack: pack.name.casefold())
 
         return CharacterPackScanResult(
             valid_packs=valid_packs,
@@ -89,6 +91,8 @@ class CharacterPackScanner:
         for pack_dir in sorted(self.characters_dir.iterdir()):
             if not pack_dir.is_dir():
                 continue
+            if pack_dir.name.startswith("."):
+                continue
             if not (pack_dir / "manifest.json").is_file():
                 continue
             candidate_dirs.append(pack_dir)
@@ -110,7 +114,7 @@ class CharacterPackScanner:
                 "Only image avatar is supported for now."
             )
 
-        style_path = pack_dir / manifest.style_file
+        style_path = self._pack_file_path(pack_dir, manifest.style_file)
 
         if not style_path.exists():
             raise ValueError(f'style_file "{manifest.style_file}" not found')
@@ -122,7 +126,7 @@ class CharacterPackScanner:
         resolved_images: dict[str, Path] = {}
 
         for state, relative_path in manifest.avatar.images.items():
-            image_path = pack_dir / relative_path
+            image_path = self._pack_file_path(pack_dir, relative_path)
             suffix = image_path.suffix.lower()
 
             if suffix not in SUPPORTED_IMAGE_EXTENSIONS:
@@ -159,3 +163,14 @@ class CharacterPackScanner:
             theme=manifest.theme,
             warnings=warnings,
         )
+
+    def _pack_file_path(self, pack_dir: Path, relative_path: str) -> Path:
+        path_text = str(relative_path or "")
+        path = PurePosixPath(path_text)
+        if path.is_absolute() or ".." in path.parts or "\\" in path_text:
+            raise ValueError(f"Unsafe manifest path: {relative_path}")
+        return pack_dir / Path(*path.parts)
+
+
+def _character_id_key(character_id: str | None) -> str:
+    return str(character_id or "").casefold()

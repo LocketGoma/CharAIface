@@ -87,7 +87,7 @@ def _suffix_markers(language: str) -> dict[str, tuple[str, ...]]:
     suffixes = _supported_suffixes()
     result: dict[str, tuple[str, ...]] = {}
     for suffix, markers in values.items():
-        normalized_suffix = str(suffix).strip().lower()
+        normalized_suffix = str(suffix).strip().casefold()
         if normalized_suffix not in suffixes or not isinstance(markers, list):
             continue
         result[normalized_suffix] = tuple(
@@ -101,7 +101,7 @@ def _supported_suffixes() -> set[str]:
     if not isinstance(values, list):
         return {".txt", ".md", ".csv", ".pdf"}
     suffixes = {
-        str(value).strip().lower()
+        str(value).strip().casefold()
         for value in values
         if str(value).strip().startswith(".")
     }
@@ -130,8 +130,13 @@ def _common_config() -> dict[str, Any]:
 def _localized_config(language: str) -> dict[str, Any]:
     config = _load_config()
     localized = config.get("localized") if isinstance(config.get("localized"), dict) else {}
-    language_key = str(language or "").strip().lower()
-    selected = localized.get(language_key) or {}
+    language_key = str(language or "").strip().casefold()
+    selected = localized.get(language_key)
+    if selected is None:
+        base_key = language_key.split("-", 1)[0].split("_", 1)[0]
+        selected = localized.get(base_key)
+    if selected is None:
+        selected = {}
     return selected if isinstance(selected, dict) else {}
 
 
@@ -146,4 +151,4 @@ def _contains_any(text: str, markers: tuple[str, ...]) -> bool:
 
 
 def _normalize(text: str) -> str:
-    return " ".join(str(text or "").strip().lower().split())
+    return " ".join(str(text or "").strip().casefold().split())

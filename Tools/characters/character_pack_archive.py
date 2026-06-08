@@ -143,7 +143,13 @@ def _validate_archive_entries(archive: zipfile.ZipFile) -> None:
     if len(infos) > MAX_ARCHIVE_FILES:
         raise ValueError("Character pack archive contains too many files")
 
-    names = {info.filename for info in infos}
+    seen_names: set[str] = set()
+    for info in infos:
+        if info.filename in seen_names:
+            raise ValueError(f"Archive contains a duplicate path: {info.filename}")
+        seen_names.add(info.filename)
+
+    names = seen_names
     if "manifest.json" not in names:
         raise ValueError("manifest.json not found")
 

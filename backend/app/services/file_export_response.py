@@ -57,17 +57,17 @@ def _fallback_response() -> str:
 
 
 def _looks_like_request(content: str) -> bool:
-    normalized = str(content or "").strip().lower()
+    normalized = _normalize(content)
     if not normalized:
         return False
-    return any(marker.lower() in normalized for marker in _config_list("request_markers"))
+    return any(_normalize(marker) in normalized for marker in _config_list("request_markers"))
 
 
 def _looks_like_refusal(content: str) -> bool:
-    normalized = str(content or "").strip().lower()
+    normalized = _normalize(content)
     if not normalized:
         return False
-    return any(marker.lower() in normalized for marker in _config_list("refusal_markers"))
+    return any(_normalize(marker) in normalized for marker in _config_list("refusal_markers"))
 
 
 def _remove_refusal_blocks(content: str) -> str:
@@ -86,3 +86,7 @@ def _remove_refusal_blocks(content: str) -> str:
         if line.strip() and not _looks_like_refusal(line)
     ]
     return "\n".join(kept_lines).strip()
+
+
+def _normalize(text: str) -> str:
+    return str(text or "").strip().casefold()

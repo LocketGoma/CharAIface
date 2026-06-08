@@ -58,6 +58,7 @@ def import_charpack(
     source = Path(source_path)
     destination_root = Path(user_characters_dir)
     builtin_ids = builtin_character_ids or set()
+    builtin_id_keys = {_character_id_key(character_id) for character_id in builtin_ids}
 
     with zipfile.ZipFile(source, "r") as archive:
         _validate_archive_entries(archive)
@@ -65,12 +66,14 @@ def import_charpack(
         manifest = _validate_archive_manifest(manifest_data)
         _validate_archive_manifest_files(archive, manifest)
 
-        if manifest.id in builtin_ids:
+        if _character_id_key(manifest.id) in builtin_id_keys:
             raise ValueError(
                 f'Character id "{manifest.id}" is reserved by a built-in character pack.'
             )
 
-        destination = destination_root / manifest.id
+        destination = _find_case_insensitive_child(destination_root, manifest.id)
+        if destination is None:
+            destination = destination_root / manifest.id
         if destination.exists() and not replace_existing:
             raise ValueError(f'Character pack folder already exists: "{destination}"')
 
@@ -100,6 +103,17 @@ def _backup_existing_pack(destination_root: Path, destination: Path) -> Path:
         backup_dir = backups_root / f"{destination.name}-{timestamp}-{counter}"
         counter += 1
     return backup_dir
+
+
+def _find_case_insensitive_child(parent: Path, child_name: str) -> Path | None:
+    if not parent.exists():
+        return None
+
+    child_key = _character_id_key(child_name)
+    for child in parent.iterdir():
+        if child.name.casefold() == child_key:
+            return child
+    return None
 
 
 def export_folder_to_charpack(
@@ -165,7 +179,13 @@ def _validate_archive_entries(archive: zipfile.ZipFile) -> None:
     if len(infos) > MAX_ARCHIVE_FILES:
         raise ValueError("Character pack archive contains too many files")
 
-    names = {info.filename for info in infos}
+    seen_names: set[str] = set()
+    for info in infos:
+        if info.filename in seen_names:
+            raise ValueError(f"Archive contains a duplicate path: {info.filename}")
+        seen_names.add(info.filename)
+
+    names = seen_names
     if "manifest.json" not in names:
         raise ValueError("manifest.json not found")
 
@@ -299,6 +319,10 @@ def _validate_character_id(character_id: str) -> None:
         raise ValueError(
             "Character id may only contain ASCII letters, numbers, '_' and '-'."
         )
+
+
+def _character_id_key(character_id: str | None) -> str:
+    return str(character_id or "").casefold()
 
 
 def _with_charpack_suffix(path: Path) -> Path:

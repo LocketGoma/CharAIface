@@ -37,7 +37,7 @@ def parse_manual_export_filename(
         return None
 
     path = Path(filename)
-    suffix = path.suffix.lower()
+    suffix = path.suffix.casefold()
     if suffix and suffix not in supported_suffixes:
         return None
     if not suffix:
@@ -90,7 +90,7 @@ def _sanitize_filename(filename: str, *, language: str, config: dict[str, Any]) 
     cleaned = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", cleaned)
     cleaned = re.sub(r"\s+", " ", cleaned).strip(" ._-")
 
-    if cleaned.lower() in _blank_values(config):
+    if cleaned.casefold() in _blank_values(config):
         return ""
     return cleaned
 
@@ -98,7 +98,7 @@ def _sanitize_filename(filename: str, *, language: str, config: dict[str, Any]) 
 def _supported_suffixes(config: dict[str, Any]) -> set[str]:
     raw_suffixes = config.get("supported_suffixes") or []
     suffixes = {
-        str(suffix).strip().lower()
+        str(suffix).strip().casefold()
         for suffix in raw_suffixes
         if str(suffix).strip().startswith(".")
     }
@@ -122,11 +122,16 @@ def _cleanup_patterns(config: dict[str, Any], language: str) -> list[str]:
 def _blank_values(config: dict[str, Any]) -> set[str]:
     common_config = config.get("common") if isinstance(config.get("common"), dict) else {}
     values = common_config.get("blank_values") or []
-    return {str(value).strip().lower() for value in values if str(value).strip()}
+    return {str(value).strip().casefold() for value in values if str(value).strip()}
 
 
 def _language_config(config: dict[str, Any], language: str) -> dict[str, Any]:
     languages = config.get("languages") if isinstance(config.get("languages"), dict) else {}
-    language_key = str(language or "").strip().lower()
-    selected = languages.get(language_key) or languages.get("en") or {}
+    language_key = str(language or "").strip().casefold()
+    selected = languages.get(language_key)
+    if selected is None:
+        base_key = language_key.split("-", 1)[0].split("_", 1)[0]
+        selected = languages.get(base_key)
+    if selected is None:
+        selected = languages.get("en") or {}
     return selected if isinstance(selected, dict) else {}
