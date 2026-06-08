@@ -3,8 +3,10 @@ import json
 from pathlib import Path
 from typing import Any
 
+from shared.runtime_paths import resource_path
 
-CONFIG_PATH = Path(__file__).resolve().parents[2] / "resources" / "app" / "manual_export_patterns.json"
+
+CONFIG_PATH = resource_path("app", "manual_export_patterns.json")
 
 
 @lru_cache(maxsize=1)

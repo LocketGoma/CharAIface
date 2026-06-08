@@ -1,5 +1,4 @@
 import json
-from pathlib import Path
 from datetime import datetime, timezone
 from typing import Any
 
@@ -15,6 +14,7 @@ from backend.app.core.backend_helper import (
     normalize_cloud_provider,
 )
 from backend.app.services.local_ai.ollama_manager import OllamaManager
+from shared.runtime_paths import resource_path
 
 
 APP_NAME = "CharAIface Backend"
@@ -226,7 +226,7 @@ class HealthService:
             }
 
     def _load_settings(self) -> dict[str, Any]:
-        settings_path = Path(__file__).resolve().parents[3] / "resources" / "data" / "settings.json"
+        settings_path = resource_path("data", "settings.json")
         try:
             return json.loads(settings_path.read_text(encoding="utf-8"))
         except Exception:

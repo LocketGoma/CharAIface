@@ -8,6 +8,7 @@ from shared.file_intake import (
     render_inline_data_handling_hint,
 )
 from shared.file_types import file_dialog_filter
+from shared.runtime_paths import resource_path, runtime_root
 from desktop.chat.chat_session import ChatSession
 from desktop.chat.session_store import ChatSessionStore
 from desktop.client.backend_http_client import BackendHttpClient
@@ -125,9 +126,8 @@ class MainWindow(QMainWindow):
         self.pending_response_session_id: str | None = None
         self.pending_response_widget = None
         self.initial_notice_added = False
-        project_root = Path(__file__).resolve().parents[2]
         self.session_store = ChatSessionStore(
-            project_root / "resources" / "data" / "chat_sessions"
+            resource_path("data", "chat_sessions")
         )
         self.chat_session = ChatSession()
         self.pending_file_attachment: FileReadResult | None = None
@@ -310,7 +310,7 @@ class MainWindow(QMainWindow):
         return header
 
     def _load_character_registry(self) -> None:
-        project_root = Path(__file__).resolve().parents[2]
+        project_root = runtime_root()
 
         builtin_characters_dir = (
             project_root
@@ -1118,7 +1118,7 @@ class MainWindow(QMainWindow):
         suffix: str,
         filename: Path | None = None,
     ) -> Path:
-        export_dir = Path(__file__).resolve().parents[2] / "resources" / "data" / "exports"
+        export_dir = resource_path("data", "exports")
         if filename is not None:
             return export_dir / filename.name
 

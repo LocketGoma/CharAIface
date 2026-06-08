@@ -17,6 +17,7 @@ from pygments.lexers import guess_lexer_for_filename
 from pygments.token import Token
 from pygments.util import ClassNotFound
 
+from shared.runtime_paths import runtime_root
 from shared.file_types import (
     JSON_SUFFIXES,
     SOURCE_CODE_SUFFIXES,
@@ -96,7 +97,7 @@ class FileAnalysisRequest:
 
 class FileAnalysisService:
     def __init__(self, project_root: Path | None = None) -> None:
-        self.project_root = project_root or Path(__file__).resolve().parents[3]
+        self.project_root = project_root or runtime_root()
         self.exports_dir = self.project_root / "resources" / "data" / "file_analysis"
 
     def analyze(self, request: FileAnalysisRequest) -> dict[str, Any]:

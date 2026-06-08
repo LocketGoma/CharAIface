@@ -12,14 +12,23 @@ import time
 from pathlib import Path
 
 
-ROOT_DIR = Path(__file__).resolve().parents[1]
+if not getattr(sys, "frozen", False):
+    source_root = Path(__file__).resolve().parents[1]
+    source_root_text = str(source_root)
+    if source_root_text not in sys.path:
+        sys.path.insert(0, source_root_text)
+
+from shared.runtime_paths import is_frozen, resource_path, runtime_root
+
+
+ROOT_DIR = runtime_root()
 BACKEND_HOST = "127.0.0.1"
 BACKEND_PORT = 10420
 BACKEND_MODULE = "backend.app.main:app"
 FRONTEND_CONTROL_HOST = "127.0.0.1"
 FRONTEND_CONTROL_PORT = 10421
-SETTINGS_PATH = ROOT_DIR / "resources" / "data" / "settings.json"
-LOG_DIR = ROOT_DIR / "resources" / "logs"
+SETTINGS_PATH = resource_path("data", "settings.json")
+LOG_DIR = resource_path("logs")
 LOG_PATH = LOG_DIR / "launcher.log"
 _SHOW_LAUNCHER_STATUS = True
 
@@ -227,16 +236,19 @@ def _start_backend(show_backend: bool) -> subprocess.Popen:
     env = os.environ.copy()
     env["PYTHONPATH"] = str(ROOT_DIR) + os.pathsep + env.get("PYTHONPATH", "")
 
-    command = [
-        sys.executable,
-        "-m",
-        "uvicorn",
-        BACKEND_MODULE,
-        "--host",
-        BACKEND_HOST,
-        "--port",
-        str(BACKEND_PORT),
-    ]
+    if is_frozen():
+        command = [sys.executable, "--backend-only"]
+    else:
+        command = [
+            sys.executable,
+            "-m",
+            "uvicorn",
+            BACKEND_MODULE,
+            "--host",
+            BACKEND_HOST,
+            "--port",
+            str(BACKEND_PORT),
+        ]
 
     if show_backend:
         stdout = None
@@ -263,6 +275,11 @@ def _start_backend(show_backend: bool) -> subprocess.Popen:
 
 
 def _run_desktop() -> int:
+    if is_frozen():
+        from desktop.app import main as desktop_main
+
+        return int(desktop_main())
+
     env = os.environ.copy()
     env["PYTHONPATH"] = str(ROOT_DIR) + os.pathsep + env.get("PYTHONPATH", "")
 
@@ -271,10 +288,27 @@ def _run_desktop() -> int:
     return int(completed.returncode)
 
 
+def _run_backend_only() -> int:
+    import uvicorn
+
+    uvicorn.run(
+        BACKEND_MODULE,
+        host=BACKEND_HOST,
+        port=BACKEND_PORT,
+        log_level="info",
+    )
+    return 0
+
+
 def main() -> int:
     global _backend_process, _backend_pids_to_stop, _SHOW_LAUNCHER_STATUS
 
     parser = argparse.ArgumentParser(description="Run CharAIface backend and desktop together.")
+    parser.add_argument(
+        "--backend-only",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
     parser.add_argument(
         "--show-backend",
         action="store_true",
@@ -291,6 +325,9 @@ def main() -> int:
         help="Do not stop backend processes when the desktop exits.",
     )
     args = parser.parse_args()
+
+    if args.backend_only:
+        return _run_backend_only()
 
     signal.signal(signal.SIGINT, _signal_handler)
     if hasattr(signal, "SIGTERM"):

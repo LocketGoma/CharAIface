@@ -3,16 +3,12 @@ from __future__ import annotations
 from functools import lru_cache
 import json
 import re
-from pathlib import Path
 from typing import Any
 
+from shared.runtime_paths import resource_path
 
-FILE_EXPORT_RESPONSE_CONFIG_PATH = (
-    Path(__file__).resolve().parents[3]
-    / "resources"
-    / "app"
-    / "file_export_response_patterns.json"
-)
+
+FILE_EXPORT_RESPONSE_CONFIG_PATH = resource_path("app", "file_export_response_patterns.json")
 
 
 @lru_cache(maxsize=1)

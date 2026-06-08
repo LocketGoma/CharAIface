@@ -13,16 +13,12 @@ from backend.app.services.file_analysis_service import (
     FileAnalysisService,
 )
 from shared.file_intake import render_attachment_intake_block
+from shared.runtime_paths import resource_path
 from shared.schema.chat import ChatMessage
 
 
 ModelCaller = Callable[[list[dict[str, str]]], str]
-PROMPT_CONFIG_PATH = (
-    Path(__file__).resolve().parents[3]
-    / "resources"
-    / "app"
-    / "file_tool_loop_prompts.json"
-)
+PROMPT_CONFIG_PATH = resource_path("app", "file_tool_loop_prompts.json")
 DEFAULT_PLANNER_SYSTEM_PROMPT = (
     "You are a tool-use planner for CharAIface.\n"
     "Decide whether the assistant should call a backend tool before answering.\n"

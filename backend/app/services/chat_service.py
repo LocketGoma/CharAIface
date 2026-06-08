@@ -29,6 +29,7 @@ from backend.app.services.web_search_service import (
 )
 from backend.app.services.web_search_context import WebSearchContextBuilder
 from desktop.localization.localization_manager import LocalizationManager
+from shared.runtime_paths import resource_path, runtime_root
 from shared.schema.chat import ChatMessage, ChatRequest, ChatResponse
 
 
@@ -79,12 +80,12 @@ class ChatService:
         self.health_service = HealthService()
         self.system_status_service = SystemStatusService()
         self.web_search_service = WebSearchService()
-        self.project_root = Path(__file__).resolve().parents[3]
+        self.project_root = runtime_root()
         self.file_analysis_service = FileAnalysisService(self.project_root)
         self.file_tool_loop = FileToolLoop(self.file_analysis_service)
-        self.settings_path = self.project_root / "resources" / "data" / "settings.json"
+        self.settings_path = resource_path("data", "settings.json")
         self.localization = LocalizationManager(
-            self.project_root / "resources" / "locales" / "ui.csv"
+            resource_path("locales", "ui.csv")
         )
         self.web_search_context = WebSearchContextBuilder(self.project_root)
 

@@ -1,10 +1,9 @@
 import sys
-from pathlib import Path
-
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QApplication
 
+from shared.runtime_paths import resource_path, runtime_root
 from desktop.localization.localization_manager import LocalizationManager
 from desktop.settings.settings_repository import SettingsRepository
 from desktop.theme.theme_manager import ThemeManager
@@ -73,14 +72,14 @@ def main() -> int:
     app.setQuitOnLastWindowClosed(False)
     _ensure_valid_application_font(app)
 
-    project_root = Path(__file__).resolve().parents[1]
+    project_root = runtime_root()
     app_icon = load_app_icon(project_root)
     if not app_icon.isNull():
         app.setWindowIcon(app_icon)
 
-    settings_path = project_root / "resources" / "data" / "settings.json"
-    locale_path = project_root / "resources" / "locales" / "ui.csv"
-    themes_dir = project_root / "resources" / "themes"
+    settings_path = resource_path("data", "settings.json")
+    locale_path = resource_path("locales", "ui.csv")
+    themes_dir = resource_path("themes")
 
     settings_repository = SettingsRepository(settings_path=settings_path)
     settings = settings_repository.load()
