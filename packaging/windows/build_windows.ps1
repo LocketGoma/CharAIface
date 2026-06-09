@@ -9,7 +9,11 @@ $SpecPath = Join-Path $ScriptPath "CharAIface.spec"
 $DistPath = Join-Path $ProjectRoot "dist\windows"
 $WorkPath = Join-Path $ProjectRoot "build\windows"
 $PyInstallerConfigDir = Join-Path $ProjectRoot "build\pyinstaller-config\windows"
+$PythonUserBase = Join-Path $ProjectRoot "build\python-userbase\windows"
 $PackagingBuiltinRoot = Join-Path $ProjectRoot "build\packaging-assets\windows\resources\builtin"
+
+$env:PYTHONNOUSERSITE = "1"
+$env:PYTHONUSERBASE = $PythonUserBase
 
 if (!(Test-Path $VenvPython)) {
     Write-Host "[ERROR] .venv Python was not found: $VenvPython" -ForegroundColor Red
@@ -26,6 +30,7 @@ if ($LASTEXITCODE -ne 0) {
 
 Set-Location $ProjectRoot
 New-Item -ItemType Directory -Force -Path $PyInstallerConfigDir | Out-Null
+New-Item -ItemType Directory -Force -Path $PythonUserBase | Out-Null
 $env:PYINSTALLER_CONFIG_DIR = $PyInstallerConfigDir
 
 & $VenvPython "$ProjectRoot\packaging\prepare_packaging_assets.py" `
@@ -48,6 +53,14 @@ $env:CHARAIFACE_PACKAGING_BUILTIN_ROOT = $PackagingBuiltinRoot
 
 if ($LASTEXITCODE -ne 0) {
     Write-Host "[ERROR] PyInstaller build failed." -ForegroundColor Red
+    exit $LASTEXITCODE
+}
+
+& $VenvPython "$ProjectRoot\packaging\verify_packaged_resources.py" `
+    --resources-root "$DistPath\CharAIface\_internal\resources"
+
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "[ERROR] Packaged resource verification failed." -ForegroundColor Red
     exit $LASTEXITCODE
 }
 

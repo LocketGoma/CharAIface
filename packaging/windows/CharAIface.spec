@@ -22,6 +22,7 @@ EXCLUDED_RESOURCE_NAMES = {
 EXCLUDED_RESOURCE_PARTS = {
     "__pycache__",
     "chat_sessions",
+    "default_sakura_import_test",
     "exports",
     "file_analysis",
     "logs",
@@ -59,7 +60,6 @@ datas = [
 ]
 datas += add_resource_tree(ROOT / "resources" / "app", "resources/app")
 datas += add_builtin_charpacks(BUILTIN_RESOURCE_ROOT, "resources/builtin")
-datas += add_resource_tree(ROOT / "resources" / "characters", "resources/characters")
 datas += add_resource_tree(ROOT / "resources" / "data" / "search_context", "resources/data/search_context")
 datas += add_resource_tree(ROOT / "resources" / "icons", "resources/icons")
 datas += add_resource_tree(ROOT / "resources" / "locales", "resources/locales")
@@ -131,7 +131,7 @@ exe = EXE(
     name="CharAIface",
     debug=False,
     bootloader_ignore_signals=False,
-    strip=True,
+    strip=False,
     upx=True,
     console=False,
     icon=str(ROOT / "resources" / "icons" / "char_aiface.ico"),
@@ -141,7 +141,7 @@ coll = COLLECT(
     exe,
     a.binaries,
     a.datas,
-    strip=True,
+    strip=False,
     upx=True,
     upx_exclude=[],
     name="CharAIface",

@@ -4,7 +4,7 @@
 #define MyAppExeName "CharAIface.exe"
 
 [Setup]
-AppId={{2D0C9DF2-8F59-47D1-AD6F-CHRAIFACE001}
+AppId={{2D0C9DF2-8F59-47D1-AD6F-C0A1FACE0001}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}

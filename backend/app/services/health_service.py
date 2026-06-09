@@ -86,7 +86,11 @@ class HealthService:
         }
 
     def status_code_for_payload(self, payload: dict[str, Any]) -> int:
-        if payload.get("status") == "ok":
+        if (
+            payload.get("backend_api") == "available"
+            and payload.get("chat_api") == "available"
+            and payload.get("chat_service") == "available"
+        ):
             return 200
 
         return 503

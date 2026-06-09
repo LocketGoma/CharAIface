@@ -29,7 +29,7 @@ from backend.app.services.web_search_service import (
 )
 from backend.app.services.web_search_context import WebSearchContextBuilder
 from desktop.localization.localization_manager import LocalizationManager
-from shared.runtime_paths import resource_path, runtime_root
+from shared.runtime_paths import resource_path, runtime_root, user_resource_path
 from shared.schema.chat import ChatMessage, ChatRequest, ChatResponse
 
 
@@ -1597,6 +1597,7 @@ class ChatService:
     def _character_pack_roots(self) -> list[Path]:
         candidates = [
             self.project_root / "resources" / "builtin" / "characters",
+            user_resource_path("characters"),
             self.project_root / "resources" / "characters",
             self.project_root / "resources" / "character",
             self.project_root / "resource" / "characters",

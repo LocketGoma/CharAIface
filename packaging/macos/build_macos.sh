@@ -38,4 +38,7 @@ export CHARAIFACE_PACKAGING_BUILTIN_ROOT="$PACKAGING_BUILTIN_ROOT"
   --workpath "$WORK_PATH" \
   "$SPEC_PATH"
 
+"$VENV_PYTHON" "$PROJECT_ROOT/packaging/verify_packaged_resources.py" \
+  --resources-root "$DIST_PATH/CharAIface.app/Contents/Resources/resources"
+
 echo "[CharAIface] macOS build completed: $DIST_PATH/CharAIface.app"

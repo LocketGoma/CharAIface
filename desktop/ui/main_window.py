@@ -8,7 +8,12 @@ from shared.file_intake import (
     render_inline_data_handling_hint,
 )
 from shared.file_types import file_dialog_filter
-from shared.runtime_paths import resource_path, runtime_root
+from shared.runtime_paths import (
+    ensure_user_data_dirs,
+    resource_path,
+    runtime_root,
+    user_resource_path,
+)
 from desktop.chat.chat_session import ChatSession
 from desktop.chat.session_store import ChatSessionStore
 from desktop.client.backend_http_client import BackendHttpClient
@@ -106,6 +111,7 @@ class MainWindow(QMainWindow):
         self.character_state = CharacterStateController(done_to_idle_ms=3000)
         self.character_registry: CharacterRegistry | None = None
         self.current_character_pack: CharacterPack | None = None
+        self._character_resources_missing = False
         self.local_model_prepare_thread: QThread | None = None
         self.local_model_prepare_worker: LocalModelPrepareWorker | None = None
         self.chat_response_thread: QThread | None = None
@@ -126,8 +132,9 @@ class MainWindow(QMainWindow):
         self.pending_response_session_id: str | None = None
         self.pending_response_widget = None
         self.initial_notice_added = False
+        ensure_user_data_dirs()
         self.session_store = ChatSessionStore(
-            resource_path("data", "chat_sessions")
+            user_resource_path("chat_sessions")
         )
         self.chat_session = ChatSession()
         self.pending_file_attachment: FileReadResult | None = None
@@ -312,19 +319,11 @@ class MainWindow(QMainWindow):
     def _load_character_registry(self) -> None:
         project_root = runtime_root()
 
-        builtin_characters_dir = (
-            project_root
-            / "resources"
-            / "builtin"
-        )
-
-        user_characters_dir = (
-            project_root
-            / "resources"
-            / "characters"
-        )
+        builtin_characters_dir = project_root / "resources" / "builtin"
+        user_characters_dir = user_resource_path("characters")
 
         additional_user_characters_dirs = [
+            project_root / "resources" / "characters",
             project_root / "resources" / "character",
             project_root / "resource" / "characters",
             project_root / "resource" / "character",
@@ -376,6 +375,7 @@ class MainWindow(QMainWindow):
 
     def _apply_character_pack(self, character_pack: CharacterPack) -> None:
         self.current_character_pack = character_pack
+        self._character_resources_missing = False
         self.settings.selected_character_id = character_pack.id
 
         self.bottom_area.set_character_name(character_pack.name)
@@ -397,18 +397,19 @@ class MainWindow(QMainWindow):
         )
 
     def _show_missing_default_character_warning(self) -> None:
-        QMessageBox.critical(
-            self,
-            self.localization.t("app.title"),
-            self.localization.t("character.default_missing"),
-        )
+        message = self.localization.t("character.default_missing")
+        was_missing = self._character_resources_missing
+        if not was_missing:
+            print(f"[CharacterRegistry] {message}")
 
-        app = QApplication.instance()
+        self.current_character_pack = None
+        self._character_resources_missing = True
+        if hasattr(self, "bottom_area"):
+            self.bottom_area.set_character_name(message)
+            self.bottom_area.set_avatar_images({})
+            self.bottom_area.set_state_text(message)
+        self._update_chat_view_display_names()
 
-        if app is not None:
-            QTimer.singleShot(0, app.quit)
-        else:
-            QTimer.singleShot(0, self.close)
 
     def _local_model_name_from_payload(self, model_payload: dict) -> str:
         return str(
@@ -644,6 +645,8 @@ class MainWindow(QMainWindow):
         if hasattr(self, "session_sidebar"):
             self.session_sidebar.retranslate_ui()
         self.bottom_area.retranslate_ui()
+        if self._character_resources_missing:
+            self._show_missing_default_character_warning()
         self.bottom_area.set_user_name(self.settings.user_name)
         self._update_chat_response_elapsed_status()
         self._update_chat_view_display_names()
@@ -2286,7 +2289,7 @@ class MainWindow(QMainWindow):
 
         status = result.get("status", "unknown")
         if status != "ok":
-            print(f"[Backend] health error: {result}")
+            print(f"[Backend] health ready with warnings: {result}")
             return
 
         print(f"[Backend] health ok: {result}")

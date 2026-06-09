@@ -38,7 +38,7 @@ For alpha testing, the `dist\windows\CharAIface` folder can still be zipped.
 For a normal installer, use Inno Setup with:
 
 ```powershell
-ISCC.exe .\packaging\windows\CharAIface.iss
+powershell -NoProfile -ExecutionPolicy Bypass -File .\packaging\windows\build_installer.ps1
 ```
 
 Expected output:

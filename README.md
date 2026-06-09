@@ -119,7 +119,18 @@ The app returns an openable file link after export.
 User character packs are stored as folders under:
 
 ```text
-resources/characters/
+Windows: Documents\CharAIface\characters\
+macOS: ~/Library/Application Support/CharAIface/characters/
+Linux: $XDG_DATA_HOME/CharAIface/characters/ or ~/.local/share/CharAIface/characters/
+```
+
+The app creates the user data folder and the `characters` and `chat_sessions`
+subfolders on first launch.
+
+Each character pack uses one subfolder:
+
+```text
+characters/
   character_id/
     manifest.json
     style.md
@@ -314,8 +325,13 @@ The desktop app communicates with the backend through the local backend helper.
 
 Character packs can be used in two forms:
 
-- Folder packs under `resources/characters/`
+- Folder packs under the per-user `CharAIface/characters/` data directory
 - `.charpack` archives for import/export
+
+On Windows, chat session data is saved under `Documents\CharAIface\chat_sessions\`.
+For source checkout and development compatibility, `resources/characters/` is
+also scanned when it exists. Packaged builds should use the user directory
+instead of editing bundled runtime files.
 
 For the complete format, import/export policy, duplicate ID behavior, and Korean
 documentation, see [CHARPACK.md](CHARPACK.md).

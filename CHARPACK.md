@@ -143,7 +143,20 @@ usually ending at `idle`.
 
 ## Folder Packs
 
-During development, a user character pack can also exist as a folder under:
+In installed builds, user character folder packs belong in the per-user app data
+directory:
+
+```text
+Windows: Documents\CharAIface\characters\<character_id>\
+macOS: ~/Library/Application Support/CharAIface/characters/<character_id>/
+Linux: $XDG_DATA_HOME/CharAIface/characters/<character_id>/
+       or ~/.local/share/CharAIface/characters/<character_id>/
+```
+
+The app creates the user data folder and the `characters` folder on first launch.
+
+During development from a source checkout, a user character pack can also exist
+as a folder under:
 
 ```text
 resources/characters/<character_id>/
@@ -165,7 +178,8 @@ recommended.
 
 ## Import Policy
 
-The main app imports `.charpack` files into the user character directory.
+The main app imports `.charpack` files into the per-user character directory
+listed above.
 
 Current safeguards:
 
