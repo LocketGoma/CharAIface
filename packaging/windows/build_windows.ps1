@@ -11,6 +11,7 @@ $WorkPath = Join-Path $ProjectRoot "build\windows"
 $PyInstallerConfigDir = Join-Path $ProjectRoot "build\pyinstaller-config\windows"
 $PythonUserBase = Join-Path $ProjectRoot "build\python-userbase\windows"
 $PackagingBuiltinRoot = Join-Path $ProjectRoot "build\packaging-assets\windows\resources\builtin"
+$PackagingSettingsRoot = Join-Path $ProjectRoot "build\packaging-assets\windows\resources\data"
 
 $env:PYTHONNOUSERSITE = "1"
 $env:PYTHONUSERBASE = $PythonUserBase
@@ -42,7 +43,15 @@ if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
+if (Test-Path $PackagingSettingsRoot) {
+    Remove-Item -Recurse -Force $PackagingSettingsRoot
+}
+New-Item -ItemType Directory -Force -Path $PackagingSettingsRoot | Out-Null
+Copy-Item "$ProjectRoot\resources\data\settings.json.example" "$PackagingSettingsRoot\settings.json"
+Copy-Item "$ProjectRoot\resources\data\settings.json.example" "$PackagingSettingsRoot\settings.json.example"
+
 $env:CHARAIFACE_PACKAGING_BUILTIN_ROOT = $PackagingBuiltinRoot
+$env:CHARAIFACE_PACKAGING_SETTINGS_ROOT = $PackagingSettingsRoot
 
 & $VenvPython -m PyInstaller `
     --noconfirm `

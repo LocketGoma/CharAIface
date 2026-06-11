@@ -181,6 +181,9 @@ settings.character.reload,캐릭터 다시 불러오기,Reload Characters
 settings.character.reload.completed,캐릭터팩 {count}개를 다시 불러왔습니다.,Reloaded {count} character pack(s).
 settings.character.reload_all,캐릭터 셋 전체 다시 로드,Reload All Character Sets
 settings.character.import_charpack,캐릭터팩 가져오기,Import Character Pack
+settings.character.open_folder,캐릭터팩 폴더 열기,Open Character Pack Folder
+settings.character.open_folder.failed.title,캐릭터팩 폴더 열기 실패,Could Not Open Character Pack Folder
+settings.character.open_folder.failed,캐릭터팩 폴더를 열 수 없습니다.  {error},Could not open the character pack folder.  {error}
 settings.character.export_charpack,캐릭터팩 내보내기,Export Character Pack
 settings.character.charpack_filter,CharAIface 캐릭터팩 (*.charpack),CharAIface Character Pack (*.charpack)
 settings.character.import.completed.title,캐릭터팩 가져오기 완료,Character Pack Imported

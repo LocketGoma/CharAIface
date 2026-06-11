@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QUrl, Signal
+from PySide6.QtCore import QSize, Qt, QUrl, Signal
 from PySide6.QtGui import QDesktopServices, QFontDatabase, QIntValidator
 
 import httpx
@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QSlider,
     QSpinBox,
     QStackedWidget,
+    QStyle,
     QTabWidget,
     QTextEdit,
     QVBoxLayout,
@@ -277,18 +278,27 @@ class SettingsDialog(QDialog):
         self.character_combo = QComboBox()
         self._setup_character_combo()
 
-        self.character_reload_button = QPushButton(
-            self.localization.t("settings.character.reload_all")
+        self.character_reload_button = self._create_character_tool_button(
+            self.localization.t("settings.character.reload_all"),
+            QStyle.StandardPixmap.SP_BrowserReload,
         )
         self.character_reload_button.clicked.connect(self._reload_character_packs)
 
-        self.character_import_button = QPushButton(
-            self.localization.t("settings.character.import_charpack")
+        self.character_import_button = self._create_character_tool_button(
+            self.localization.t("settings.character.import_charpack"),
+            QStyle.StandardPixmap.SP_ArrowDown,
         )
         self.character_import_button.clicked.connect(self._import_character_pack)
 
-        self.character_export_button = QPushButton(
-            self.localization.t("settings.character.export_charpack")
+        self.character_open_folder_button = self._create_character_tool_button(
+            self.localization.t("settings.character.open_folder"),
+            QStyle.StandardPixmap.SP_DirOpenIcon,
+        )
+        self.character_open_folder_button.clicked.connect(self._open_character_pack_folder)
+
+        self.character_export_button = self._create_character_tool_button(
+            self.localization.t("settings.character.export_charpack"),
+            QStyle.StandardPixmap.SP_ArrowUp,
         )
         self.character_export_button.clicked.connect(self._export_character_pack)
 
@@ -305,8 +315,10 @@ class SettingsDialog(QDialog):
         character_button_layout.setContentsMargins(0, 0, 0, 0)
         character_button_layout.setSpacing(8)
         character_button_layout.addWidget(self.character_import_button)
+        character_button_layout.addWidget(self.character_open_folder_button)
         character_button_layout.addWidget(self.character_export_button)
         character_button_layout.addWidget(self.character_reload_button)
+        character_button_layout.addStretch()
         form_layout.addRow("", character_button_row)
 
         layout.addLayout(form_layout)
@@ -316,6 +328,20 @@ class SettingsDialog(QDialog):
         self._update_character_info_label()
 
         return tab
+
+    def _create_character_tool_button(
+        self,
+        text: str,
+        standard_icon: QStyle.StandardPixmap,
+    ) -> QPushButton:
+        button = QPushButton(text)
+        button.setObjectName("CharacterPackToolButton")
+        button.setIcon(self.style().standardIcon(standard_icon))
+        button.setIconSize(QSize(16, 16))
+        button.setToolTip(text)
+        button.setAccessibleName(text)
+        button.setCursor(Qt.CursorShape.PointingHandCursor)
+        return button
 
     def _create_theme_tab(self) -> QWidget:
         tab = QWidget()
@@ -1664,6 +1690,32 @@ class SettingsDialog(QDialog):
             index = self._find_character_combo_index(info.character_id)
             if index >= 0:
                 self.character_combo.setCurrentIndex(index)
+
+    def _open_character_pack_folder(self) -> None:
+        folder_path = Path(self.character_registry.user_characters_dir)
+        try:
+            folder_path.mkdir(parents=True, exist_ok=True)
+        except Exception as error:
+            QMessageBox.critical(
+                self,
+                self.localization.t("settings.character.open_folder.failed.title"),
+                self.localization.t(
+                    "settings.character.open_folder.failed",
+                    error=str(error),
+                ),
+            )
+            return
+
+        opened = QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder_path)))
+        if not opened:
+            QMessageBox.warning(
+                self,
+                self.localization.t("settings.character.open_folder.failed.title"),
+                self.localization.t(
+                    "settings.character.open_folder.failed",
+                    error=str(folder_path),
+                ),
+            )
 
     def _export_character_pack(self) -> None:
         character_id = self.character_combo.currentData()

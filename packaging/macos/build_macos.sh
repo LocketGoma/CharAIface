@@ -9,6 +9,7 @@ DIST_PATH="$PROJECT_ROOT/dist/macos"
 WORK_PATH="$PROJECT_ROOT/build/macos"
 PYINSTALLER_CONFIG_DIR="$PROJECT_ROOT/build/pyinstaller-config/macos"
 PACKAGING_BUILTIN_ROOT="$PROJECT_ROOT/build/packaging-assets/macos/resources/builtin"
+PACKAGING_SETTINGS_ROOT="$PROJECT_ROOT/build/packaging-assets/macos/resources/data"
 
 if [[ ! -x "$VENV_PYTHON" ]]; then
   echo "[ERROR] .venv Python was not found: $VENV_PYTHON"
@@ -29,7 +30,12 @@ export PYINSTALLER_CONFIG_DIR
 "$VENV_PYTHON" "$PROJECT_ROOT/packaging/prepare_packaging_assets.py" \
   --source "$PROJECT_ROOT/resources/builtin" \
   --target "$PACKAGING_BUILTIN_ROOT"
+rm -rf "$PACKAGING_SETTINGS_ROOT"
+mkdir -p "$PACKAGING_SETTINGS_ROOT"
+cp "$PROJECT_ROOT/resources/data/settings.json.example" "$PACKAGING_SETTINGS_ROOT/settings.json"
+cp "$PROJECT_ROOT/resources/data/settings.json.example" "$PACKAGING_SETTINGS_ROOT/settings.json.example"
 export CHARAIFACE_PACKAGING_BUILTIN_ROOT="$PACKAGING_BUILTIN_ROOT"
+export CHARAIFACE_PACKAGING_SETTINGS_ROOT="$PACKAGING_SETTINGS_ROOT"
 
 "$VENV_PYTHON" -m PyInstaller \
   --noconfirm \

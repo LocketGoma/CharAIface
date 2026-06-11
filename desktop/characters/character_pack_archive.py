@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import re
 import shutil
-import tempfile
 import zipfile
 from dataclasses import dataclass
 from datetime import datetime
@@ -71,26 +70,38 @@ def import_charpack(
                 f'Character id "{manifest.id}" is reserved by a built-in character pack.'
             )
 
-        destination = _find_case_insensitive_child(destination_root, manifest.id)
-        if destination is None:
-            destination = destination_root / manifest.id
-        if destination.exists() and not replace_existing:
-            raise ValueError(f'Character pack folder already exists: "{destination}"')
-
         destination_root.mkdir(parents=True, exist_ok=True)
-        with tempfile.TemporaryDirectory(prefix="charpack_import_") as temp_name:
-            temp_dir = Path(temp_name)
-            archive.extractall(temp_dir)
+        destination_archive = _find_case_insensitive_child(
+            destination_root,
+            f"{manifest.id}{CHARPACK_EXTENSION}",
+        )
+        existing_folder = _find_case_insensitive_child(destination_root, manifest.id)
+        if destination_archive is None:
+            destination_archive = destination_root / f"{manifest.id}{CHARPACK_EXTENSION}"
 
-            if destination.exists():
-                if backup_existing:
-                    backup_dir = _backup_existing_pack(destination_root, destination)
-                    shutil.move(str(destination), str(backup_dir))
-                else:
-                    shutil.rmtree(destination)
-            shutil.move(str(temp_dir), str(destination))
+        existing_paths = [
+            path
+            for path in (destination_archive, existing_folder)
+            if path is not None and path.exists()
+        ]
+        if existing_paths and not replace_existing:
+            raise ValueError(f'Character pack already exists: "{existing_paths[0]}"')
 
-    return destination
+        for existing_path in existing_paths:
+            if existing_path.resolve() == source.resolve():
+                continue
+            if backup_existing:
+                backup_path = _backup_existing_pack(destination_root, existing_path)
+                shutil.move(str(existing_path), str(backup_path))
+            elif existing_path.is_dir():
+                shutil.rmtree(existing_path)
+            else:
+                existing_path.unlink()
+
+        if destination_archive.resolve() != source.resolve():
+            shutil.copy2(source, destination_archive)
+
+    return destination_archive
 
 
 def extract_charpack_to_directory(

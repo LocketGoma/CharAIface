@@ -11,6 +11,9 @@ ENTRY = ROOT / "scripts" / "run_char_aiface.py"
 BUILTIN_RESOURCE_ROOT = Path(
     os.environ.get("CHARAIFACE_PACKAGING_BUILTIN_ROOT", ROOT / "resources" / "builtin")
 )
+PACKAGING_SETTINGS_ROOT = Path(
+    os.environ.get("CHARAIFACE_PACKAGING_SETTINGS_ROOT", ROOT / "resources" / "data")
+)
 
 
 EXCLUDED_RESOURCE_NAMES = {
@@ -65,7 +68,7 @@ datas += add_resource_tree(ROOT / "resources" / "icons", "resources/icons")
 datas += add_resource_tree(ROOT / "resources" / "locales", "resources/locales")
 datas += add_resource_tree(ROOT / "resources" / "models", "resources/models")
 datas += add_resource_tree(ROOT / "resources" / "themes", "resources/themes")
-datas.append((str(ROOT / "resources" / "data" / "settings.json.example"), "resources/data"))
+datas += add_resource_tree(PACKAGING_SETTINGS_ROOT, "resources/data")
 
 hiddenimports = [
     "backend.app.main",

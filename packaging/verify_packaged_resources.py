@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from tempfile import TemporaryDirectory
 from pathlib import Path
@@ -32,8 +33,13 @@ def main() -> int:
     require_file(resources_root / "locales" / "ui.csv")
     require_file(resources_root / "themes" / "light.json")
     require_file(resources_root / "themes" / "dark.json")
+    require_file(resources_root / "data" / "settings.json")
     require_file(resources_root / "data" / "settings.json.example")
     require_file(resources_root / "builtin" / f"{DEFAULT_CHARACTER_ID}.charpack")
+
+    settings = json.loads((resources_root / "data" / "settings.json").read_text(encoding="utf-8"))
+    if str(settings.get("language", "")).lower() != "en":
+        raise RuntimeError("Packaged default settings must use language='en'.")
 
     with TemporaryDirectory(prefix="charaiface_verify_user_characters_") as temp_name:
         registry = CharacterRegistry(
