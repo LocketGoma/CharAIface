@@ -64,6 +64,11 @@ The PyInstaller specs include:
 - `CHARPACK.md`
 - `LICENSE`
 
+Packaged builds copy `resources/data/settings.json.example` to both
+`resources/data/settings.json` and `resources/data/settings.json.example`.
+The template is intentionally English-based so release builds start in English
+without a build-time settings rewrite step.
+
 The specs must not include:
 
 - `.git/`
@@ -120,5 +125,5 @@ After building, manually verify:
 
 - macOS signing and notarization are not configured yet.
 - Windows installer signing is not configured yet.
-- App data currently follows the existing resource/data layout; this may be
-  split into a user data directory before public release.
+- User data is stored outside the app bundle/folder through
+  `shared.runtime_paths.user_data_root()`.

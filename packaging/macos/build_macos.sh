@@ -29,11 +29,9 @@ export PYINSTALLER_CONFIG_DIR
 
 "$VENV_PYTHON" "$PROJECT_ROOT/packaging/prepare_packaging_assets.py" \
   --source "$PROJECT_ROOT/resources/builtin" \
-  --target "$PACKAGING_BUILTIN_ROOT"
-rm -rf "$PACKAGING_SETTINGS_ROOT"
-mkdir -p "$PACKAGING_SETTINGS_ROOT"
-cp "$PROJECT_ROOT/resources/data/settings.json.example" "$PACKAGING_SETTINGS_ROOT/settings.json"
-cp "$PROJECT_ROOT/resources/data/settings.json.example" "$PACKAGING_SETTINGS_ROOT/settings.json.example"
+  --target "$PACKAGING_BUILTIN_ROOT" \
+  --settings-source "$PROJECT_ROOT/resources/data/settings.json.example" \
+  --settings-target "$PACKAGING_SETTINGS_ROOT"
 export CHARAIFACE_PACKAGING_BUILTIN_ROOT="$PACKAGING_BUILTIN_ROOT"
 export CHARAIFACE_PACKAGING_SETTINGS_ROOT="$PACKAGING_SETTINGS_ROOT"
 

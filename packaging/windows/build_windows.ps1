@@ -36,19 +36,14 @@ $env:PYINSTALLER_CONFIG_DIR = $PyInstallerConfigDir
 
 & $VenvPython "$ProjectRoot\packaging\prepare_packaging_assets.py" `
     --source "$ProjectRoot\resources\builtin" `
-    --target $PackagingBuiltinRoot
+    --target $PackagingBuiltinRoot `
+    --settings-source "$ProjectRoot\resources\data\settings.json.example" `
+    --settings-target $PackagingSettingsRoot
 
 if ($LASTEXITCODE -ne 0) {
     Write-Host "[ERROR] Packaging asset preparation failed." -ForegroundColor Red
     exit $LASTEXITCODE
 }
-
-if (Test-Path $PackagingSettingsRoot) {
-    Remove-Item -Recurse -Force $PackagingSettingsRoot
-}
-New-Item -ItemType Directory -Force -Path $PackagingSettingsRoot | Out-Null
-Copy-Item "$ProjectRoot\resources\data\settings.json.example" "$PackagingSettingsRoot\settings.json"
-Copy-Item "$ProjectRoot\resources\data\settings.json.example" "$PackagingSettingsRoot\settings.json.example"
 
 $env:CHARAIFACE_PACKAGING_BUILTIN_ROOT = $PackagingBuiltinRoot
 $env:CHARAIFACE_PACKAGING_SETTINGS_ROOT = $PackagingSettingsRoot

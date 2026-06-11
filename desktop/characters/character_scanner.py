@@ -2,6 +2,7 @@ import json
 from pathlib import Path, PurePosixPath
 
 from desktop.characters.character_pack import CharacterPack
+from desktop.characters.character_ids import character_id_key
 from shared.schema.character import CharacterPackManifest
 
 
@@ -53,7 +54,7 @@ class CharacterPackScanner:
             try:
                 pack = self._load_pack(pack_dir)
 
-                pack_key = _character_id_key(pack.id)
+                pack_key = character_id_key(pack.id)
                 if pack_key in seen_ids:
                     invalid_packs.append(
                         {
@@ -82,9 +83,9 @@ class CharacterPackScanner:
         for archive_path in self._iter_candidate_charpack_files():
             try:
                 pack_dir = self._extract_charpack(archive_path)
-                pack = self._load_pack(pack_dir)
+                pack = self._load_pack(pack_dir, source_archive_path=archive_path)
 
-                pack_key = _character_id_key(pack.id)
+                pack_key = character_id_key(pack.id)
                 if pack_key in seen_ids:
                     invalid_packs.append(
                         {
@@ -170,7 +171,12 @@ class CharacterPackScanner:
         target_dir = self.charpack_extract_dir / target_name
         return extract_charpack_to_directory(archive_path, target_dir)
 
-    def _load_pack(self, pack_dir: Path) -> CharacterPack:
+    def _load_pack(
+        self,
+        pack_dir: Path,
+        *,
+        source_archive_path: Path | None = None,
+    ) -> CharacterPack:
         manifest_path = pack_dir / "manifest.json"
 
         if not manifest_path.exists():
@@ -226,6 +232,7 @@ class CharacterPackScanner:
             description=manifest.description,
             author=manifest.author,
             root_dir=pack_dir,
+            source_archive_path=source_archive_path,
             style_path=style_path,
             style_prompt=style_prompt,
             style_strength=manifest.style_strength,
@@ -241,10 +248,6 @@ class CharacterPackScanner:
         if path.is_absolute() or ".." in path.parts or "\\" in path_text:
             raise ValueError(f"Unsafe manifest path: {relative_path}")
         return pack_dir / Path(*path.parts)
-
-
-def _character_id_key(character_id: str | None) -> str:
-    return str(character_id or "").casefold()
 
 
 def _safe_extract_dir_name(path: Path) -> str:

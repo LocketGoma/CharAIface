@@ -2,6 +2,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from desktop.characters.character_pack import CharacterPack
+from desktop.characters.character_ids import character_id_key
 from desktop.characters.character_scanner import CharacterPackScanner
 
 
@@ -53,20 +54,20 @@ class CharacterRegistry:
         self._load_user_characters()
 
     def get_pack(self, character_id: str) -> CharacterPack | None:
-        return self._packs.get(_character_id_key(character_id))
+        return self._packs.get(character_id_key(character_id))
 
     def get_default_pack(self) -> CharacterPack | None:
         if not self._packs:
             return None
 
-        default_key = _character_id_key(DEFAULT_CHARACTER_ID)
+        default_key = character_id_key(DEFAULT_CHARACTER_ID)
         if default_key in self._packs:
             return self._packs[default_key]
 
         builtin_packs = [
             pack
             for pack in self._packs.values()
-            if _character_id_key(pack.id) in self._builtin_pack_ids
+            if character_id_key(pack.id) in self._builtin_pack_ids
         ]
 
         if builtin_packs:
@@ -75,10 +76,10 @@ class CharacterRegistry:
         return sorted(self._packs.values(), key=lambda pack: pack.name.casefold())[0]
 
     def is_builtin(self, character_id: str) -> bool:
-        return _character_id_key(character_id) in self._builtin_pack_ids
+        return character_id_key(character_id) in self._builtin_pack_ids
 
     def is_user_pack(self, character_id: str) -> bool:
-        return _character_id_key(character_id) in self._user_pack_ids
+        return character_id_key(character_id) in self._user_pack_ids
 
     def _load_builtin_characters(self) -> None:
         scanner = CharacterPackScanner(
@@ -145,7 +146,7 @@ class CharacterRegistry:
             self._register_pack(pack=pack, source=source)
 
     def _register_pack(self, pack: CharacterPack, source: str) -> None:
-        pack_key = _character_id_key(pack.id)
+        pack_key = character_id_key(pack.id)
         if pack_key in self._packs:
             existing_pack = self._packs[pack_key]
             self._invalid_packs.append(
@@ -197,7 +198,3 @@ class CharacterRegistry:
             result.append(copied)
 
         return result
-
-
-def _character_id_key(character_id: str | None) -> str:
-    return str(character_id or "").casefold()

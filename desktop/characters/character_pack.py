@@ -15,6 +15,7 @@ class CharacterPack(BaseModel):
     author: str = ""
 
     root_dir: Path
+    source_archive_path: Path | None = None
     style_path: Path
     style_prompt: str
     style_strength: float = 0.5

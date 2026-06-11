@@ -9,6 +9,7 @@ from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from desktop.characters.character_ids import character_id_key
 from desktop.characters.character_scanner import SUPPORTED_IMAGE_EXTENSIONS
 from shared.schema.character import CharacterPackManifest
 
@@ -57,7 +58,7 @@ def import_charpack(
     source = Path(source_path)
     destination_root = Path(user_characters_dir)
     builtin_ids = builtin_character_ids or set()
-    builtin_id_keys = {_character_id_key(character_id) for character_id in builtin_ids}
+    builtin_id_keys = {character_id_key(character_id) for character_id in builtin_ids}
 
     with zipfile.ZipFile(source, "r") as archive:
         _validate_archive_entries(archive)
@@ -65,7 +66,7 @@ def import_charpack(
         manifest = _validate_archive_manifest(manifest_data)
         _validate_archive_manifest_files(archive, manifest)
 
-        if _character_id_key(manifest.id) in builtin_id_keys:
+        if character_id_key(manifest.id) in builtin_id_keys:
             raise ValueError(
                 f'Character id "{manifest.id}" is reserved by a built-in character pack.'
             )
@@ -141,7 +142,7 @@ def _find_case_insensitive_child(parent: Path, child_name: str) -> Path | None:
     if not parent.exists():
         return None
 
-    child_key = _character_id_key(child_name)
+    child_key = character_id_key(child_name)
     for child in parent.iterdir():
         if child.name.casefold() == child_key:
             return child
@@ -282,11 +283,11 @@ def _validate_folder_pack_files(
     if "idle" not in manifest.avatar.images:
         raise ValueError("avatar.images.idle is required")
 
-    style_path = pack_dir / manifest.style_file
+    style_path = _pack_file_path(pack_dir, manifest.style_file)
     if not style_path.is_file():
         raise ValueError(f'style_file "{manifest.style_file}" not found')
 
-    idle_path = pack_dir / manifest.avatar.images["idle"]
+    idle_path = _pack_file_path(pack_dir, manifest.avatar.images["idle"])
     if not idle_path.is_file():
         raise ValueError(
             f'Image file for state "idle" not found: {manifest.avatar.images["idle"]}'
@@ -321,7 +322,7 @@ def _collect_image_entries(
     entries: list[tuple[str, Path, str]] = []
     used_archive_names: set[str] = set()
     for index, (state, relative_path) in enumerate(manifest.avatar.images.items(), start=1):
-        source_path = pack_dir / relative_path
+        source_path = _pack_file_path(pack_dir, relative_path)
         if not source_path.is_file():
             continue
         archive_name = f"images/{state}{source_path.suffix.lower()}"
@@ -346,15 +347,19 @@ def _validate_manifest_relative_path(
     return suffix
 
 
+def _pack_file_path(pack_dir: Path, relative_path: str) -> Path:
+    path_text = str(relative_path or "")
+    path = PurePosixPath(path_text)
+    if path.is_absolute() or ".." in path.parts or "\\" in path_text:
+        raise ValueError(f"Unsafe manifest path: {relative_path}")
+    return pack_dir / Path(*path.parts)
+
+
 def _validate_character_id(character_id: str) -> None:
     if not _SAFE_CHARACTER_ID.fullmatch(character_id):
         raise ValueError(
             "Character id may only contain ASCII letters, numbers, '_' and '-'."
         )
-
-
-def _character_id_key(character_id: str | None) -> str:
-    return str(character_id or "").casefold()
 
 
 def _with_charpack_suffix(path: Path) -> Path:
