@@ -476,11 +476,14 @@ def _render_csv_profile(header: list[str], rows: list[list[str]]) -> str:
 
 def _render_numeric_frequency_csv(rows: list[list[str]]) -> str:
     row_count = len(rows)
-    lines = ["number,count,round_appearance_probability_percent"]
+    lines = [
+        "number,total_cell_count,row_appearance_count,row_appearance_probability_percent"
+    ]
     row_appearance = _value_row_appearance_counts(rows)
     for value, count in _numeric_value_frequency(rows):
-        probability = _format_percent((row_appearance.get(value, 0) / row_count) * 100) if row_count else "0"
-        lines.append(f"{value},{count},{probability}")
+        row_appearance_count = row_appearance.get(value, 0)
+        probability = _format_percent((row_appearance_count / row_count) * 100) if row_count else "0"
+        lines.append(f"{value},{count},{row_appearance_count},{probability}")
     return "\n".join(lines)
 
 
