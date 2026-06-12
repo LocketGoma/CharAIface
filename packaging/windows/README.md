@@ -24,31 +24,64 @@ From the project root:
 .\packaging\windows\build_windows.ps1
 ```
 
+If PowerShell blocks the script with `PSSecurityException` or
+`UnauthorizedAccess`, run it with a process-local execution policy bypass:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\packaging\windows\build_windows.ps1
+```
+
+Alternatively, in the current PowerShell window:
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\packaging\windows\build_windows.ps1
+```
+
+If Windows marked the script as downloaded from the internet, unblock the file
+once and retry:
+
+```powershell
+Unblock-File .\packaging\windows\build_windows.ps1
+```
+
 Expected output:
 
 ```text
 dist\windows\CharAIface\
   CharAIface.exe
-  _internal\
+  app\
 ```
 
-## Installer
+## Release Archive
 
-For alpha testing, the `dist\windows\CharAIface` folder can still be zipped.
-For a normal installer, use Inno Setup with:
+The current Windows release artifact is a `.7z` archive, not an installer.
+After the PyInstaller build succeeds, create the archive from the generated
+one-folder app contents:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\packaging\windows\build_installer.ps1
+$ArchivePath = Resolve-Path .\dist
+$ArchivePath = Join-Path $ArchivePath "CharAIface-windows.7z"
+if (Test-Path $ArchivePath) {
+    Remove-Item -LiteralPath $ArchivePath -Force
+}
+Push-Location .\dist\windows\CharAIface
+& ..\..\..\Tools\7-Zip\7z.exe a -t7z -mx=9 $ArchivePath .\*
+Pop-Location
 ```
 
 Expected output:
 
 ```text
-dist\windows-installer\CharAIfaceSetup.exe
+dist\CharAIface-windows.7z
 ```
 
-The installer includes the full PyInstaller output; users do not need to install
+The archive should contain `CharAIface.exe` and `app\` at the archive root.
+Users extract the archive and run `CharAIface.exe`; they do not need to install
 Python separately.
+
+The Inno Setup script is kept as optional scaffolding, but it is not the current
+release path.
 
 ## Smoke Test
 

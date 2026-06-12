@@ -29,7 +29,12 @@ from backend.app.services.web_search_service import (
 )
 from backend.app.services.web_search_context import WebSearchContextBuilder
 from desktop.localization.localization_manager import LocalizationManager
-from shared.runtime_paths import resource_path, runtime_root, user_resource_path
+from shared.runtime_paths import (
+    app_data_path,
+    character_data_root,
+    resource_path,
+    runtime_root,
+)
 from shared.schema.chat import ChatMessage, ChatRequest, ChatResponse
 
 
@@ -83,7 +88,7 @@ class ChatService:
         self.project_root = runtime_root()
         self.file_analysis_service = FileAnalysisService(self.project_root)
         self.file_tool_loop = FileToolLoop(self.file_analysis_service)
-        self.settings_path = resource_path("data", "settings.json")
+        self.settings_path = app_data_path("settings.json")
         self.localization = LocalizationManager(
             resource_path("locales", "ui.csv")
         )
@@ -1600,7 +1605,7 @@ class ChatService:
     def _character_pack_roots(self) -> list[Path]:
         candidates = [
             self.project_root / "resources" / "builtin" / "characters",
-            user_resource_path("characters"),
+            character_data_root(),
             self.project_root / "resources" / "characters",
             self.project_root / "resources" / "character",
             self.project_root / "resource" / "characters",
@@ -1838,11 +1843,11 @@ class ChatService:
     def _effective_settings(self, request: ChatRequest | None = None) -> dict[str, Any]:
         """Return file settings overlaid with the desktop request snapshot.
 
-        The desktop UI persists settings to resources/data/settings.json, but the
-        backend can be running as a separate process and may see an older file or
-        a file that predates newly added fields.  The request snapshot is the
-        current in-memory AppSettings from the desktop process, so it should win
-        over the file for chat-time behavior such as web search options.
+        The desktop UI persists settings through app_data_path("settings.json"),
+        but the backend can be running as a separate process and may see an older
+        file or a file that predates newly added fields. The request snapshot is
+        the current in-memory AppSettings from the desktop process, so it should
+        win over the file for chat-time behavior such as web search options.
         """
         settings = self._load_settings()
         snapshot = getattr(request, "settings_snapshot", None) if request is not None else None

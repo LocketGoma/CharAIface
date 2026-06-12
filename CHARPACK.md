@@ -161,7 +161,9 @@ Linux: $XDG_DATA_HOME/CharAIface/characters/<character_id>/
        or ~/.local/share/CharAIface/characters/<character_id>/
 ```
 
-The app creates the user data folder and the `characters` folder on first launch.
+Packaged builds create the user data folder and the `characters` folder on
+first launch. Source/development runs use `resources/characters/` in the
+repository instead.
 
 During development from a source checkout, a user character pack can also exist
 as a folder under:

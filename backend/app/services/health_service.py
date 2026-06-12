@@ -14,7 +14,7 @@ from backend.app.core.backend_helper import (
     normalize_cloud_provider,
 )
 from backend.app.services.local_ai.ollama_manager import OllamaManager
-from shared.runtime_paths import resource_path
+from shared.runtime_paths import app_data_path
 
 
 APP_NAME = "CharAIface Backend"
@@ -230,7 +230,7 @@ class HealthService:
             }
 
     def _load_settings(self) -> dict[str, Any]:
-        settings_path = resource_path("data", "settings.json")
+        settings_path = app_data_path("settings.json")
         try:
             return json.loads(settings_path.read_text(encoding="utf-8"))
         except Exception:

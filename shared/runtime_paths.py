@@ -75,12 +75,40 @@ def user_resource_path(*parts: str) -> Path:
     return user_data_root() / Path(*parts)
 
 
-def ensure_user_data_dirs() -> Path:
-    root = user_data_root()
+def app_data_root() -> Path:
+    """Return the writable app data root for the current runtime mode.
+
+    Source checkouts keep development data inside the repository. Packaged
+    builds keep user data outside the app bundle/folder.
+    """
+    if is_frozen():
+        return user_data_root()
+    return resource_path("data")
+
+
+def app_data_path(*parts: str) -> Path:
+    return app_data_root() / Path(*parts)
+
+
+def character_data_root() -> Path:
+    if is_frozen():
+        return user_resource_path("characters")
+    return runtime_root() / "resources" / "characters"
+
+
+def ensure_app_data_dirs() -> Path:
+    root = app_data_root()
     root.mkdir(parents=True, exist_ok=True)
-    user_resource_path("characters").mkdir(parents=True, exist_ok=True)
-    user_resource_path("chat_sessions").mkdir(parents=True, exist_ok=True)
+    character_data_root().mkdir(parents=True, exist_ok=True)
+    app_data_path("chat_sessions").mkdir(parents=True, exist_ok=True)
+    app_data_path("exports").mkdir(parents=True, exist_ok=True)
+    app_data_path("file_analysis").mkdir(parents=True, exist_ok=True)
+    app_data_path("logs").mkdir(parents=True, exist_ok=True)
     return root
+
+
+def ensure_user_data_dirs() -> Path:
+    return ensure_app_data_dirs()
 
 
 def _windows_known_folder_documents() -> Path | None:

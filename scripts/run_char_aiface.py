@@ -18,7 +18,7 @@ if not getattr(sys, "frozen", False):
     if source_root_text not in sys.path:
         sys.path.insert(0, source_root_text)
 
-from shared.runtime_paths import is_frozen, resource_path, runtime_root
+from shared.runtime_paths import app_data_path, is_frozen, runtime_root
 
 
 ROOT_DIR = runtime_root()
@@ -27,22 +27,150 @@ BACKEND_PORT = 10420
 BACKEND_MODULE = "backend.app.main:app"
 FRONTEND_CONTROL_HOST = "127.0.0.1"
 FRONTEND_CONTROL_PORT = 10421
-SETTINGS_PATH = resource_path("data", "settings.json")
-LOG_DIR = resource_path("logs")
-LOG_PATH = LOG_DIR / "launcher.log"
+SETTINGS_PATH = app_data_path("settings.json")
+LOG_DIR = app_data_path("logs")
+LOG_PATH: Path | None = None
 _SHOW_LAUNCHER_STATUS = True
 
 
 _backend_process: subprocess.Popen | None = None
 _backend_pids_to_stop: set[int] = set()
 _cleanup_started = False
+_stdio_handles: list = []
+
+
+class _TeeTextIO:
+    def __init__(self, *streams) -> None:  # noqa: ANN002
+        self._streams = streams
+
+    def write(self, text: str) -> int:
+        for stream in self._streams:
+            stream.write(text)
+        return len(text)
+
+    def flush(self) -> None:
+        for stream in self._streams:
+            stream.flush()
+
+    def isatty(self) -> bool:
+        return any(
+            bool(getattr(stream, "isatty", lambda: False)())
+            for stream in self._streams
+        )
+
+
+def _timestamped_log_path(prefix: str) -> Path:
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    created_at = datetime.now().strftime("%y%m%d%H%M%S")
+    path = LOG_DIR / f"{prefix}_{created_at}.log"
+    if not path.exists():
+        return path
+
+    suffix = 2
+    while True:
+        candidate = LOG_DIR / f"{prefix}_{created_at}_{suffix}.log"
+        if not candidate.exists():
+            return candidate
+        suffix += 1
+
+
+def _launcher_log_path() -> Path:
+    global LOG_PATH
+    if LOG_PATH is None:
+        LOG_PATH = _timestamped_log_path("launcher")
+    return LOG_PATH
+
+
+def _windows_hidden_subprocess_kwargs() -> dict:
+    if os.name != "nt":
+        return {}
+
+    startupinfo = subprocess.STARTUPINFO()
+    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    startupinfo.wShowWindow = subprocess.SW_HIDE
+    return {
+        "creationflags": subprocess.CREATE_NO_WINDOW,
+        "startupinfo": startupinfo,
+    }
+
+
+def _windows_visible_subprocess_kwargs() -> dict:
+    if os.name != "nt":
+        return {}
+    return {"creationflags": subprocess.CREATE_NEW_CONSOLE}
+
+
+def _attach_backend_stdio(visible: bool) -> None:
+    if visible and os.name == "nt":
+        _attach_windows_console_stdio()
+        return
+
+    if sys.stdout is not None and sys.stderr is not None:
+        return
+
+    try:
+        log_path = Path(
+            os.environ.get("CHARAIFACE_BACKEND_LOG_PATH") or _timestamped_log_path("backend")
+        )
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_file = open(log_path, "a", encoding="utf-8", buffering=1)
+    except OSError:
+        log_file = open(os.devnull, "w", encoding="utf-8", buffering=1)
+
+    _stdio_handles.append(log_file)
+    if sys.stdout is None:
+        sys.stdout = log_file
+    if sys.stderr is None:
+        sys.stderr = log_file
+
+
+def _attach_windows_console_stdio() -> None:
+    try:
+        stdout = open("CONOUT$", "w", encoding="utf-8", buffering=1)
+        stderr = open("CONOUT$", "w", encoding="utf-8", buffering=1)
+        stdin = open("CONIN$", "r", encoding="utf-8", buffering=1)
+    except OSError:
+        try:
+            import ctypes
+
+            ctypes.windll.kernel32.AllocConsole()
+            stdout = open("CONOUT$", "w", encoding="utf-8", buffering=1)
+            stderr = open("CONOUT$", "w", encoding="utf-8", buffering=1)
+            stdin = open("CONIN$", "r", encoding="utf-8", buffering=1)
+        except Exception:
+            _attach_backend_stdio(visible=False)
+            return
+
+    log_stream = _open_backend_log_from_env()
+
+    if log_stream is not None:
+        _stdio_handles.extend([stdout, stderr, stdin, log_stream])
+        sys.stdout = _TeeTextIO(stdout, log_stream)
+        sys.stderr = _TeeTextIO(stderr, log_stream)
+    else:
+        _stdio_handles.extend([stdout, stderr, stdin])
+        sys.stdout = stdout
+        sys.stderr = stderr
+    sys.stdin = stdin
+
+
+def _open_backend_log_from_env():
+    log_path_text = os.environ.get("CHARAIFACE_BACKEND_LOG_PATH")
+    if not log_path_text:
+        return None
+
+    try:
+        log_path = Path(log_path_text)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        return open(log_path, "a", encoding="utf-8", buffering=1)
+    except OSError:
+        return None
 
 
 def _write_launcher_log(message: str) -> None:
     try:
-        LOG_DIR.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        with LOG_PATH.open("a", encoding="utf-8") as log_file:
+        with _launcher_log_path().open("a", encoding="utf-8") as log_file:
             log_file.write(f"[{timestamp}] {message}\n")
     except OSError:
         pass
@@ -50,7 +178,7 @@ def _write_launcher_log(message: str) -> None:
 
 def _launcher_status(message: str, *, always_print: bool = False) -> None:
     _write_launcher_log(message)
-    if always_print or _SHOW_LAUNCHER_STATUS:
+    if (always_print or _SHOW_LAUNCHER_STATUS) and sys.stdout is not None:
         print(message)
 
 
@@ -105,6 +233,7 @@ def _parse_windows_netstat_pids(port: int) -> set[int]:
             encoding="utf-8",
             errors="replace",
             check=False,
+            **_windows_hidden_subprocess_kwargs(),
         )
     except OSError:
         return pids
@@ -180,6 +309,7 @@ def _terminate_pid(pid: int, force: bool = False) -> None:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             check=False,
+            **_windows_hidden_subprocess_kwargs(),
         )
         return
 
@@ -250,27 +380,36 @@ def _start_backend(show_backend: bool) -> subprocess.Popen:
             str(BACKEND_PORT),
         ]
 
+    env["CHARAIFACE_BACKEND_VISIBLE"] = "1" if show_backend else "0"
+    backend_log_path = _timestamped_log_path("backend")
+    env["CHARAIFACE_BACKEND_LOG_PATH"] = str(backend_log_path)
+
     if show_backend:
         stdout = None
         stderr = None
     else:
-        LOG_DIR.mkdir(parents=True, exist_ok=True)
-        backend_log = open(LOG_DIR / "backend.log", "a", encoding="utf-8")
+        backend_log_path.parent.mkdir(parents=True, exist_ok=True)
+        backend_log = open(backend_log_path, "a", encoding="utf-8")
         stdout = backend_log
         stderr = backend_log
-    creationflags = 0
+    backend_window_kwargs = (
+        _windows_visible_subprocess_kwargs()
+        if show_backend
+        else _windows_hidden_subprocess_kwargs()
+    )
 
-    if os.name == "nt" and not show_backend:
-        creationflags = subprocess.CREATE_NO_WINDOW
-
-    _launcher_status("[Launcher] Starting backend.")
+    _launcher_status(
+        "[Launcher] Starting backend: "
+        f"visible={show_backend}, frozen={is_frozen()}, "
+        f"log={backend_log_path}, command={command}"
+    )
     return subprocess.Popen(
         command,
         cwd=str(ROOT_DIR),
         env=env,
         stdout=stdout,
         stderr=stderr,
-        creationflags=creationflags,
+        **backend_window_kwargs,
     )
 
 
@@ -289,6 +428,10 @@ def _run_desktop() -> int:
 
 
 def _run_backend_only() -> int:
+    _attach_backend_stdio(
+        visible=os.environ.get("CHARAIFACE_BACKEND_VISIBLE") == "1"
+    )
+
     import uvicorn
 
     from backend.app.main import app
@@ -338,7 +481,14 @@ def main() -> int:
     developer_mode = _read_developer_mode()
     show_backend = bool(args.show_backend or developer_mode)
     _SHOW_LAUNCHER_STATUS = bool(show_backend)
-    _write_launcher_log("[Launcher] CharAIface launcher started.")
+    _write_launcher_log(
+        "[Launcher] CharAIface launcher started. "
+        f"pid={os.getpid()}, frozen={is_frozen()}, root={ROOT_DIR}, "
+        f"settings={SETTINGS_PATH}, log={_launcher_log_path()}"
+    )
+    _write_launcher_log(
+        f"[Launcher] developer_mode={developer_mode}, show_backend={show_backend}"
+    )
 
     if _request_existing_frontend_activation():
         _launcher_status("[Launcher] Existing frontend session window activated.")
@@ -358,7 +508,12 @@ def main() -> int:
         _backend_pids_to_stop.add(_backend_process.pid)
 
         if not _wait_for_port(BACKEND_HOST, BACKEND_PORT, timeout_seconds=20.0):
-            _launcher_status("[Launcher] Backend did not open the expected port.", always_print=True)
+            return_code = _backend_process.poll()
+            _launcher_status(
+                "[Launcher] Backend did not open the expected port. "
+                f"backend_pid={_backend_process.pid}, returncode={return_code}",
+                always_print=True,
+            )
             _cleanup_backend()
             return 1
     else:

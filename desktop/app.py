@@ -3,7 +3,7 @@ from PySide6.QtCore import QEvent, Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QApplication
 
-from shared.runtime_paths import resource_path, runtime_root
+from shared.runtime_paths import app_data_path, resource_path, runtime_root
 from desktop.localization.localization_manager import LocalizationManager
 from desktop.settings.settings_repository import SettingsRepository
 from desktop.theme.theme_manager import ThemeManager
@@ -95,7 +95,7 @@ def main() -> int:
     if not app_icon.isNull():
         app.setWindowIcon(app_icon)
 
-    settings_path = resource_path("data", "settings.json")
+    settings_path = app_data_path("settings.json")
     locale_path = resource_path("locales", "ui.csv")
     themes_dir = resource_path("themes")
 

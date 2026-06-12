@@ -9,10 +9,11 @@ from shared.file_intake import (
 )
 from shared.file_types import file_dialog_filter
 from shared.runtime_paths import (
-    ensure_user_data_dirs,
+    app_data_path,
+    character_data_root,
+    ensure_app_data_dirs,
     resource_path,
     runtime_root,
-    user_resource_path,
 )
 from desktop.chat.chat_session import ChatSession
 from desktop.chat.session_store import ChatSessionStore
@@ -137,9 +138,9 @@ class MainWindow(QMainWindow):
         self.pending_response_session_id: str | None = None
         self.pending_response_widget = None
         self.initial_notice_added = False
-        ensure_user_data_dirs()
+        ensure_app_data_dirs()
         self.session_store = ChatSessionStore(
-            user_resource_path("chat_sessions")
+            app_data_path("chat_sessions")
         )
         self.chat_session = ChatSession()
         self.pending_file_attachment: FileReadResult | None = None
@@ -328,7 +329,7 @@ class MainWindow(QMainWindow):
         project_root = runtime_root()
 
         builtin_characters_dir = project_root / "resources" / "builtin"
-        user_characters_dir = user_resource_path("characters")
+        user_characters_dir = character_data_root()
 
         additional_user_characters_dirs = [
             project_root / "resources" / "characters",
@@ -1184,7 +1185,7 @@ class MainWindow(QMainWindow):
         suffix: str,
         filename: Path | None = None,
     ) -> Path:
-        export_dir = resource_path("data", "exports")
+        export_dir = app_data_path("exports")
         if filename is not None:
             return export_dir / filename.name
 

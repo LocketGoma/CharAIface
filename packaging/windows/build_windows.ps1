@@ -61,7 +61,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 & $VenvPython "$ProjectRoot\packaging\verify_packaged_resources.py" `
-    --resources-root "$DistPath\CharAIface\_internal\resources"
+    --resources-root "$DistPath\CharAIface\app\resources"
 
 if ($LASTEXITCODE -ne 0) {
     Write-Host "[ERROR] Packaged resource verification failed." -ForegroundColor Red

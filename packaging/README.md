@@ -2,9 +2,9 @@
 
 This folder contains alpha packaging scaffolding for CharAIface.
 
-The release goal is a normal self-contained desktop installer. Users should not
+The release goal is a normal self-contained desktop package. Users should not
 need to install Python, create a virtual environment, or download a separate
-runtime package. The installer or app bundle includes the Python runtime and all
+runtime package. The release artifact includes the Python runtime and all
 project dependencies.
 
 ## Current Direction
@@ -12,20 +12,20 @@ project dependencies.
 The preferred alpha target is:
 
 - macOS: PyInstaller `.app` bundle wrapped in a DMG.
-- Windows: PyInstaller one-folder build wrapped in an installer such as Inno Setup.
+- Windows: PyInstaller one-folder build wrapped in a `.7z` archive.
 
-This is intentionally larger than a bootstrap installer, but it is simpler and
+This is intentionally larger than a bootstrap package, but it is simpler and
 more typical for Python desktop apps at this stage.
 
 Recommended order:
 
 1. Build the platform PyInstaller output
 2. Smoke-test the generated app/folder
-3. Wrap the output in the platform installer format
-4. Upload that installer artifact as the user-facing GitHub Release download
+3. Wrap the output in the platform release format
+4. Upload that artifact as the user-facing GitHub Release download
 
 CharAIface includes PySide6, FastAPI, pandas, openpyxl, tree-sitter packages,
-and resource files. A self-contained installer will be larger than a native app,
+and resource files. A self-contained package will be larger than a native app,
 but it avoids asking users to install Python or manage dependencies.
 
 ## Packaging Direction
@@ -46,9 +46,9 @@ The Windows flow is:
 build_windows.ps1
   creates dist/windows/CharAIface/
 
-Inno Setup
-  reads packaging/windows/CharAIface.iss
-  creates dist/windows-installer/CharAIfaceSetup.exe
+7-Zip
+  reads dist/windows/CharAIface/
+  creates dist/CharAIface-windows.7z
 ```
 
 ## Included Runtime Files
@@ -124,6 +124,7 @@ After building, manually verify:
 ## Known Alpha Limitations
 
 - macOS signing and notarization are not configured yet.
-- Windows installer signing is not configured yet.
-- User data is stored outside the app bundle/folder through
-  `shared.runtime_paths.user_data_root()`.
+- Windows installer signing is not configured because the current release path is `.7z`.
+- Packaged user data is stored outside the app bundle/folder through
+  `shared.runtime_paths.app_data_root()`. Source/development runs keep writable
+  data inside the repository.

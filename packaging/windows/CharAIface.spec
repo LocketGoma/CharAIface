@@ -53,6 +53,7 @@ exe = EXE(
     strip=False,
     upx=True,
     console=False,
+    contents_directory="app",
     icon=str(ROOT / "resources" / "icons" / "char_aiface.ico"),
 )
 
