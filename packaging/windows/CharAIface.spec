@@ -1,111 +1,30 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 import os
+import sys
 from pathlib import Path
-
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 
 ROOT = Path(SPECPATH).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "packaging"))
+
+from pyinstaller_spec_common import COMMON_EXCLUDES, build_datas, build_hiddenimports
+
 ENTRY = ROOT / "scripts" / "run_char_aiface.py"
 BUILTIN_RESOURCE_ROOT = Path(
     os.environ.get("CHARAIFACE_PACKAGING_BUILTIN_ROOT", ROOT / "resources" / "builtin")
 )
+PACKAGING_SETTINGS_ROOT = Path(
+    os.environ.get("CHARAIFACE_PACKAGING_SETTINGS_ROOT", ROOT / "resources" / "data")
+)
 
-
-EXCLUDED_RESOURCE_NAMES = {
-    ".DS_Store",
-    ".gitkeep",
-    "Thumbs.db",
-}
-
-EXCLUDED_RESOURCE_PARTS = {
-    "__pycache__",
-    "chat_sessions",
-    "default_sakura_import_test",
-    "exports",
-    "file_analysis",
-    "logs",
-}
-
-
-def add_resource_tree(source: Path, target: str) -> list[tuple[str, str]]:
-    result = []
-    for path in source.rglob("*"):
-        if not path.is_file():
-            continue
-        relative = path.relative_to(source)
-        if path.name in EXCLUDED_RESOURCE_NAMES:
-            continue
-        if any(part in EXCLUDED_RESOURCE_PARTS for part in relative.parts):
-            continue
-        result.append((str(path), str(Path(target) / relative.parent)))
-    return result
-
-
-def add_builtin_charpacks(source: Path, target: str) -> list[tuple[str, str]]:
-    if not source.exists():
-        return []
-    return [
-        (str(path), target)
-        for path in sorted(source.glob("*.charpack"))
-        if path.is_file()
-    ]
-
-
-datas = [
-    (str(ROOT / "README.md"), "."),
-    (str(ROOT / "CHARPACK.md"), "."),
-    (str(ROOT / "LICENSE"), "."),
-]
-datas += add_resource_tree(ROOT / "resources" / "app", "resources/app")
-datas += add_builtin_charpacks(BUILTIN_RESOURCE_ROOT, "resources/builtin")
-datas += add_resource_tree(ROOT / "resources" / "data" / "search_context", "resources/data/search_context")
-datas += add_resource_tree(ROOT / "resources" / "icons", "resources/icons")
-datas += add_resource_tree(ROOT / "resources" / "locales", "resources/locales")
-datas += add_resource_tree(ROOT / "resources" / "models", "resources/models")
-datas += add_resource_tree(ROOT / "resources" / "themes", "resources/themes")
-datas.append((str(ROOT / "resources" / "data" / "settings.json.example"), "resources/data"))
-
-hiddenimports = [
-    "backend.app.main",
-    "uvicorn.loops.auto",
-    "uvicorn.loops.asyncio",
-    "uvicorn.protocols.http.auto",
-    "uvicorn.protocols.websockets.auto",
-    "uvicorn.lifespan.on",
-    "uvicorn.lifespan.off",
-    "keyring.backends.Windows",
-    "keyring.backends.null",
-]
-hiddenimports += collect_submodules("pygments.lexers")
-hiddenimports += collect_submodules("tree_sitter_language_pack")
-
-datas += collect_data_files("tree_sitter_language_pack")
-
-excludes = [
-    "PySide6.QtCharts",
-    "PySide6.QtDBus",
-    "PySide6.QtDesigner",
-    "PySide6.QtHelp",
-    "PySide6.QtMultimedia",
-    "PySide6.QtOpenGL",
-    "PySide6.QtPdf",
-    "PySide6.QtQml",
-    "PySide6.QtQmlModels",
-    "PySide6.QtQuick",
-    "PySide6.QtQuickWidgets",
-    "PySide6.QtSql",
-    "PySide6.QtTest",
-    "PySide6.QtVirtualKeyboard",
-    "PySide6.QtWebChannel",
-    "PySide6.QtWebEngineCore",
-    "PySide6.QtWebEngineWidgets",
-    "numpy.tests",
-    "pandas.tests",
-    "pytest",
-    "unittest",
-]
+datas = build_datas(
+    ROOT,
+    builtin_resource_root=BUILTIN_RESOURCE_ROOT,
+    packaging_settings_root=PACKAGING_SETTINGS_ROOT,
+)
+hiddenimports = build_hiddenimports("keyring.backends.Windows")
+excludes = COMMON_EXCLUDES
 
 
 a = Analysis(

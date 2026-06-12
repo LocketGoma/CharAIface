@@ -3,13 +3,13 @@ from __future__ import annotations
 import json
 import re
 import shutil
-import tempfile
 import zipfile
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from desktop.characters.character_ids import character_id_key
 from desktop.characters.character_scanner import SUPPORTED_IMAGE_EXTENSIONS
 from shared.schema.character import CharacterPackManifest
 
@@ -28,9 +28,23 @@ class CharacterPackArchiveInfo:
     source_path: Path
     character_id: str
     name: str
+    localized_names: dict[str, str]
     version: str
     author: str
     description: str
+
+    def display_name(self, country_code: str | None = None) -> str:
+        code = _normalize_country_code(country_code)
+        names = {
+            _normalize_country_code(key): value.strip()
+            for key, value in self.localized_names.items()
+            if _normalize_country_code(key) and value.strip()
+        }
+        if code and names.get(code):
+            return names[code]
+        if names.get("en"):
+            return names["en"]
+        return self.name
 
 
 def inspect_charpack(source_path: str | Path) -> CharacterPackArchiveInfo:
@@ -41,6 +55,10 @@ def inspect_charpack(source_path: str | Path) -> CharacterPackArchiveInfo:
         source_path=source,
         character_id=manifest.id,
         name=manifest.name,
+        localized_names=_localized_names_with_english_fallback(
+            manifest.localized_names,
+            manifest.name,
+        ),
         version=manifest.version,
         author=manifest.author,
         description=manifest.description,
@@ -58,7 +76,7 @@ def import_charpack(
     source = Path(source_path)
     destination_root = Path(user_characters_dir)
     builtin_ids = builtin_character_ids or set()
-    builtin_id_keys = {_character_id_key(character_id) for character_id in builtin_ids}
+    builtin_id_keys = {character_id_key(character_id) for character_id in builtin_ids}
 
     with zipfile.ZipFile(source, "r") as archive:
         _validate_archive_entries(archive)
@@ -66,31 +84,43 @@ def import_charpack(
         manifest = _validate_archive_manifest(manifest_data)
         _validate_archive_manifest_files(archive, manifest)
 
-        if _character_id_key(manifest.id) in builtin_id_keys:
+        if character_id_key(manifest.id) in builtin_id_keys:
             raise ValueError(
                 f'Character id "{manifest.id}" is reserved by a built-in character pack.'
             )
 
-        destination = _find_case_insensitive_child(destination_root, manifest.id)
-        if destination is None:
-            destination = destination_root / manifest.id
-        if destination.exists() and not replace_existing:
-            raise ValueError(f'Character pack folder already exists: "{destination}"')
-
         destination_root.mkdir(parents=True, exist_ok=True)
-        with tempfile.TemporaryDirectory(prefix="charpack_import_") as temp_name:
-            temp_dir = Path(temp_name)
-            archive.extractall(temp_dir)
+        destination_archive = _find_case_insensitive_child(
+            destination_root,
+            f"{manifest.id}{CHARPACK_EXTENSION}",
+        )
+        existing_folder = _find_case_insensitive_child(destination_root, manifest.id)
+        if destination_archive is None:
+            destination_archive = destination_root / f"{manifest.id}{CHARPACK_EXTENSION}"
 
-            if destination.exists():
-                if backup_existing:
-                    backup_dir = _backup_existing_pack(destination_root, destination)
-                    shutil.move(str(destination), str(backup_dir))
-                else:
-                    shutil.rmtree(destination)
-            shutil.move(str(temp_dir), str(destination))
+        existing_paths = [
+            path
+            for path in (destination_archive, existing_folder)
+            if path is not None and path.exists()
+        ]
+        if existing_paths and not replace_existing:
+            raise ValueError(f'Character pack already exists: "{existing_paths[0]}"')
 
-    return destination
+        for existing_path in existing_paths:
+            if existing_path.resolve() == source.resolve():
+                continue
+            if backup_existing:
+                backup_path = _backup_existing_pack(destination_root, existing_path)
+                shutil.move(str(existing_path), str(backup_path))
+            elif existing_path.is_dir():
+                shutil.rmtree(existing_path)
+            else:
+                existing_path.unlink()
+
+        if destination_archive.resolve() != source.resolve():
+            shutil.copy2(source, destination_archive)
+
+    return destination_archive
 
 
 def extract_charpack_to_directory(
@@ -130,7 +160,7 @@ def _find_case_insensitive_child(parent: Path, child_name: str) -> Path | None:
     if not parent.exists():
         return None
 
-    child_key = _character_id_key(child_name)
+    child_key = character_id_key(child_name)
     for child in parent.iterdir():
         if child.name.casefold() == child_key:
             return child
@@ -271,11 +301,11 @@ def _validate_folder_pack_files(
     if "idle" not in manifest.avatar.images:
         raise ValueError("avatar.images.idle is required")
 
-    style_path = pack_dir / manifest.style_file
+    style_path = _pack_file_path(pack_dir, manifest.style_file)
     if not style_path.is_file():
         raise ValueError(f'style_file "{manifest.style_file}" not found')
 
-    idle_path = pack_dir / manifest.avatar.images["idle"]
+    idle_path = _pack_file_path(pack_dir, manifest.avatar.images["idle"])
     if not idle_path.is_file():
         raise ValueError(
             f'Image file for state "idle" not found: {manifest.avatar.images["idle"]}'
@@ -310,7 +340,7 @@ def _collect_image_entries(
     entries: list[tuple[str, Path, str]] = []
     used_archive_names: set[str] = set()
     for index, (state, relative_path) in enumerate(manifest.avatar.images.items(), start=1):
-        source_path = pack_dir / relative_path
+        source_path = _pack_file_path(pack_dir, relative_path)
         if not source_path.is_file():
             continue
         archive_name = f"images/{state}{source_path.suffix.lower()}"
@@ -335,6 +365,14 @@ def _validate_manifest_relative_path(
     return suffix
 
 
+def _pack_file_path(pack_dir: Path, relative_path: str) -> Path:
+    path_text = str(relative_path or "")
+    path = PurePosixPath(path_text)
+    if path.is_absolute() or ".." in path.parts or "\\" in path_text:
+        raise ValueError(f"Unsafe manifest path: {relative_path}")
+    return pack_dir / Path(*path.parts)
+
+
 def _validate_character_id(character_id: str) -> None:
     if not _SAFE_CHARACTER_ID.fullmatch(character_id):
         raise ValueError(
@@ -342,8 +380,22 @@ def _validate_character_id(character_id: str) -> None:
         )
 
 
-def _character_id_key(character_id: str | None) -> str:
-    return str(character_id or "").casefold()
+def _localized_names_with_english_fallback(
+    localized_names: dict[str, str],
+    fallback_name: str,
+) -> dict[str, str]:
+    result = {
+        _normalize_country_code(code): str(name or "").strip()
+        for code, name in (localized_names or {}).items()
+        if _normalize_country_code(code) and str(name or "").strip()
+    }
+    if not result.get("en"):
+        result["en"] = str(fallback_name or "").strip() or "Character"
+    return result
+
+
+def _normalize_country_code(country_code: str | None) -> str:
+    return str(country_code or "").strip().lower()[:2]
 
 
 def _with_charpack_suffix(path: Path) -> Path:

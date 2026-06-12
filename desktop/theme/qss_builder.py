@@ -613,6 +613,23 @@ def build_qss(theme: ThemeDefinition) -> str:
         border: 1px solid {p.accent};
     }}
 
+    QPushButton#CharacterPackToolButton {{
+        background-color: {p.input_bg};
+        color: {p.text_primary};
+        border: 1px solid {p.border};
+        border-radius: 8px;
+        padding: 7px 10px;
+        font-weight: bold;
+    }}
+
+    QPushButton#CharacterPackToolButton:hover {{
+        border: 1px solid {p.accent};
+    }}
+
+    QPushButton#CharacterPackToolButton:pressed {{
+        background-color: {p.border};
+    }}
+
     QLabel#SettingsDescriptionLabel {{
         font-size: 11pt;
         font-weight: bold;

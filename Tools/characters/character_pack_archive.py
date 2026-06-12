@@ -30,6 +30,7 @@ class ReactionImage:
 class CharacterPackDraft:
     character_id: str
     name: str
+    localized_names: dict[str, str]
     version: str
     author: str
     description: str
@@ -63,6 +64,10 @@ def write_charpack(target: Path, draft: CharacterPackDraft) -> None:
             "format_version": CHARPACK_FORMAT_VERSION,
             "id": draft.character_id or "example_character",
             "name": draft.name or "Example Character",
+            "localized_names": _localized_names_with_english_fallback(
+                draft.localized_names,
+                draft.name,
+            ),
             "version": draft.version or "1.0.0",
             "description": draft.description,
             "author": draft.author,
@@ -127,6 +132,10 @@ def load_charpack(source: Path, workspace_dir: Path) -> CharacterPackDraft:
     return CharacterPackDraft(
         character_id=manifest_data.get("id", "example_character"),
         name=manifest_data.get("name", "Example Character"),
+        localized_names=_localized_names_with_english_fallback(
+            manifest_data.get("localized_names") or {},
+            manifest_data.get("name", "Example Character"),
+        ),
         version=manifest_data.get("version", "1.0.0"),
         author=manifest_data.get("author", ""),
         description=manifest_data.get("description", ""),
@@ -199,6 +208,12 @@ def _validate_manifest(manifest: dict[str, Any]) -> None:
 
 def _validate_draft(draft: CharacterPackDraft) -> None:
     _validate_character_id(draft.character_id or "example_character")
+    localized_names = _localized_names_with_english_fallback(
+        draft.localized_names,
+        draft.name,
+    )
+    if not localized_names.get("en"):
+        raise ValueError("English character name is required.")
     if "idle" not in {image.reaction for image in draft.images}:
         raise ValueError("avatar.images.idle is required")
 
@@ -247,3 +262,21 @@ def _with_charpack_suffix(path: Path) -> Path:
 
 def _is_zip_symlink(info: zipfile.ZipInfo) -> bool:
     return (info.external_attr >> 16) & 0o170000 == 0o120000
+
+
+def _localized_names_with_english_fallback(
+    localized_names: dict[str, str],
+    fallback_name: str,
+) -> dict[str, str]:
+    result = {
+        _normalize_country_code(code): str(name or "").strip()
+        for code, name in (localized_names or {}).items()
+        if _normalize_country_code(code) and str(name or "").strip()
+    }
+    if not result.get("en"):
+        result["en"] = str(fallback_name or "").strip() or "Example Character"
+    return result
+
+
+def _normalize_country_code(country_code: str | None) -> str:
+    return str(country_code or "").strip().lower()[:2]

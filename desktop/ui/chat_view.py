@@ -24,7 +24,6 @@ from PySide6.QtWidgets import (
 from shared.schema.chat import ChatMessage, ChatRole
 
 
-PAID_MODEL_LABEL = " (유료 모델 사용) "
 TYPEWRITER_INTERVAL_MS = 25
 TYPEWRITER_MAX_INTERVAL_MS = 100
 TYPEWRITER_MAX_TICKS = 160
@@ -108,6 +107,7 @@ class ChatView(QScrollArea):
         self._copy_action_text = ""
         self._regenerate_action_text = ""
         self._cancel_response_action_text = ""
+        self._paid_model_label = ""
         self._developer_mode = False
 
         self.setWidgetResizable(True)
@@ -361,10 +361,12 @@ class ChatView(QScrollArea):
         copy_text: str,
         regenerate_text: str,
         cancel_response_text: str,
+        paid_model_label: str,
     ) -> None:
         self._copy_action_text = copy_text
         self._regenerate_action_text = regenerate_text
         self._cancel_response_action_text = cancel_response_text
+        self._paid_model_label = paid_model_label
 
     def handle_global_mouse_press(self, global_pos: QPoint) -> bool:
         """Handle clickable chat content hidden under the bottom overlay.
@@ -834,7 +836,7 @@ class ChatView(QScrollArea):
             display_name = self.assistant_display_name
 
             if self._is_paid_model_message(message):
-                display_name += PAID_MODEL_LABEL
+                display_name += self._paid_model_label
 
             return display_name
 

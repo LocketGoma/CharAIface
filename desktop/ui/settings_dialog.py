@@ -1,6 +1,7 @@
+import shutil
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QUrl, Signal
+from PySide6.QtCore import QSize, Qt, QUrl, Signal
 from PySide6.QtGui import QDesktopServices, QFontDatabase, QIntValidator
 
 import httpx
@@ -11,6 +12,7 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QFileDialog,
     QFormLayout,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -20,6 +22,7 @@ from PySide6.QtWidgets import (
     QSlider,
     QSpinBox,
     QStackedWidget,
+    QStyle,
     QTabWidget,
     QTextEdit,
     QVBoxLayout,
@@ -31,6 +34,8 @@ from desktop.characters.character_pack_archive import (
     import_charpack,
     inspect_charpack,
 )
+from desktop.characters.character_pack import CharacterPack
+from desktop.characters.character_ids import character_id_key
 from backend.app.services.cloud_auth_manager import (
     CloudAuthManager,
     CloudCredentialConfig,
@@ -277,18 +282,27 @@ class SettingsDialog(QDialog):
         self.character_combo = QComboBox()
         self._setup_character_combo()
 
-        self.character_reload_button = QPushButton(
-            self.localization.t("settings.character.reload_all")
+        self.character_reload_button = self._create_character_tool_button(
+            self.localization.t("settings.character.reload_all"),
+            QStyle.StandardPixmap.SP_BrowserReload,
         )
         self.character_reload_button.clicked.connect(self._reload_character_packs)
 
-        self.character_import_button = QPushButton(
-            self.localization.t("settings.character.import_charpack")
+        self.character_import_button = self._create_character_tool_button(
+            self.localization.t("settings.character.import_charpack"),
+            QStyle.StandardPixmap.SP_ArrowDown,
         )
         self.character_import_button.clicked.connect(self._import_character_pack)
 
-        self.character_export_button = QPushButton(
-            self.localization.t("settings.character.export_charpack")
+        self.character_open_folder_button = self._create_character_tool_button(
+            self.localization.t("settings.character.open_folder"),
+            QStyle.StandardPixmap.SP_DirOpenIcon,
+        )
+        self.character_open_folder_button.clicked.connect(self._open_character_pack_folder)
+
+        self.character_export_button = self._create_character_tool_button(
+            self.localization.t("settings.character.export_charpack"),
+            QStyle.StandardPixmap.SP_ArrowUp,
         )
         self.character_export_button.clicked.connect(self._export_character_pack)
 
@@ -301,12 +315,15 @@ class SettingsDialog(QDialog):
 
         form_layout.addRow(self.localization.t("settings.character.select"), self.character_combo)
         character_button_row = QWidget()
-        character_button_layout = QHBoxLayout(character_button_row)
+        character_button_layout = QGridLayout(character_button_row)
         character_button_layout.setContentsMargins(0, 0, 0, 0)
         character_button_layout.setSpacing(8)
-        character_button_layout.addWidget(self.character_import_button)
-        character_button_layout.addWidget(self.character_export_button)
-        character_button_layout.addWidget(self.character_reload_button)
+        character_button_layout.addWidget(self.character_import_button, 0, 0)
+        character_button_layout.addWidget(self.character_open_folder_button, 0, 1)
+        character_button_layout.addWidget(self.character_export_button, 1, 0)
+        character_button_layout.addWidget(self.character_reload_button, 1, 1)
+        character_button_layout.setColumnStretch(0, 1)
+        character_button_layout.setColumnStretch(1, 1)
         form_layout.addRow("", character_button_row)
 
         layout.addLayout(form_layout)
@@ -316,6 +333,21 @@ class SettingsDialog(QDialog):
         self._update_character_info_label()
 
         return tab
+
+    def _create_character_tool_button(
+        self,
+        text: str,
+        standard_icon: QStyle.StandardPixmap,
+    ) -> QPushButton:
+        button = QPushButton(text)
+        button.setObjectName("CharacterPackToolButton")
+        button.setIcon(self.style().standardIcon(standard_icon))
+        button.setIconSize(QSize(16, 16))
+        button.setToolTip(text)
+        button.setAccessibleName(text)
+        button.setCursor(Qt.CursorShape.PointingHandCursor)
+        button.setMinimumHeight(34)
+        return button
 
     def _create_theme_tab(self) -> QWidget:
         tab = QWidget()
@@ -1499,7 +1531,7 @@ class SettingsDialog(QDialog):
                 if self.character_registry.is_builtin(pack.id)
                 else self.localization.t("settings.character.user.short")
             )
-            display_name = f"{pack.name} ({source_label})"
+            display_name = f"{self._character_pack_display_name(pack)} ({source_label})"
             self.character_combo.addItem(display_name, pack.id)
 
         index = self._find_character_combo_index(self.settings.selected_character_id)
@@ -1529,7 +1561,10 @@ class SettingsDialog(QDialog):
                 if self.character_registry.is_builtin(pack.id)
                 else self.localization.t("settings.character.user.short")
             )
-            self.character_combo.addItem(f"{pack.name} ({source_label})", pack.id)
+            self.character_combo.addItem(
+                f"{self._character_pack_display_name(pack)} ({source_label})",
+                pack.id,
+            )
 
         index = self._find_character_combo_index(current_character_id)
         if index < 0:
@@ -1545,12 +1580,12 @@ class SettingsDialog(QDialog):
         self._refresh_theme_palette_view()
 
     def _find_character_combo_index(self, character_id: str | None) -> int:
-        target_key = str(character_id or "").casefold()
+        target_key = character_id_key(character_id)
         if not target_key:
             return -1
 
         for index in range(self.character_combo.count()):
-            item_key = str(self.character_combo.itemData(index) or "").casefold()
+            item_key = character_id_key(self.character_combo.itemData(index))
             if item_key == target_key:
                 return index
         return -1
@@ -1581,12 +1616,12 @@ class SettingsDialog(QDialog):
         previous_character_id = self.character_combo.currentData()
         try:
             info = inspect_charpack(source_path)
-            builtin_character_ids = {
-                pack.id
+            builtin_character_id_keys = {
+                character_id_key(pack.id)
                 for pack in self.character_registry.packs
                 if self.character_registry.is_builtin(pack.id)
             }
-            if info.character_id in builtin_character_ids:
+            if character_id_key(info.character_id) in builtin_character_id_keys:
                 QMessageBox.warning(
                     self,
                     self.localization.t("settings.character.import.failed.title"),
@@ -1599,13 +1634,14 @@ class SettingsDialog(QDialog):
 
             existing_pack = self.character_registry.get_pack(info.character_id)
             replace_existing = False
+            import_display_name = self._character_archive_display_name(info)
             if existing_pack is not None and self.character_registry.is_user_pack(info.character_id):
                 decision = QMessageBox.question(
                     self,
                     self.localization.t("settings.character.import.replace.title"),
                     self.localization.t(
                         "settings.character.import.replace",
-                        name=info.name,
+                        name=import_display_name,
                         character_id=info.character_id,
                         existing_version=existing_pack.version,
                         incoming_version=info.version,
@@ -1624,7 +1660,11 @@ class SettingsDialog(QDialog):
             import_charpack(
                 source_path,
                 self.character_registry.user_characters_dir,
-                builtin_character_ids=builtin_character_ids,
+                builtin_character_ids={
+                    pack.id
+                    for pack in self.character_registry.packs
+                    if self.character_registry.is_builtin(pack.id)
+                },
                 replace_existing=replace_existing,
             )
             self._refresh_character_combo(selected_character_id=previous_character_id)
@@ -1644,7 +1684,7 @@ class SettingsDialog(QDialog):
             self.localization.t("settings.character.import.completed.title"),
             self.localization.t(
                 "settings.character.import.completed",
-                name=info.name,
+                name=import_display_name,
                 character_id=info.character_id,
             ),
         )
@@ -1654,7 +1694,7 @@ class SettingsDialog(QDialog):
             self.localization.t("settings.character.import.apply.title"),
             self.localization.t(
                 "settings.character.import.apply",
-                name=info.name,
+                name=import_display_name,
                 character_id=info.character_id,
             ),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
@@ -1664,6 +1704,32 @@ class SettingsDialog(QDialog):
             index = self._find_character_combo_index(info.character_id)
             if index >= 0:
                 self.character_combo.setCurrentIndex(index)
+
+    def _open_character_pack_folder(self) -> None:
+        folder_path = Path(self.character_registry.user_characters_dir)
+        try:
+            folder_path.mkdir(parents=True, exist_ok=True)
+        except Exception as error:
+            QMessageBox.critical(
+                self,
+                self.localization.t("settings.character.open_folder.failed.title"),
+                self.localization.t(
+                    "settings.character.open_folder.failed",
+                    error=str(error),
+                ),
+            )
+            return
+
+        opened = QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder_path)))
+        if not opened:
+            QMessageBox.warning(
+                self,
+                self.localization.t("settings.character.open_folder.failed.title"),
+                self.localization.t(
+                    "settings.character.open_folder.failed",
+                    error=str(folder_path),
+                ),
+            )
 
     def _export_character_pack(self) -> None:
         character_id = self.character_combo.currentData()
@@ -1694,7 +1760,11 @@ class SettingsDialog(QDialog):
             return
 
         try:
-            export_path = export_folder_to_charpack(pack.root_dir, file_name)
+            source_archive_path = pack.source_archive_path
+            if source_archive_path is not None and source_archive_path.is_file():
+                export_path = self._copy_character_archive(source_archive_path, file_name)
+            else:
+                export_path = export_folder_to_charpack(pack.root_dir, file_name)
         except Exception as error:
             QMessageBox.critical(
                 self,
@@ -1711,10 +1781,19 @@ class SettingsDialog(QDialog):
             self.localization.t("settings.character.export.completed.title"),
             self.localization.t(
                 "settings.character.export.completed",
-                name=pack.name,
+                name=self._character_pack_display_name(pack),
                 path=str(export_path),
             ),
         )
+
+    def _copy_character_archive(self, source_path: Path, target_path: str | Path) -> Path:
+        target = Path(target_path)
+        if target.suffix.lower() != ".charpack":
+            target = target.with_suffix(".charpack")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if source_path.resolve() != target.resolve():
+            shutil.copy2(source_path, target)
+        return target
 
     def _character_import_version_hint(
         self,
@@ -2344,7 +2423,7 @@ class SettingsDialog(QDialog):
             )
 
         self.character_info_label.setText(
-            f"{pack.name}\n"
+            f"{self._character_pack_display_name(pack)}\n"
             f"{source_label} / v{pack.version}\n"
             f"by {author}\n\n"
             f"{description}"
@@ -2359,6 +2438,14 @@ class SettingsDialog(QDialog):
             return "English"
 
         return language
+
+    def _character_pack_display_name(self, pack: CharacterPack) -> str:
+        return pack.display_name(self.settings.language)
+
+    def _character_archive_display_name(self, info) -> str:  # noqa: ANN001
+        if hasattr(info, "display_name"):
+            return info.display_name(self.settings.language)
+        return str(getattr(info, "name", "") or "").strip() or "Character"
 
     def _toggle_theme_palette_view(self) -> None:
         if not hasattr(self, "theme_palette_view"):
@@ -2402,7 +2489,7 @@ class SettingsDialog(QDialog):
                     theme = self.theme_manager.create_character_theme(
                         base_theme_id=pack.theme.base_theme,
                         palette_override=pack.theme.palette_override,
-                        character_name=pack.name,
+                        character_name=self._character_pack_display_name(pack),
                     )
                     return theme.palette.model_dump(), override_keys
                 except Exception:

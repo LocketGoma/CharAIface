@@ -2,6 +2,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from desktop.characters.character_pack import CharacterPack
+from desktop.characters.character_ids import character_id_key
 from desktop.characters.character_scanner import CharacterPackScanner
 
 
@@ -27,7 +28,7 @@ class CharacterRegistry:
         self._user_pack_ids: set[str] = set()
         self._invalid_packs: list[dict] = []
         self._warnings: list[str] = []
-        self._builtin_charpack_temp_dir: TemporaryDirectory[str] | None = None
+        self._charpack_temp_dir: TemporaryDirectory[str] | None = None
 
     @property
     def packs(self) -> list[CharacterPack]:
@@ -47,26 +48,26 @@ class CharacterRegistry:
         self._user_pack_ids.clear()
         self._invalid_packs.clear()
         self._warnings.clear()
-        self._reset_builtin_charpack_temp_dir()
+        self._reset_charpack_temp_dir()
 
         self._load_builtin_characters()
         self._load_user_characters()
 
     def get_pack(self, character_id: str) -> CharacterPack | None:
-        return self._packs.get(_character_id_key(character_id))
+        return self._packs.get(character_id_key(character_id))
 
     def get_default_pack(self) -> CharacterPack | None:
         if not self._packs:
             return None
 
-        default_key = _character_id_key(DEFAULT_CHARACTER_ID)
+        default_key = character_id_key(DEFAULT_CHARACTER_ID)
         if default_key in self._packs:
             return self._packs[default_key]
 
         builtin_packs = [
             pack
             for pack in self._packs.values()
-            if _character_id_key(pack.id) in self._builtin_pack_ids
+            if character_id_key(pack.id) in self._builtin_pack_ids
         ]
 
         if builtin_packs:
@@ -75,18 +76,17 @@ class CharacterRegistry:
         return sorted(self._packs.values(), key=lambda pack: pack.name.casefold())[0]
 
     def is_builtin(self, character_id: str) -> bool:
-        return _character_id_key(character_id) in self._builtin_pack_ids
+        return character_id_key(character_id) in self._builtin_pack_ids
 
     def is_user_pack(self, character_id: str) -> bool:
-        return _character_id_key(character_id) in self._user_pack_ids
+        return character_id_key(character_id) in self._user_pack_ids
 
     def _load_builtin_characters(self) -> None:
-        extract_dir = self._builtin_charpack_extract_dir()
         scanner = CharacterPackScanner(
             characters_dir=self.builtin_characters_dir,
             include_folder_packs=False,
             include_charpack_files=True,
-            charpack_extract_dir=extract_dir,
+            charpack_extract_dir=self._charpack_extract_dir("builtin"),
         )
         result = scanner.scan()
 
@@ -130,7 +130,12 @@ class CharacterRegistry:
         if not create_if_missing and not characters_dir.exists():
             return
 
-        scanner = CharacterPackScanner(characters_dir=characters_dir)
+        scanner = CharacterPackScanner(
+            characters_dir=characters_dir,
+            include_folder_packs=True,
+            include_charpack_files=True,
+            charpack_extract_dir=self._charpack_extract_dir(source),
+        )
         result = scanner.scan()
 
         self._invalid_packs.extend(
@@ -141,7 +146,7 @@ class CharacterRegistry:
             self._register_pack(pack=pack, source=source)
 
     def _register_pack(self, pack: CharacterPack, source: str) -> None:
-        pack_key = _character_id_key(pack.id)
+        pack_key = character_id_key(pack.id)
         if pack_key in self._packs:
             existing_pack = self._packs[pack_key]
             self._invalid_packs.append(
@@ -170,16 +175,19 @@ class CharacterRegistry:
                 f"[{source}] {pack.id}: {warning}"
             )
 
-    def _reset_builtin_charpack_temp_dir(self) -> None:
-        if self._builtin_charpack_temp_dir is not None:
-            self._builtin_charpack_temp_dir.cleanup()
-            self._builtin_charpack_temp_dir = None
+    def _reset_charpack_temp_dir(self) -> None:
+        if self._charpack_temp_dir is not None:
+            self._charpack_temp_dir.cleanup()
+            self._charpack_temp_dir = None
 
-    def _builtin_charpack_extract_dir(self) -> Path:
-        self._builtin_charpack_temp_dir = TemporaryDirectory(
-            prefix="charaiface_builtin_charpacks_"
-        )
-        return Path(self._builtin_charpack_temp_dir.name)
+    def _charpack_extract_dir(self, source: str) -> Path:
+        if self._charpack_temp_dir is None:
+            self._charpack_temp_dir = TemporaryDirectory(
+                prefix="charaiface_charpacks_"
+            )
+        target = Path(self._charpack_temp_dir.name) / source
+        target.mkdir(parents=True, exist_ok=True)
+        return target
 
     def _with_source(self, invalid_packs: list[dict], source: str) -> list[dict]:
         result: list[dict] = []
@@ -190,7 +198,3 @@ class CharacterRegistry:
             result.append(copied)
 
         return result
-
-
-def _character_id_key(character_id: str | None) -> str:
-    return str(character_id or "").casefold()

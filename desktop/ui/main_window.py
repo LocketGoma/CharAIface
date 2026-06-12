@@ -86,6 +86,11 @@ CHAT_RESPONSE_STATE_HANDLERS = {
 
 CHAT_RESPONSE_GENERATING_SECONDS = 20
 CHAT_RESPONSE_LONG_WAIT_SECONDS = 60
+APP_NOTICE_METADATA_KEY = "app_notice_key"
+INITIAL_NOTICE_KEYS = (
+    "chat.initial_notice.model_required",
+    "chat.initial_notice.new_session",
+)
 
 
 class MainWindow(QMainWindow):
@@ -204,7 +209,10 @@ class MainWindow(QMainWindow):
         self.chat_view.set_developer_mode(self.settings.developer_mode)
         self.chat_view.setParent(self.content_area)
 
-        self.session_sidebar = SessionSidebar(parent=self.content_area)
+        self.session_sidebar = SessionSidebar(
+            localization=self.localization,
+            parent=self.content_area,
+        )
         self.session_sidebar.new_session_requested.connect(
             self._on_sidebar_new_session_requested
         )
@@ -234,7 +242,7 @@ class MainWindow(QMainWindow):
         # The character overlay is visual-first. Normal mouse input over the
         # character is ignored/pass-through. Holding Alt (Option on macOS) turns
         # the character layer into an interactive mouse target.
-        self._character_click_text = "(캐릭터를 쓰다듬는다)"
+        self._character_click_text = self.localization.t("chat.character_click_text")
         self._character_mouse_events_enabled = False
         app = QApplication.instance()
         if app is not None:
@@ -378,7 +386,7 @@ class MainWindow(QMainWindow):
         self._character_resources_missing = False
         self.settings.selected_character_id = character_pack.id
 
-        self.bottom_area.set_character_name(character_pack.name)
+        self.bottom_area.set_character_name(self._character_pack_display_name(character_pack))
         self.bottom_area.set_avatar_images(character_pack.avatar_images_as_str())
         self._update_chat_view_display_names()
 
@@ -393,7 +401,7 @@ class MainWindow(QMainWindow):
 
         print(
             "[CharacterRegistry] Applied character: "
-            f"{character_pack.name} ({character_pack.id}) [{source}]"
+            f"{self._character_pack_display_name(character_pack)} ({character_pack.id}) [{source}]"
         )
 
     def _show_missing_default_character_warning(self) -> None:
@@ -536,7 +544,6 @@ class MainWindow(QMainWindow):
             self.chat_view.set_message_font(self.settings.chat_font_family, self.settings.chat_font_size)
             self.chat_view.set_typewriter_interval_ms(self.settings.typewriter_interval_ms)
             self.chat_view.set_developer_mode(self.settings.developer_mode)
-            self._render_current_chat_session()
 
         if self.settings.language != old_language:
             try:
@@ -579,6 +586,7 @@ class MainWindow(QMainWindow):
         self.bottom_area.set_user_name(self.settings.user_name)
         self._update_chat_view_display_names()
         self.retranslate_ui()
+        self._render_current_chat_session()
 
         self.settings_repository.save(self.settings)
         self._setup_tray_icon()
@@ -606,7 +614,7 @@ class MainWindow(QMainWindow):
                     character_theme = self.theme_manager.create_character_theme(
                         base_theme_id=character_pack.theme.base_theme,
                         palette_override=character_pack.theme.palette_override,
-                        character_name=character_pack.name,
+                        character_name=self._character_pack_display_name(character_pack),
                     )
                     self.apply_theme(character_theme)
                     return
@@ -641,13 +649,20 @@ class MainWindow(QMainWindow):
             copy_text=self.localization.t("chat.action.copy"),
             regenerate_text=self.localization.t("chat.action.regenerate"),
             cancel_response_text=self.localization.t("chat.action.stop_thinking"),
+            paid_model_label=self.localization.t("chat.paid_model_label"),
         )
+        self._character_click_text = self.localization.t("chat.character_click_text")
         if hasattr(self, "session_sidebar"):
             self.session_sidebar.retranslate_ui()
+            self._refresh_session_sidebar()
         self.bottom_area.retranslate_ui()
         if self._character_resources_missing:
             self._show_missing_default_character_warning()
         self.bottom_area.set_user_name(self.settings.user_name)
+        if self.current_character_pack is not None:
+            self.bottom_area.set_character_name(
+                self._character_pack_display_name(self.current_character_pack)
+            )
         self._update_chat_response_elapsed_status()
         self._update_chat_view_display_names()
         if self._tray_icon is not None:
@@ -825,9 +840,12 @@ class MainWindow(QMainWindow):
 
     def _character_display_name(self) -> str:
         if self.current_character_pack is not None:
-            return self.current_character_pack.name
+            return self._character_pack_display_name(self.current_character_pack)
 
         return "Assistant"
+
+    def _character_pack_display_name(self, pack: CharacterPack) -> str:
+        return pack.display_name(self.settings.language)
 
     def _add_initial_session_notice(self, local_model_installed: bool) -> None:
         if self.initial_notice_added:
@@ -848,9 +866,55 @@ class MainWindow(QMainWindow):
                 key,
                 app_name=self._application_display_name(),
                 character_name=self._character_display_name(),
-            )
+            ),
+            metadata={APP_NOTICE_METADATA_KEY: key},
         )
         self.initial_notice_added = True
+
+    def _localized_app_notice_message(self, message: ChatMessage) -> ChatMessage:
+        key = self._app_notice_key_for_message(message)
+        if key is None:
+            return message
+
+        metadata = dict(message.metadata or {})
+        metadata[APP_NOTICE_METADATA_KEY] = key
+        return message.model_copy(
+            update={
+                "content": self._localized_initial_notice_text(key),
+                "metadata": metadata,
+            }
+        )
+
+    def _app_notice_key_for_message(self, message: ChatMessage) -> str | None:
+        if message.role != "assistant":
+            return None
+
+        metadata_key = str((message.metadata or {}).get(APP_NOTICE_METADATA_KEY) or "").strip()
+        if metadata_key in INITIAL_NOTICE_KEYS:
+            return metadata_key
+
+        return self._legacy_initial_notice_key(message.content)
+
+    def _legacy_initial_notice_key(self, content: str) -> str | None:
+        normalized_content = str(content or "").strip()
+        if not normalized_content:
+            return None
+
+        for key in INITIAL_NOTICE_KEYS:
+            for language in self.localization.available_languages:
+                if normalized_content == self._localized_initial_notice_text(key, language=language):
+                    return key
+
+        return None
+
+    def _localized_initial_notice_text(self, key: str, *, language: str | None = None) -> str:
+        kwargs = {
+            "app_name": self._application_display_name(),
+            "character_name": self._character_display_name(),
+        }
+        if language:
+            return self.localization.t_for_language(language, key, **kwargs)
+        return self.localization.t(key, **kwargs)
 
     def _add_user_message(self, content: str) -> None:
         message = self.chat_session.add_user_message(
@@ -1443,7 +1507,7 @@ class MainWindow(QMainWindow):
             self.pending_response_session_id = None
         self.chat_view.clear_messages()
         for message in self.chat_session.messages:
-            self.chat_view.add_chat_message(message)
+            self.chat_view.add_chat_message(self._localized_app_notice_message(message))
         if self.current_session_id == self.active_chat_response_session_id:
             self._show_pending_assistant_response(self.current_session_id)
             self._update_chat_response_elapsed_status()
@@ -1516,7 +1580,7 @@ class MainWindow(QMainWindow):
         new_title, accepted = QInputDialog.getText(
             self,
             self.localization.t("app.title"),
-            "세션 명칭 변경",
+            self.localization.t("session.rename.title"),
             text=current_title,
         )
         if not accepted:
@@ -1527,7 +1591,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(
                 self,
                 self.localization.t("app.title"),
-                "세션 명칭은 공백을 제외하고 최소 2바이트 이상이어야 합니다.",
+                self.localization.t("session.rename.too_short"),
             )
             return
 
@@ -1574,14 +1638,17 @@ class MainWindow(QMainWindow):
         self._save_current_chat_session(touch_updated_at=False)
         self.chat_session.clear()
         self.current_session_id = None
-        self.current_session_title = "New Chat Session"
+        self.current_session_title = self.localization.t("session.default_title")
         self.initial_notice_added = True
         self.chat_view.clear_messages()
 
         if show_message:
             self._add_assistant_message("New local chat session created.", render_markdown=False)
         else:
-            self._add_assistant_message("새 세션입니다.", render_markdown=False)
+            self._add_assistant_message(
+                self.localization.t("session.new.created"),
+                render_markdown=False,
+            )
 
         # Ensure a newly created session is saved and rendered in the sidebar immediately.
         self._save_current_chat_session(force=True)

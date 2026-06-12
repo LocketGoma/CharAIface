@@ -17,6 +17,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from desktop.localization.localization_manager import LocalizationManager
+
 
 class SessionListItemWidget(QFrame):
     selected = Signal(str)
@@ -32,10 +34,12 @@ class SessionListItemWidget(QFrame):
         message_count: int,
         updated_at: str,
         is_current: bool,
+        labels: dict[str, str],
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.session_id = session_id
+        self.labels = labels
         self.setObjectName("SessionListItemWidget")
         self.setProperty("currentSession", bool(is_current))
         self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -47,7 +51,7 @@ class SessionListItemWidget(QFrame):
 
         normalized_title = " ".join(str(title or "").strip().split())
         if not normalized_title:
-            normalized_title = "New Chat Session"
+            normalized_title = labels["default_title"]
 
         self.marker_label = QLabel("▶" if is_current else "")
         self.marker_label.setObjectName("SessionListItemMarker")
@@ -64,7 +68,7 @@ class SessionListItemWidget(QFrame):
         self.menu_button = QToolButton()
         self.menu_button.setObjectName("SessionItemMenuButton")
         self.menu_button.setText("≡")
-        self.menu_button.setToolTip("Session options")
+        self.menu_button.setToolTip(self.labels["options_tooltip"])
         self.menu_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.menu_button.clicked.connect(self._show_menu)
 
@@ -79,9 +83,9 @@ class SessionListItemWidget(QFrame):
 
     def _show_menu(self) -> None:
         menu = QMenu(self)
-        export_action = menu.addAction("세션 내보내기")
-        rename_action = menu.addAction("세션 명칭 변경")
-        delete_action = menu.addAction("세션 삭제")
+        export_action = menu.addAction(self.labels["export"])
+        rename_action = menu.addAction(self.labels["rename"])
+        delete_action = menu.addAction(self.labels["delete"])
         action = menu.exec(self.menu_button.mapToGlobal(self.menu_button.rect().bottomLeft()))
         if action == export_action:
             self.export_requested.emit(self.session_id)
@@ -104,8 +108,13 @@ class SessionSidebar(QFrame):
     EXPANDED_WIDTH = 220
     COLLAPSED_HEADER_HEIGHT = 44
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        localization: LocalizationManager,
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
+        self.localization = localization
 
         self.setObjectName("SessionSidebar")
         self.setFixedWidth(self.EXPANDED_WIDTH)
@@ -129,13 +138,11 @@ class SessionSidebar(QFrame):
         self.toggle_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.toggle_button.clicked.connect(self.toggle_collapsed)
 
-        self.title_label = QLabel("Sessions")
+        self.title_label = QLabel()
         self.title_label.setObjectName("SessionSidebarTitle")
 
         self.refresh_button = QToolButton()
         self.refresh_button.setObjectName("SessionSidebarRefreshButton")
-        self.refresh_button.setText("Refresh")
-        self.refresh_button.setToolTip("Refresh sessions")
         self.refresh_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.refresh_button.clicked.connect(self.refresh_requested.emit)
 
@@ -143,7 +150,7 @@ class SessionSidebar(QFrame):
         header_layout.addWidget(self.title_label, stretch=1)
         header_layout.addWidget(self.refresh_button)
 
-        self.new_button = QPushButton("+ New chat")
+        self.new_button = QPushButton()
         self.new_button.setObjectName("SessionSidebarPrimaryButton")
         self.new_button.clicked.connect(self.new_session_requested.emit)
 
@@ -156,15 +163,15 @@ class SessionSidebar(QFrame):
         root_layout.addWidget(self.new_button)
         root_layout.addWidget(self.session_list, stretch=1)
 
+        self.retranslate_ui()
         self._apply_collapsed_state()
 
     def retranslate_ui(self) -> None:
-        # Temporary static labels. These can be moved to ui.csv later.
-        self.title_label.setText("Sessions")
-        self.new_button.setText("+ New chat")
-        self.refresh_button.setText("Refresh")
-        self.refresh_button.setToolTip("Refresh sessions")
-        self.toggle_button.setToolTip("Toggle sessions")
+        self.title_label.setText(self.localization.t("session.sidebar.title"))
+        self.new_button.setText(self.localization.t("session.sidebar.new_chat"))
+        self.refresh_button.setText(self.localization.t("session.sidebar.refresh"))
+        self.refresh_button.setToolTip(self.localization.t("session.sidebar.refresh.tooltip"))
+        self.toggle_button.setToolTip(self.localization.t("session.sidebar.toggle.tooltip"))
 
     def is_collapsed(self) -> bool:
         return self._collapsed
@@ -235,7 +242,7 @@ class SessionSidebar(QFrame):
 
             title = " ".join(str(session.get("title") or "").strip().split())
             if not title:
-                title = "New Chat Session"
+                title = self.localization.t("session.default_title")
             message_count = int(session.get("message_count", 0) or 0)
             updated_at = str(session.get("updated_at") or "").strip()
             is_current = session_id == current_session_id
@@ -250,6 +257,7 @@ class SessionSidebar(QFrame):
                 message_count=message_count,
                 updated_at=updated_at,
                 is_current=is_current,
+                labels=self._item_labels(),
             )
             widget.selected.connect(self._emit_session_selected)
             widget.export_requested.connect(self.session_export_requested.emit)
@@ -263,6 +271,15 @@ class SessionSidebar(QFrame):
                 self.session_list.setCurrentItem(item)
 
         self._is_refreshing = False
+
+    def _item_labels(self) -> dict[str, str]:
+        return {
+            "options_tooltip": self.localization.t("session.menu.options.tooltip"),
+            "export": self.localization.t("session.menu.export"),
+            "rename": self.localization.t("session.menu.rename"),
+            "delete": self.localization.t("session.menu.delete"),
+            "default_title": self.localization.t("session.default_title"),
+        }
 
     def selected_session_id(self) -> str | None:
         item = self.session_list.currentItem()

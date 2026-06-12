@@ -68,6 +68,8 @@ class CharacterSetGeneratorWindow(QMainWindow):
         self.palette_swatches: dict[str, QPushButton] = {}
         self.images: list[ReactionImage] = []
         self.selected_image: ReactionImage | None = None
+        self.localized_names: dict[str, str] = {"en": "Example Character"}
+        self.current_name_language = "en"
         # TODO: expose this as a proper Options setting once the Options dialog exists.
         self.animate_timeline_images = False
 
@@ -237,11 +239,29 @@ class CharacterSetGeneratorWindow(QMainWindow):
         form.setVerticalSpacing(8)
         self.id_input = QLineEdit("example_character")
         self.name_input = QLineEdit("Example Character")
+        self.name_input.textChanged.connect(self._name_text_changed)
+        self.name_language_combo = QComboBox()
+        self.name_language_combo.setObjectName("NameLanguageCombo")
+        self.name_language_combo.setFixedWidth(74)
+        for language in self._supported_name_languages():
+            self.name_language_combo.addItem(language, language)
+        name_language_index = self.name_language_combo.findData("en")
+        if name_language_index >= 0:
+            self.name_language_combo.setCurrentIndex(name_language_index)
+        self.name_language_combo.currentIndexChanged.connect(self._name_language_changed)
+
+        name_row = QWidget()
+        name_row_layout = QHBoxLayout(name_row)
+        name_row_layout.setContentsMargins(0, 0, 0, 0)
+        name_row_layout.setSpacing(6)
+        name_row_layout.addWidget(self.name_input, 1)
+        name_row_layout.addWidget(self.name_language_combo, 0)
+
         self.version_input = QLineEdit("1.0.0")
         self.author_input = QLineEdit("")
         self.description_input = QLineEdit("")
         form.addRow(self.localization.t("metadata.id"), self.id_input)
-        form.addRow(self.localization.t("metadata.name"), self.name_input)
+        form.addRow(self.localization.t("metadata.name"), name_row)
         form.addRow(self.localization.t("metadata.version"), self.version_input)
         form.addRow(self.localization.t("metadata.author"), self.author_input)
         form.addRow(self.localization.t("metadata.description"), self.description_input)
@@ -409,7 +429,8 @@ class CharacterSetGeneratorWindow(QMainWindow):
         self.images.clear()
         self.selected_image = None
         self.id_input.setText("example_character")
-        self.name_input.setText("Example Character")
+        self.localized_names = {"en": "Example Character"}
+        self._set_name_language("en", sync_current=False)
         self.version_input.setText("1.0.0")
         self.author_input.setText("")
         self.description_input.setText("")
@@ -501,9 +522,11 @@ class CharacterSetGeneratorWindow(QMainWindow):
         )
 
     def _current_draft(self) -> CharacterPackDraft:
+        localized_names = self._current_localized_names()
         return CharacterPackDraft(
             character_id=self.id_input.text().strip() or "example_character",
-            name=self.name_input.text().strip() or "Example Character",
+            name=localized_names.get("en") or "Example Character",
+            localized_names=localized_names,
             version=self.version_input.text().strip() or "1.0.0",
             author=self.author_input.text().strip(),
             description=self.description_input.text().strip(),
@@ -523,7 +546,11 @@ class CharacterSetGeneratorWindow(QMainWindow):
 
     def _apply_draft(self, draft: CharacterPackDraft) -> None:
         self.id_input.setText(draft.character_id)
-        self.name_input.setText(draft.name)
+        self.localized_names = self._localized_names_with_english_fallback(
+            draft.localized_names,
+            draft.name,
+        )
+        self._set_name_language("en", sync_current=False)
         self.version_input.setText(draft.version)
         self.author_input.setText(draft.author)
         self.description_input.setText(draft.description)
@@ -550,6 +577,73 @@ class CharacterSetGeneratorWindow(QMainWindow):
             self.select_reaction_image(self.images[0])
         else:
             self.preview.set_image(None)
+
+    def _supported_name_languages(self) -> list[str]:
+        languages = [
+            str(language or "").strip().lower()[:2]
+            for language in self.localization.available_languages
+            if str(language or "").strip()
+        ]
+        result: list[str] = []
+        for language in ["en", *languages]:
+            if language and language not in result:
+                result.append(language)
+        return result
+
+    def _name_text_changed(self, text: str) -> None:
+        language = self.current_name_language or "en"
+        self.localized_names[language] = str(text or "").strip()
+
+    def _name_language_changed(self) -> None:
+        language = str(self.name_language_combo.currentData() or "en")
+        self._set_name_language(language)
+
+    def _set_name_language(self, language: str, *, sync_current: bool = True) -> None:
+        if sync_current:
+            self._sync_current_name()
+        language = str(language or "en").strip().lower()[:2] or "en"
+        self.current_name_language = language
+        index = self.name_language_combo.findData(language)
+        if index >= 0 and self.name_language_combo.currentIndex() != index:
+            self.name_language_combo.blockSignals(True)
+            self.name_language_combo.setCurrentIndex(index)
+            self.name_language_combo.blockSignals(False)
+
+        fallback_name = self.localized_names.get("en", "")
+        name = self.localized_names.get(language, "")
+        self.name_input.blockSignals(True)
+        self.name_input.setText(name)
+        self.name_input.setPlaceholderText(fallback_name)
+        self.name_input.blockSignals(False)
+
+    def _sync_current_name(self) -> None:
+        language = self.current_name_language or "en"
+        text = self.name_input.text().strip()
+        if text:
+            self.localized_names[language] = text
+        else:
+            self.localized_names.pop(language, None)
+
+    def _current_localized_names(self) -> dict[str, str]:
+        self._sync_current_name()
+        return self._localized_names_with_english_fallback(
+            self.localized_names,
+            self.name_input.text().strip() or "Example Character",
+        )
+
+    def _localized_names_with_english_fallback(
+        self,
+        localized_names: dict[str, str],
+        fallback_name: str,
+    ) -> dict[str, str]:
+        result = {
+            str(language or "").strip().lower()[:2]: str(name or "").strip()
+            for language, name in (localized_names or {}).items()
+            if str(language or "").strip() and str(name or "").strip()
+        }
+        if not result.get("en"):
+            result["en"] = str(fallback_name or "").strip() or "Example Character"
+        return result
 
     def _support_style_from_full_style(self, *, full_style: str, core_style: str) -> str:
         full = str(full_style or "").strip()

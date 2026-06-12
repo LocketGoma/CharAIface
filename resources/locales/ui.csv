@@ -45,6 +45,7 @@ chat.file.message_prefix,[파일 첨부됨 : {name}],[File attached: {name}]
 chat.initial_message,CharAIface 기본 화면입니다. 아직 실제 AI 응답 연결 전입니다.,This is the CharAIface default screen. Real AI responses are not connected yet.
 chat.initial_notice.model_required,안내 : 안녕하세요! {app_name}의 {character_name} 입니다! 사용을 위해서는 로컬 AI 모델 설치가 필요합니다. 가이드를 따라주세요,"Notice: Hello! I'm {character_name} from {app_name}! To use the app, a local AI model must be installed. Please follow the guide."
 chat.initial_notice.new_session,안내 : 안녕하세요. {app_name}의 {character_name} 입니다! 새로운 세션이 확인되었습니다.,Notice: Hello. I'm {character_name} from {app_name}! A new session has been detected.
+chat.character_click_text,(캐릭터를 쓰다듬는다),(pets the character)
 chat.paid_model_label, (유료 모델 사용) , (Paid model used)
 chat.pending_response,응답 생성 중...,Generating response...
 chat.placeholder,메시지를 입력하세요...,Type a message...
@@ -60,6 +61,21 @@ character.default_missing,기본 캐릭터가 없습니다!,Default character is
 developer.mode,개발자 모드,Developer Mode
 
 common.message_label,메시지,Message
+bottom.user_label,유저 :,User:
+
+session.default_title,새 채팅 세션,New Chat Session
+session.new.created,새 세션입니다.,This is a new session.
+session.rename.title,세션 명칭 변경,Rename Session
+session.rename.too_short,세션 명칭은 공백을 제외하고 최소 2바이트 이상이어야 합니다.,The session name must contain at least 2 bytes excluding whitespace.
+session.sidebar.title,세션,Sessions
+session.sidebar.new_chat,+ 새 채팅,+ New chat
+session.sidebar.refresh,새로고침,Refresh
+session.sidebar.refresh.tooltip,세션 새로고침,Refresh sessions
+session.sidebar.toggle.tooltip,세션 접기/펼치기,Toggle sessions
+session.menu.options.tooltip,세션 옵션,Session options
+session.menu.export,세션 내보내기,Export session
+session.menu.rename,세션 명칭 변경,Rename session
+session.menu.delete,세션 삭제,Delete session
 
 state.assistant_done,문자입력완료,Done
 state.assistant_typing,문자입력중,Typing
@@ -181,6 +197,9 @@ settings.character.reload,캐릭터 다시 불러오기,Reload Characters
 settings.character.reload.completed,캐릭터팩 {count}개를 다시 불러왔습니다.,Reloaded {count} character pack(s).
 settings.character.reload_all,캐릭터 셋 전체 다시 로드,Reload All Character Sets
 settings.character.import_charpack,캐릭터팩 가져오기,Import Character Pack
+settings.character.open_folder,캐릭터팩 폴더 열기,Open Character Pack Folder
+settings.character.open_folder.failed.title,캐릭터팩 폴더 열기 실패,Could Not Open Character Pack Folder
+settings.character.open_folder.failed,캐릭터팩 폴더를 열 수 없습니다.  {error},Could not open the character pack folder.  {error}
 settings.character.export_charpack,캐릭터팩 내보내기,Export Character Pack
 settings.character.charpack_filter,CharAIface 캐릭터팩 (*.charpack),CharAIface Character Pack (*.charpack)
 settings.character.import.completed.title,캐릭터팩 가져오기 완료,Character Pack Imported
