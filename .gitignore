@@ -242,3 +242,5 @@ resources/data/exports
 tests
 resources/characters
 !resources/characters/README.md
+Tools/7-Zip/
+Tools/7zip-download/
