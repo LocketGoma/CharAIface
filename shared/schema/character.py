@@ -14,6 +14,7 @@ class CharacterThemeConfig(BaseModel):
 class CharacterPackManifest(BaseModel):
     id: str
     name: str
+    localized_names: dict[str, str] = Field(default_factory=dict)
     version: str
     description: str = ""
     author: str = ""

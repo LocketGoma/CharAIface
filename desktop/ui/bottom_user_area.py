@@ -173,13 +173,13 @@ class BottomUserArea(QWidget):
         user_name_layout.setContentsMargins(12, 4, 12, 4)
         user_name_layout.setSpacing(8)
 
-        self.user_label = QLabel("유저 :")
+        self.user_label = QLabel()
         self.user_label.setObjectName("UserLabel")
         self.user_label.setAlignment(
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
         )
 
-        self.user_name_label = QLabel("곰")
+        self.user_name_label = QLabel()
         self.user_name_label.setObjectName("UserNameLabel")
         self.user_name_label.setAlignment(
             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
@@ -242,6 +242,7 @@ class BottomUserArea(QWidget):
 
     def retranslate_ui(self) -> None:
         self._update_send_button_text()
+        self.user_label.setText(self.localization.t("bottom.user_label"))
         self.attach_button.setToolTip(self.localization.t("chat.file.attach.button"))
         self.attachment_cancel_button.setToolTip(
             self.localization.t("chat.file.attach.cancel")

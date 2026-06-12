@@ -55,7 +55,7 @@ Required for `.charpack` archives:
 - `format`: must be `charaiface.character_pack`
 - `format_version`: must be `1`
 - `id`: character id; ASCII letters, numbers, `_`, and `-` only
-- `name`: display name
+- `name`: required English/default display name
 - `version`: character pack version string
 - `style_file`: full style prompt file path, usually `style.md`
 - `avatar.type`: currently only `image` is supported
@@ -65,6 +65,10 @@ Optional or defaulted fields:
 
 - `description`: short character description
 - `author`: character pack author
+- `localized_names`: optional map of 2-letter language/country-style codes to
+  display names. `en` is the required fallback for newly generated packs. If
+  the current UI language is missing, CharAIface falls back to `en`, then
+  `name`.
 - `style_strength`: numeric style strength, currently preserved by the app
 - `theme.base_theme`: usually `light` or `dark`
 - `theme.palette_override`: color override map
@@ -78,6 +82,10 @@ Example:
   "format_version": 1,
   "id": "sample_character",
   "name": "Sample Character",
+  "localized_names": {
+    "en": "Sample Character",
+    "ko": "샘플 캐릭터"
+  },
   "version": "1.0.0",
   "description": "Example character pack.",
   "author": "CharAIface",
@@ -292,7 +300,7 @@ images/
 - `format`: 반드시 `charaiface.character_pack`
 - `format_version`: 반드시 `1`
 - `id`: 캐릭터 ID. ASCII 영문자, 숫자, `_`, `-`만 허용
-- `name`: 표시 이름
+- `name`: 필수 영어/기본 표시 이름
 - `version`: 캐릭터팩 버전 문자열
 - `style_file`: 전체 스타일 프롬프트 파일 경로. 보통 `style.md`
 - `avatar.type`: 현재는 `image`만 지원
@@ -302,6 +310,10 @@ images/
 
 - `description`: 짧은 캐릭터 설명
 - `author`: 캐릭터팩 제작자
+- `localized_names`: 2자리 언어/국가 스타일 코드별 표시 이름 맵. 새로
+  생성하는 캐릭터팩에서는 `en`을 필수 fallback으로 사용합니다. 현재 UI
+  언어에 해당하는 이름이 없으면 CharAIface는 `en`, 그다음 `name` 순서로
+  fallback합니다.
 - `style_strength`: 스타일 강도 값. 현재 앱에서는 보존됨
 - `theme.base_theme`: 보통 `light` 또는 `dark`
 - `theme.palette_override`: 색상 override 맵

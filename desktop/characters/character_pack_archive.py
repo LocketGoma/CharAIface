@@ -28,9 +28,23 @@ class CharacterPackArchiveInfo:
     source_path: Path
     character_id: str
     name: str
+    localized_names: dict[str, str]
     version: str
     author: str
     description: str
+
+    def display_name(self, country_code: str | None = None) -> str:
+        code = _normalize_country_code(country_code)
+        names = {
+            _normalize_country_code(key): value.strip()
+            for key, value in self.localized_names.items()
+            if _normalize_country_code(key) and value.strip()
+        }
+        if code and names.get(code):
+            return names[code]
+        if names.get("en"):
+            return names["en"]
+        return self.name
 
 
 def inspect_charpack(source_path: str | Path) -> CharacterPackArchiveInfo:
@@ -41,6 +55,10 @@ def inspect_charpack(source_path: str | Path) -> CharacterPackArchiveInfo:
         source_path=source,
         character_id=manifest.id,
         name=manifest.name,
+        localized_names=_localized_names_with_english_fallback(
+            manifest.localized_names,
+            manifest.name,
+        ),
         version=manifest.version,
         author=manifest.author,
         description=manifest.description,
@@ -360,6 +378,24 @@ def _validate_character_id(character_id: str) -> None:
         raise ValueError(
             "Character id may only contain ASCII letters, numbers, '_' and '-'."
         )
+
+
+def _localized_names_with_english_fallback(
+    localized_names: dict[str, str],
+    fallback_name: str,
+) -> dict[str, str]:
+    result = {
+        _normalize_country_code(code): str(name or "").strip()
+        for code, name in (localized_names or {}).items()
+        if _normalize_country_code(code) and str(name or "").strip()
+    }
+    if not result.get("en"):
+        result["en"] = str(fallback_name or "").strip() or "Character"
+    return result
+
+
+def _normalize_country_code(country_code: str | None) -> str:
+    return str(country_code or "").strip().lower()[:2]
 
 
 def _with_charpack_suffix(path: Path) -> Path:

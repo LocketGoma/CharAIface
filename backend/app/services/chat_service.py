@@ -1113,6 +1113,10 @@ class ChatService:
         if not content:
             return False
 
+        metadata = getattr(message, "metadata", {}) or {}
+        if metadata.get("app_notice_key"):
+            return False
+
         if role == "assistant" and (
             content.startswith("안내 :")
             or content.startswith("Notice:")
@@ -1120,7 +1124,6 @@ class ChatService:
         ):
             return False
 
-        metadata = getattr(message, "metadata", {}) or {}
         if metadata.get("source") in {"system_notice", "backend_fallback"}:
             return False
 

@@ -15,7 +15,12 @@ class LocalizationManager:
         self.current_language = default_language
         self.fallback_language = fallback_language
         self._table: dict[str, dict[str, str]] = {}
+        self._available_languages: list[str] = []
         self.load()
+
+    @property
+    def available_languages(self) -> list[str]:
+        return self._available_languages.copy()
 
     def load(self) -> None:
         with self.csv_path.open("r", encoding="utf-8-sig", newline="") as file:
@@ -24,6 +29,7 @@ class LocalizationManager:
                 raise ValueError("Localization CSV must contain a key column.")
 
             languages = [field for field in reader.fieldnames if field != "key"]
+            self._available_languages = languages
             table: dict[str, dict[str, str]] = {}
             for row in reader:
                 key = (row.get("key") or "").strip()

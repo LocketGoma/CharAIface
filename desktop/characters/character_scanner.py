@@ -225,9 +225,15 @@ class CharacterPackScanner:
 
         style_prompt = style_path.read_text(encoding="utf-8")
 
+        localized_names = _localized_names_with_english_fallback(
+            manifest.localized_names,
+            manifest.name,
+        )
+
         return CharacterPack(
             id=manifest.id,
             name=manifest.name,
+            localized_names=localized_names,
             version=manifest.version,
             description=manifest.description,
             author=manifest.author,
@@ -259,3 +265,17 @@ def _safe_extract_dir_name(path: Path) -> str:
         for char in stem
     ).strip("._-")
     return safe or "character_pack"
+
+
+def _localized_names_with_english_fallback(
+    localized_names: dict[str, str],
+    fallback_name: str,
+) -> dict[str, str]:
+    result = {
+        str(code or "").strip().lower()[:2]: str(name or "").strip()
+        for code, name in (localized_names or {}).items()
+        if str(code or "").strip() and str(name or "").strip()
+    }
+    if not result.get("en"):
+        result["en"] = str(fallback_name or "").strip() or "Character"
+    return result

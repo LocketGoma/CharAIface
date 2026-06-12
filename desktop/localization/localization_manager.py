@@ -59,13 +59,13 @@ class LocalizationManager:
 
         self.current_language = language
 
-    def t(self, key: str, **kwargs) -> str:
+    def t_for_language(self, language: str, key: str, **kwargs) -> str:
         row = self._table.get(key)
 
         if row is None:
             return f"{{{key}}}"
 
-        text = row.get(self.current_language) or ""
+        text = row.get(language) or ""
         if not text:
             text = row.get(self.fallback_language) or ""
 
@@ -79,6 +79,9 @@ class LocalizationManager:
                 return text
 
         return text
+
+    def t(self, key: str, **kwargs) -> str:
+        return self.t_for_language(self.current_language, key, **kwargs)
 
     def t_mode(self, key: str, developer_mode: bool = False, **kwargs) -> str:
         if developer_mode:

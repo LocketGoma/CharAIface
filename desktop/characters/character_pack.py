@@ -10,6 +10,7 @@ class CharacterPack(BaseModel):
 
     id: str
     name: str
+    localized_names: dict[str, str] = Field(default_factory=dict)
     version: str
     description: str = ""
     author: str = ""
@@ -26,8 +27,25 @@ class CharacterPack(BaseModel):
     theme: CharacterThemeConfig | None = None
     warnings: list[str] = Field(default_factory=list)
 
+    def display_name(self, country_code: str | None = None) -> str:
+        code = _normalize_country_code(country_code)
+        names = {
+            _normalize_country_code(key): value.strip()
+            for key, value in self.localized_names.items()
+            if _normalize_country_code(key) and value.strip()
+        }
+        if code and names.get(code):
+            return names[code]
+        if names.get("en"):
+            return names["en"]
+        return self.name
+
     def avatar_images_as_str(self) -> dict[str, str]:
         return {
             state: str(path)
             for state, path in self.avatar_images.items()
         }
+
+
+def _normalize_country_code(country_code: str | None) -> str:
+    return str(country_code or "").strip().lower()[:2]

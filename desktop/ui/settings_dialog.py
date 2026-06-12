@@ -34,6 +34,7 @@ from desktop.characters.character_pack_archive import (
     import_charpack,
     inspect_charpack,
 )
+from desktop.characters.character_pack import CharacterPack
 from desktop.characters.character_ids import character_id_key
 from backend.app.services.cloud_auth_manager import (
     CloudAuthManager,
@@ -1530,7 +1531,7 @@ class SettingsDialog(QDialog):
                 if self.character_registry.is_builtin(pack.id)
                 else self.localization.t("settings.character.user.short")
             )
-            display_name = f"{pack.name} ({source_label})"
+            display_name = f"{self._character_pack_display_name(pack)} ({source_label})"
             self.character_combo.addItem(display_name, pack.id)
 
         index = self._find_character_combo_index(self.settings.selected_character_id)
@@ -1560,7 +1561,10 @@ class SettingsDialog(QDialog):
                 if self.character_registry.is_builtin(pack.id)
                 else self.localization.t("settings.character.user.short")
             )
-            self.character_combo.addItem(f"{pack.name} ({source_label})", pack.id)
+            self.character_combo.addItem(
+                f"{self._character_pack_display_name(pack)} ({source_label})",
+                pack.id,
+            )
 
         index = self._find_character_combo_index(current_character_id)
         if index < 0:
@@ -1630,13 +1634,14 @@ class SettingsDialog(QDialog):
 
             existing_pack = self.character_registry.get_pack(info.character_id)
             replace_existing = False
+            import_display_name = self._character_archive_display_name(info)
             if existing_pack is not None and self.character_registry.is_user_pack(info.character_id):
                 decision = QMessageBox.question(
                     self,
                     self.localization.t("settings.character.import.replace.title"),
                     self.localization.t(
                         "settings.character.import.replace",
-                        name=info.name,
+                        name=import_display_name,
                         character_id=info.character_id,
                         existing_version=existing_pack.version,
                         incoming_version=info.version,
@@ -1679,7 +1684,7 @@ class SettingsDialog(QDialog):
             self.localization.t("settings.character.import.completed.title"),
             self.localization.t(
                 "settings.character.import.completed",
-                name=info.name,
+                name=import_display_name,
                 character_id=info.character_id,
             ),
         )
@@ -1689,7 +1694,7 @@ class SettingsDialog(QDialog):
             self.localization.t("settings.character.import.apply.title"),
             self.localization.t(
                 "settings.character.import.apply",
-                name=info.name,
+                name=import_display_name,
                 character_id=info.character_id,
             ),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
@@ -1776,7 +1781,7 @@ class SettingsDialog(QDialog):
             self.localization.t("settings.character.export.completed.title"),
             self.localization.t(
                 "settings.character.export.completed",
-                name=pack.name,
+                name=self._character_pack_display_name(pack),
                 path=str(export_path),
             ),
         )
@@ -2418,7 +2423,7 @@ class SettingsDialog(QDialog):
             )
 
         self.character_info_label.setText(
-            f"{pack.name}\n"
+            f"{self._character_pack_display_name(pack)}\n"
             f"{source_label} / v{pack.version}\n"
             f"by {author}\n\n"
             f"{description}"
@@ -2433,6 +2438,14 @@ class SettingsDialog(QDialog):
             return "English"
 
         return language
+
+    def _character_pack_display_name(self, pack: CharacterPack) -> str:
+        return pack.display_name(self.settings.language)
+
+    def _character_archive_display_name(self, info) -> str:  # noqa: ANN001
+        if hasattr(info, "display_name"):
+            return info.display_name(self.settings.language)
+        return str(getattr(info, "name", "") or "").strip() or "Character"
 
     def _toggle_theme_palette_view(self) -> None:
         if not hasattr(self, "theme_palette_view"):
@@ -2476,7 +2489,7 @@ class SettingsDialog(QDialog):
                     theme = self.theme_manager.create_character_theme(
                         base_theme_id=pack.theme.base_theme,
                         palette_override=pack.theme.palette_override,
-                        character_name=pack.name,
+                        character_name=self._character_pack_display_name(pack),
                     )
                     return theme.palette.model_dump(), override_keys
                 except Exception:
