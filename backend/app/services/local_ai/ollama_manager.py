@@ -2,8 +2,10 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import time
 from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import Any, Iterator, Literal
 
 import httpx
@@ -25,6 +27,68 @@ OllamaModelState = Literal[
 
 DEFAULT_OLLAMA_BASE_URL = "http://127.0.0.1:11434"
 DEFAULT_TIMEOUT_SECONDS = 5.0
+OLLAMA_EXECUTABLE_ENV_VARS = ("CHARAIFACE_OLLAMA_EXE", "OLLAMA_EXE")
+
+
+def _find_ollama_cli() -> str | None:
+    for env_name in OLLAMA_EXECUTABLE_ENV_VARS:
+        env_path = os.environ.get(env_name)
+        if env_path:
+            path = Path(env_path)
+            if _is_file_candidate(path):
+                return str(path)
+
+    cli_path = shutil.which("ollama")
+    if cli_path:
+        return cli_path
+
+    for candidate in _ollama_cli_candidates():
+        if _is_file_candidate(candidate):
+            return str(candidate)
+
+    return None
+
+
+def _is_file_candidate(path: Path) -> bool:
+    try:
+        return path.is_file()
+    except OSError:
+        return False
+
+
+def _ollama_cli_candidates() -> list[Path]:
+    candidates: list[Path] = []
+
+    if os.name == "nt":
+        local_appdata = os.environ.get("LOCALAPPDATA")
+        program_files = os.environ.get("PROGRAMFILES")
+        program_files_x86 = os.environ.get("PROGRAMFILES(X86)")
+
+        if local_appdata:
+            candidates.append(Path(local_appdata) / "Programs" / "Ollama" / "ollama.exe")
+            candidates.append(Path(local_appdata) / "Ollama" / "ollama.exe")
+
+        candidates.append(Path.home() / "AppData" / "Local" / "Programs" / "Ollama" / "ollama.exe")
+
+        if program_files:
+            candidates.append(Path(program_files) / "Ollama" / "ollama.exe")
+        if program_files_x86:
+            candidates.append(Path(program_files_x86) / "Ollama" / "ollama.exe")
+
+        return candidates
+
+    if sys.platform == "darwin":
+        return [
+            Path("/opt/homebrew/bin/ollama"),
+            Path("/usr/local/bin/ollama"),
+            Path("/Applications/Ollama.app/Contents/Resources/ollama"),
+        ]
+
+    return [
+        Path("/usr/local/bin/ollama"),
+        Path("/usr/bin/ollama"),
+        Path.home() / ".local" / "bin" / "ollama",
+    ]
 
 
 @dataclass
@@ -66,10 +130,10 @@ class OllamaManager:
         self.timeout_seconds = timeout_seconds
 
     def runtime_status(self) -> OllamaRuntimeStatus:
-        cli_path = shutil.which("ollama")
+        cli_path = _find_ollama_cli()
         installed = cli_path is not None
         server_available = self.is_server_available()
-        version = self._get_cli_version() if installed else None
+        version = self._get_cli_version(cli_path) if installed and cli_path else None
         can_install_with_winget = self.can_install_with_winget()
 
         if not installed:
@@ -593,8 +657,18 @@ class OllamaManager:
         )
 
     def pull_model(self, model_name: str) -> subprocess.CompletedProcess[str]:
+        cli_path = _find_ollama_cli()
+
+        if cli_path is None:
+            return subprocess.CompletedProcess(
+                ["ollama", "pull", model_name],
+                returncode=1,
+                stdout="",
+                stderr="Ollama CLI is not installed.",
+            )
+
         return subprocess.run(
-            ["ollama", "pull", model_name],
+            [cli_path, "pull", model_name],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -643,7 +717,9 @@ class OllamaManager:
         }
 
     def start_server(self) -> None:
-        if shutil.which("ollama") is None:
+        cli_path = _find_ollama_cli()
+
+        if cli_path is None:
             return
 
         creationflags = 0
@@ -652,7 +728,7 @@ class OllamaManager:
             creationflags = subprocess.CREATE_NO_WINDOW
 
         subprocess.Popen(
-            ["ollama", "serve"],
+            [cli_path, "serve"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             creationflags=creationflags,
@@ -731,10 +807,10 @@ class OllamaManager:
 
         return False
 
-    def _get_cli_version(self) -> str | None:
+    def _get_cli_version(self, cli_path: str) -> str | None:
         try:
             result = subprocess.run(
-                ["ollama", "--version"],
+                [cli_path, "--version"],
                 capture_output=True,
                 text=True,
                 encoding="utf-8",

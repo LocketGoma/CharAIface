@@ -14,7 +14,7 @@ from desktop.core.frontend_helper import (
     guess_cloud_ai_provider,
     normalize_provider,
 )
-from desktop.settings.app_settings import AppSettings
+from desktop.settings.app_settings import AppSettings, default_language_from_system
 
 
 class SettingsRepository:
@@ -68,8 +68,12 @@ class SettingsRepository:
         migrated.pop("auto_download_models", None)
         migrated.pop("ask_before_model_download", None)
 
+        if "setup_wizard_completed" not in migrated:
+            migrated["setup_wizard_completed"] = True
         if "language" not in migrated:
             migrated["language"] = AppSettings().language
+        elif not bool(migrated.get("setup_wizard_completed")):
+            migrated["language"] = default_language_from_system()
         self._migrate_user_country_settings(migrated)
         preferred_unit_system = str(
             migrated.get("preferred_unit_system", AppSettings().preferred_unit_system)

@@ -356,3 +356,22 @@ tray.minimized_message,CharAIface가 트레이/메뉴바에서 계속 실행 중
 tray.open_session_window,세션 윈도우 열기,Open Session Window
 tray.quit,종료,Quit
 tray.show,열기,Open
+
+setup.title,처음 설정,First Setup
+setup.button.back,이전,Back
+setup.button.next,다음,Next
+setup.button.finish,시작하기,Start
+setup.button.skip,건너뛰기,Skip
+setup.welcome.title,CharAIface 시작하기,Set up CharAIface
+setup.welcome.subtitle,처음 실행에 필요한 기본 위치와 옵션을 확인합니다.,Review the basic locations and options for first launch.
+setup.welcome.body,이 마법사는 Windows와 macOS 패키지에서 공통으로 사용됩니다. 나중에 설정 창에서 대부분의 항목을 다시 바꿀 수 있습니다.,This wizard is shared by Windows and macOS packages. Most choices can be changed later from Settings.
+setup.paths.body,"사용자 데이터 위치: {data_path} 캐릭터팩 위치: {character_path}","User data location: {data_path} Character pack location: {character_path}"
+setup.paths.data,사용자 데이터 위치,User data location
+setup.paths.character,캐릭터팩 위치,Character pack location
+setup.profile.title,프로필,Profile
+setup.profile.subtitle,언어와 사용자 이름을 선택합니다.,Choose language and user name.
+setup.local_ai.title,로컬 AI,Local AI
+setup.local_ai.subtitle,Ollama와 로컬 모델 준비 방식을 선택합니다.,Choose how Ollama and local models are prepared.
+setup.options.title,선택 기능,Optional Features
+setup.options.subtitle,닫기 동작과 선택 기능을 설정합니다.,Choose close behavior and optional features.
+setup.options.note,API Key는 이 단계에서 입력하지 않습니다. 클라우드 AI를 사용할 경우 설정 창에서 안전 저장소에 저장하세요.,API keys are not entered here. If you use Cloud AI, save them securely from Settings.

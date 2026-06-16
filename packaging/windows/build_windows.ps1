@@ -10,6 +10,7 @@ $DistPath = Join-Path $ProjectRoot "dist\windows"
 $WorkPath = Join-Path $ProjectRoot "build\windows"
 $PyInstallerConfigDir = Join-Path $ProjectRoot "build\pyinstaller-config\windows"
 $PythonUserBase = Join-Path $ProjectRoot "build\python-userbase\windows"
+$PackagingBuiltinSourceRoot = Join-Path $ProjectRoot "resources\characters"
 $PackagingBuiltinRoot = Join-Path $ProjectRoot "build\packaging-assets\windows\resources\builtin"
 $PackagingSettingsRoot = Join-Path $ProjectRoot "build\packaging-assets\windows\resources\data"
 
@@ -35,7 +36,7 @@ New-Item -ItemType Directory -Force -Path $PythonUserBase | Out-Null
 $env:PYINSTALLER_CONFIG_DIR = $PyInstallerConfigDir
 
 & $VenvPython "$ProjectRoot\packaging\prepare_packaging_assets.py" `
-    --source "$ProjectRoot\resources\builtin" `
+    --source $PackagingBuiltinSourceRoot `
     --target $PackagingBuiltinRoot `
     --settings-source "$ProjectRoot\resources\data\settings.json.example" `
     --settings-target $PackagingSettingsRoot

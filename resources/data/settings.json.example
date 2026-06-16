@@ -1,4 +1,5 @@
 {
+  "setup_wizard_completed": false,
   "language": "en",
   "fallback_language": "en",
   "user_country_preset": "auto_language",

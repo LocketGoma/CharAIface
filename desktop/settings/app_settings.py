@@ -1,3 +1,5 @@
+import locale
+import os
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -29,8 +31,30 @@ CloudAIProvider = Literal[
 ]
 
 
+def default_language_from_system() -> str:
+    language = ""
+
+    try:
+        language = locale.getlocale()[0] or ""
+    except Exception:
+        language = ""
+
+    if not language:
+        language = (
+            os.environ.get("LANG")
+            or os.environ.get("LANGUAGE")
+            or os.environ.get("LC_ALL")
+            or os.environ.get("LC_MESSAGES")
+            or ""
+        )
+
+    return "ko" if language.lower().startswith("ko") else "en"
+
+
 class AppSettings(BaseModel):
-    language: str = "ko"
+    setup_wizard_completed: bool = False
+
+    language: str = Field(default_factory=default_language_from_system)
     fallback_language: str = "en"
 
     # User country / search locale settings

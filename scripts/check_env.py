@@ -11,6 +11,10 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 REQUIREMENTS_FILE = PROJECT_ROOT / "requirements.txt"
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from backend.app.services.local_ai.ollama_manager import _find_ollama_cli
 
 REQUIRED_DIRS: list[str] = [
     "backend",
@@ -20,7 +24,6 @@ REQUIRED_DIRS: list[str] = [
 ]
 
 OPTIONAL_DIRS: list[str] = [
-    "characters",
 ]
 
 
@@ -163,32 +166,40 @@ def _check_project_layout() -> bool:
     return success
 
 
-def _check_character_packs() -> None:
-    characters_dir = PROJECT_ROOT / "characters"
+def _check_character_packs() -> bool:
+    success = True
+    user_characters_dir = PROJECT_ROOT / "resources" / "characters"
+    default_charpack = user_characters_dir / "default_sakura.charpack"
 
-    if not characters_dir.exists():
-        _warn("characters/ directory was not found.")
-        _warn("Character packs are not included in the repository by default.")
-        _warn("Put a character folder or .charpack under characters/ before release/testing.")
-        return
+    if default_charpack.is_file():
+        _ok(f"Built-in character pack found: {default_charpack.relative_to(PROJECT_ROOT)}")
+    else:
+        _error(f"Built-in character pack missing: {default_charpack.relative_to(PROJECT_ROOT)}")
+        success = False
+
+    if not user_characters_dir.exists():
+        _warn("resources/characters/ directory was not found.")
+        _warn("This is allowed for development; it will be created on first launch when needed.")
+        return success
 
     folder_packs = [
         path
-        for path in characters_dir.iterdir()
+        for path in user_characters_dir.iterdir()
         if path.is_dir() and (path / "manifest.json").exists()
     ]
     charpacks = [
         path
-        for path in characters_dir.iterdir()
+        for path in user_characters_dir.iterdir()
         if path.is_file() and path.suffix.lower() == ".charpack"
     ]
 
     if folder_packs or charpacks:
-        _ok(f"Character packs found: folders={len(folder_packs)}, charpacks={len(charpacks)}")
-        return
+        _ok(f"Tracked character packs found: folders={len(folder_packs)}, charpacks={len(charpacks)}")
+        return success
 
-    _warn("No character packs were found under characters/.")
-    _warn("This is allowed for development, but the app may show a missing-character warning.")
+    _warn("No tracked character packs were found under resources/characters/.")
+    _warn("This is allowed because the built-in character pack is packaged separately.")
+    return success
 
 
 def _is_port_open(host: str, port: int, timeout_seconds: float = 0.4) -> bool:
@@ -208,27 +219,33 @@ def _check_backend_port() -> None:
 
 
 def _check_ollama() -> None:
+    cli_path = _find_ollama_cli()
+    if cli_path is None:
+        _warn("Ollama was not found in PATH or standard install locations.")
+        _warn("Local AI will not work until Ollama is installed and available.")
+        return
+
     try:
         result = subprocess.run(
-            ["ollama", "--version"],
+            [cli_path, "--version"],
             check=False,
             capture_output=True,
             text=True,
             timeout=2,
         )
     except FileNotFoundError:
-        _warn("Ollama was not found in PATH.")
+        _warn(f"Ollama executable disappeared before version check: {cli_path}")
         _warn("Local AI will not work until Ollama is installed and available.")
         return
     except Exception as exc:
-        _warn(f"Ollama check failed: {exc}")
+        _warn(f"Ollama check failed for {cli_path}: {exc}")
         return
 
     output = (result.stdout or result.stderr or "").strip()
     if result.returncode == 0:
-        _ok(f"Ollama found: {output}")
+        _ok(f"Ollama found: {output} ({cli_path})")
     else:
-        _warn(f"Ollama command returned non-zero exit code: {output}")
+        _warn(f"Ollama command returned non-zero exit code from {cli_path}: {output}")
 
 
 def main() -> int:
@@ -240,7 +257,7 @@ def main() -> int:
     success = _check_project_layout() and success
     success = _check_requirements() and success
 
-    _check_character_packs()
+    success = _check_character_packs() and success
     _check_backend_port()
     _check_ollama()
 

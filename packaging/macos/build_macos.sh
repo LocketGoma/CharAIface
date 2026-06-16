@@ -8,6 +8,7 @@ SPEC_PATH="$SCRIPT_DIR/CharAIface.spec"
 DIST_PATH="$PROJECT_ROOT/dist/macos"
 WORK_PATH="$PROJECT_ROOT/build/macos"
 PYINSTALLER_CONFIG_DIR="$PROJECT_ROOT/build/pyinstaller-config/macos"
+PACKAGING_BUILTIN_SOURCE_ROOT="$PROJECT_ROOT/resources/characters"
 PACKAGING_BUILTIN_ROOT="$PROJECT_ROOT/build/packaging-assets/macos/resources/builtin"
 PACKAGING_SETTINGS_ROOT="$PROJECT_ROOT/build/packaging-assets/macos/resources/data"
 
@@ -28,7 +29,7 @@ mkdir -p "$PYINSTALLER_CONFIG_DIR"
 export PYINSTALLER_CONFIG_DIR
 
 "$VENV_PYTHON" "$PROJECT_ROOT/packaging/prepare_packaging_assets.py" \
-  --source "$PROJECT_ROOT/resources/builtin" \
+  --source "$PACKAGING_BUILTIN_SOURCE_ROOT" \
   --target "$PACKAGING_BUILTIN_ROOT" \
   --settings-source "$PROJECT_ROOT/resources/data/settings.json.example" \
   --settings-target "$PACKAGING_SETTINGS_ROOT"

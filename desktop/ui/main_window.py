@@ -71,6 +71,7 @@ from desktop.theme.theme_model import ThemeDefinition
 from desktop.ui.bottom_user_area import BottomUserArea
 from desktop.ui.chat_view import ChatView
 from desktop.ui.settings_dialog import SettingsDialog
+from desktop.ui.setup_wizard_dialog import SetupWizardDialog
 from desktop.ui.session_sidebar import SessionSidebar
 
 
@@ -155,6 +156,8 @@ class MainWindow(QMainWindow):
         # settings change via the settings dialog.
         self._local_model_update_timer: QTimer | None = None
         self._active_settings_dialog: SettingsDialog | None = None
+        self._setup_wizard_active = False
+        self._startup_local_ai_check_done = False
         self._tray_icon: QSystemTrayIcon | None = None
         self._tray_menu: QMenu | None = None
         self._force_quit_requested = False
@@ -180,7 +183,8 @@ class MainWindow(QMainWindow):
         self.retranslate_ui()
         QTimer.singleShot(0, self._restore_window_geometry)
         QTimer.singleShot(100, self._check_backend_health)
-        QTimer.singleShot(500, self._check_local_ai_model)
+        QTimer.singleShot(300, self._show_setup_wizard_if_needed)
+        QTimer.singleShot(1200, self._check_local_ai_model)
 
         # Schedule periodic model update checks based on the loaded settings.
         QTimer.singleShot(1000, self._schedule_local_model_update_timer)
@@ -481,17 +485,12 @@ class MainWindow(QMainWindow):
             print("[Settings] CharacterRegistry is not initialized.")
             return
 
-        # Retrieve the list of installed local models so that the settings dialog
-        # can populate its model selection combo box and download dialog. If the
-        # query fails or returns no models, an empty list will be used.
-        installed_models = self._fetch_installed_local_model_names(auto_start_server=True)
-
         dialog = SettingsDialog(
             settings=self.settings.model_copy(deep=True),
             localization=self.localization,
             theme_manager=self.theme_manager,
             character_registry=self.character_registry,
-            installed_models=installed_models,
+            installed_models=[],
             parent=self,
         )
         dialog.local_model_prepare_requested.connect(
@@ -529,6 +528,38 @@ class MainWindow(QMainWindow):
         finally:
             if self._active_settings_dialog is dialog:
                 self._active_settings_dialog = None
+
+    def _show_setup_wizard_if_needed(self) -> None:
+        if self.settings.setup_wizard_completed:
+            return
+        self.open_setup_wizard(required=True)
+
+    def open_setup_wizard(self, *, required: bool = False) -> None:
+        if self._setup_wizard_active:
+            return
+
+        dialog = SetupWizardDialog(
+            settings=self.settings.model_copy(deep=True),
+            localization=self.localization,
+            parent=self,
+        )
+
+        self._setup_wizard_active = True
+        try:
+            accepted = bool(dialog.exec())
+            new_settings = dialog.settings
+
+            if accepted:
+                dialog.apply_to_settings()
+                new_settings = dialog.settings
+            elif required:
+                new_settings.setup_wizard_completed = True
+
+            if accepted or required:
+                self._apply_settings(new_settings)
+                QTimer.singleShot(100, self._check_local_ai_model)
+        finally:
+            self._setup_wizard_active = False
 
     def _apply_settings(
         self,
@@ -2363,6 +2394,13 @@ class MainWindow(QMainWindow):
         print(f"[Backend] health ok: {result}")
 
     def _check_local_ai_model(self) -> None:
+        if not self.settings.setup_wizard_completed:
+            print("[LocalAI] Setup wizard is not completed; skipping startup model check.")
+            return
+        if self._startup_local_ai_check_done:
+            return
+        self._startup_local_ai_check_done = True
+
         model_name = self.settings.local_model
 
         if not model_name:
