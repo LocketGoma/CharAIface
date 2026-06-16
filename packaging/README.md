@@ -64,10 +64,14 @@ The PyInstaller specs include:
 - `CHARPACK.md`
 - `LICENSE`
 
-Default built-in character `.charpack` files are tracked under
-`resources/characters/` and copied into the packaged `resources/builtin/`
-directory during the packaging asset preparation step. The private
-`resources/builtin/` source folder can remain outside source control.
+Default built-in character `.charpack` files are read from `resources/builtin/`
+and copied into the packaged `resources/builtin/` directory during the
+packaging asset preparation step. That source folder may remain local and
+outside source control when character assets are distributed separately.
+
+The asset preparation step accepts either ready-made `.charpack` files or
+folder-based packs with `manifest.json`, then writes only packaged `.charpack`
+files into the build asset directory.
 
 Packaged builds copy `resources/data/settings.json.example` to both
 `resources/data/settings.json` and `resources/data/settings.json.example`.

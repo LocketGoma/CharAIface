@@ -12,11 +12,9 @@ if str(PROJECT_ROOT) not in sys.path:
 from desktop.characters.character_pack_archive import export_folder_to_charpack
 
 
-PACKAGING_COPY_IGNORE = shutil.ignore_patterns(
-    ".DS_Store",
-    "Thumbs.db",
-    "__pycache__",
-)
+CHARPACK_SUFFIX = ".charpack"
+MANIFEST_FILENAME = "manifest.json"
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -53,20 +51,65 @@ def _prepare_builtin_assets(source: Path, target: Path) -> None:
     if target.exists():
         shutil.rmtree(target)
 
-    shutil.copytree(source, target, ignore=PACKAGING_COPY_IGNORE)
+    target.mkdir(parents=True, exist_ok=True)
 
-    builtin_characters_dir = target / "characters"
-    if builtin_characters_dir.exists():
-        for pack_dir in sorted(builtin_characters_dir.iterdir()):
-            if not pack_dir.is_dir():
-                continue
-            if not (pack_dir / "manifest.json").is_file():
-                continue
-            charpack_path = target / f"{pack_dir.name}.charpack"
-            export_folder_to_charpack(pack_dir, charpack_path)
-        shutil.rmtree(builtin_characters_dir)
+    prepared_count = 0
+    for asset_root in _iter_character_asset_roots(source):
+        prepared_count += _copy_charpacks(asset_root, target)
+        prepared_count += _export_folder_packs(asset_root, target)
+
+    if prepared_count == 0:
+        raise FileNotFoundError(
+            "No built-in character packs were found under "
+            f"{source}. Expected .charpack files or folders with {MANIFEST_FILENAME}."
+        )
 
     print(f"[CharAIface] Prepared packaging assets: {target}")
+
+
+def _iter_character_asset_roots(source: Path) -> list[Path]:
+    roots = [source]
+    nested_characters = source / "characters"
+    if nested_characters.is_dir():
+        roots.append(nested_characters)
+
+    unique_roots: list[Path] = []
+    seen: set[Path] = set()
+    for root in roots:
+        resolved = root.resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        unique_roots.append(root)
+    return unique_roots
+
+
+def _copy_charpacks(source: Path, target: Path) -> int:
+    copied_count = 0
+    for charpack_path in sorted(source.glob(f"*{CHARPACK_SUFFIX}")):
+        if not charpack_path.is_file():
+            continue
+        shutil.copy2(charpack_path, target / charpack_path.name)
+        copied_count += 1
+    return copied_count
+
+
+def _export_folder_packs(source: Path, target: Path) -> int:
+    exported_count = 0
+
+    if (source / MANIFEST_FILENAME).is_file():
+        export_folder_to_charpack(source, target / f"{source.name}{CHARPACK_SUFFIX}")
+        return 1
+
+    for pack_dir in sorted(source.iterdir()):
+        if not pack_dir.is_dir():
+            continue
+        if not (pack_dir / MANIFEST_FILENAME).is_file():
+            continue
+        export_folder_to_charpack(pack_dir, target / f"{pack_dir.name}{CHARPACK_SUFFIX}")
+        exported_count += 1
+
+    return exported_count
 
 
 def _prepare_settings_assets(source: Path, target: Path) -> None:

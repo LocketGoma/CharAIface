@@ -168,15 +168,17 @@ def _check_project_layout() -> bool:
 
 def _check_character_packs() -> bool:
     success = True
-    user_characters_dir = PROJECT_ROOT / "resources" / "characters"
-    default_charpack = user_characters_dir / "default_sakura.charpack"
+    builtin_characters_dir = PROJECT_ROOT / "resources" / "builtin"
+    default_charpack = builtin_characters_dir / "default_sakura.charpack"
 
     if default_charpack.is_file():
         _ok(f"Built-in character pack found: {default_charpack.relative_to(PROJECT_ROOT)}")
     else:
         _error(f"Built-in character pack missing: {default_charpack.relative_to(PROJECT_ROOT)}")
+        _warn("Create or copy the built-in .charpack before running or packaging the app.")
         success = False
 
+    user_characters_dir = PROJECT_ROOT / "resources" / "characters"
     if not user_characters_dir.exists():
         _warn("resources/characters/ directory was not found.")
         _warn("This is allowed for development; it will be created on first launch when needed.")
@@ -194,10 +196,10 @@ def _check_character_packs() -> bool:
     ]
 
     if folder_packs or charpacks:
-        _ok(f"Tracked character packs found: folders={len(folder_packs)}, charpacks={len(charpacks)}")
+        _ok(f"Development character packs found: folders={len(folder_packs)}, charpacks={len(charpacks)}")
         return success
 
-    _warn("No tracked character packs were found under resources/characters/.")
+    _warn("No development character packs were found under resources/characters/.")
     _warn("This is allowed because the built-in character pack is packaged separately.")
     return success
 

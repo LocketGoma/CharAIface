@@ -10,7 +10,7 @@ $DistPath = Join-Path $ProjectRoot "dist\windows"
 $WorkPath = Join-Path $ProjectRoot "build\windows"
 $PyInstallerConfigDir = Join-Path $ProjectRoot "build\pyinstaller-config\windows"
 $PythonUserBase = Join-Path $ProjectRoot "build\python-userbase\windows"
-$PackagingBuiltinSourceRoot = Join-Path $ProjectRoot "resources\characters"
+$PackagingBuiltinSourceRoot = Join-Path $ProjectRoot "resources\builtin"
 $PackagingBuiltinRoot = Join-Path $ProjectRoot "build\packaging-assets\windows\resources\builtin"
 $PackagingSettingsRoot = Join-Path $ProjectRoot "build\packaging-assets\windows\resources\data"
 

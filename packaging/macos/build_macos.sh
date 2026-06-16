@@ -8,7 +8,7 @@ SPEC_PATH="$SCRIPT_DIR/CharAIface.spec"
 DIST_PATH="$PROJECT_ROOT/dist/macos"
 WORK_PATH="$PROJECT_ROOT/build/macos"
 PYINSTALLER_CONFIG_DIR="$PROJECT_ROOT/build/pyinstaller-config/macos"
-PACKAGING_BUILTIN_SOURCE_ROOT="$PROJECT_ROOT/resources/characters"
+PACKAGING_BUILTIN_SOURCE_ROOT="$PROJECT_ROOT/resources/builtin"
 PACKAGING_BUILTIN_ROOT="$PROJECT_ROOT/build/packaging-assets/macos/resources/builtin"
 PACKAGING_SETTINGS_ROOT="$PROJECT_ROOT/build/packaging-assets/macos/resources/data"
 
