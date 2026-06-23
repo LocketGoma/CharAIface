@@ -35,11 +35,13 @@ class SessionListItemWidget(QFrame):
         updated_at: str,
         is_current: bool,
         labels: dict[str, str],
+        export_visible: bool = True,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.session_id = session_id
         self.labels = labels
+        self.export_visible = bool(export_visible)
         self.setObjectName("SessionListItemWidget")
         self.setProperty("currentSession", bool(is_current))
         self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -83,16 +85,21 @@ class SessionListItemWidget(QFrame):
 
     def _show_menu(self) -> None:
         menu = QMenu(self)
-        export_action = menu.addAction(self.labels["export"])
+        export_action = (
+            menu.addAction(self.labels["export"]) if self.export_visible else None
+        )
         rename_action = menu.addAction(self.labels["rename"])
         delete_action = menu.addAction(self.labels["delete"])
         action = menu.exec(self.menu_button.mapToGlobal(self.menu_button.rect().bottomLeft()))
-        if action == export_action:
+        if export_action is not None and action == export_action:
             self.export_requested.emit(self.session_id)
         elif action == rename_action:
             self.rename_requested.emit(self.session_id)
         elif action == delete_action:
             self.delete_requested.emit(self.session_id)
+
+    def set_export_visible(self, visible: bool) -> None:
+        self.export_visible = bool(visible)
 
 
 class SessionSidebar(QFrame):
@@ -122,6 +129,7 @@ class SessionSidebar(QFrame):
         self._current_session_id: str | None = None
         self._is_refreshing = False
         self._collapsed = False
+        self._session_export_visible = True
 
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(10, 10, 10, 10)
@@ -258,6 +266,7 @@ class SessionSidebar(QFrame):
                 updated_at=updated_at,
                 is_current=is_current,
                 labels=self._item_labels(),
+                export_visible=self._session_export_visible,
             )
             widget.selected.connect(self._emit_session_selected)
             widget.export_requested.connect(self.session_export_requested.emit)
@@ -271,6 +280,14 @@ class SessionSidebar(QFrame):
                 self.session_list.setCurrentItem(item)
 
         self._is_refreshing = False
+
+    def set_session_export_visible(self, visible: bool) -> None:
+        self._session_export_visible = bool(visible)
+        for index in range(self.session_list.count()):
+            item = self.session_list.item(index)
+            widget = self.session_list.itemWidget(item)
+            if isinstance(widget, SessionListItemWidget):
+                widget.set_export_visible(self._session_export_visible)
 
     def _item_labels(self) -> dict[str, str]:
         return {

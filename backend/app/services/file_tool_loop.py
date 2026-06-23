@@ -12,7 +12,7 @@ from backend.app.services.file_analysis_service import (
     FileAnalysisRequest,
     FileAnalysisService,
 )
-from shared.file_intake import render_attachment_intake_block
+from resources.addons.file_import_export.intake import render_attachment_intake_block
 from shared.runtime_paths import resource_path
 from shared.schema.chat import ChatMessage
 

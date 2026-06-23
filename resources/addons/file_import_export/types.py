@@ -2,65 +2,30 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
-TABLE_SUFFIXES = {".csv", ".tsv"}
-SPREADSHEET_SUFFIXES = {".xlsx"}
-TABLE_LIKE_SUFFIXES = TABLE_SUFFIXES | SPREADSHEET_SUFFIXES
-JSON_SUFFIXES = {".json"}
-MARKDOWN_SUFFIXES = {".md", ".markdown"}
-TEXT_SUFFIXES = {".txt", ".log"}
-CONFIG_SUFFIXES = {
-    ".cfg",
-    ".conf",
-    ".ini",
-    ".plist",
-    ".properties",
-    ".toml",
-    ".xml",
-    ".yaml",
-    ".yml",
-}
-SOURCE_CODE_SUFFIXES = {
-    ".c",
-    ".cc",
-    ".cpp",
-    ".cs",
-    ".css",
-    ".cxx",
-    ".go",
-    ".h",
-    ".hh",
-    ".hpp",
-    ".htm",
-    ".html",
-    ".hxx",
-    ".java",
-    ".js",
-    ".jsx",
-    ".kt",
-    ".kts",
-    ".m",
-    ".mm",
-    ".php",
-    ".py",
-    ".rb",
-    ".rs",
-    ".sh",
-    ".sql",
-    ".swift",
-    ".ts",
-    ".tsx",
-    ".vue",
-}
-SUPPORTED_TEXT_FILE_SUFFIXES = (
-    TABLE_SUFFIXES
-    | JSON_SUFFIXES
-    | MARKDOWN_SUFFIXES
-    | TEXT_SUFFIXES
-    | CONFIG_SUFFIXES
-    | SOURCE_CODE_SUFFIXES
+from resources.addons.file_import_export import (
+    CONFIG_SUFFIXES,
+    JSON_SUFFIXES,
+    MARKDOWN_SUFFIXES,
+    SOURCE_CODE_SUFFIXES,
+    SPREADSHEET_SUFFIXES,
+    SUPPORTED_EXPORT_SUFFIXES,
+    SUPPORTED_FILE_SUFFIXES,
+    SUPPORTED_TEXT_FILE_SUFFIXES,
+    TABLE_LIKE_SUFFIXES,
+    TABLE_SUFFIXES,
+    TEXT_SUFFIXES,
+    export_filter,
+    export_suffixes,
+    file_dialog_filter,
+    supported_file_types_description,
 )
-SUPPORTED_FILE_SUFFIXES = SUPPORTED_TEXT_FILE_SUFFIXES | SPREADSHEET_SUFFIXES
+
+
+def default_export_suffixes(settings_snapshot=None) -> set[str]:
+    try:
+        return set(export_suffixes(settings_snapshot))
+    except TypeError:
+        return set(export_suffixes())
 
 FILE_KIND_DISPLAY_LABELS = {
     "table": "Table/spreadsheet",
@@ -119,25 +84,6 @@ def file_type_label(name_or_suffix: str | Path) -> str:
     if suffix in TEXT_SUFFIXES:
         return "Text document"
     return f"{suffix.lstrip('.').upper()} text" if suffix else "Text file"
-
-
-def file_dialog_filter() -> str:
-    return ";;".join(
-        [
-            "Documents (*.txt *.md *.json *.ini *.yml)",
-            "Tables (*.csv *.tsv *.xlsx)",
-            "Code files (*.c *.cpp *.h *.hpp *.py)",
-            "All files (*)",
-        ]
-    )
-
-
-def supported_file_types_description() -> str:
-    return (
-        "Documents (*.txt, *.md, *.json, *.ini, *.yml), "
-        "tables (*.csv, *.tsv, *.xlsx), and source code "
-        "(*.c, *.cpp, *.h, *.hpp, *.py and more)"
-    )
 
 
 def format_file_size(size_bytes: int) -> str:

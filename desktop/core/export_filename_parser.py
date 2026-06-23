@@ -5,6 +5,7 @@ import re
 from typing import Any
 
 from shared.runtime_paths import resource_path
+from resources.addons.file_import_export.types import default_export_suffixes
 
 
 CONFIG_PATH = resource_path("app", "export_filename_patterns.json")
@@ -27,10 +28,16 @@ def parse_manual_export_filename(
     *,
     language: str,
     fallback_suffix: str,
+    supported_suffixes: set[str] | None = None,
 ) -> Path | None:
     config = _load_config()
-    supported_suffixes = _supported_suffixes(config)
-    candidate = _extract_candidate(text, language=language, config=config, supported_suffixes=supported_suffixes)
+    active_suffixes = _supported_suffixes(config, supported_suffixes=supported_suffixes)
+    candidate = _extract_candidate(
+        text,
+        language=language,
+        config=config,
+        supported_suffixes=active_suffixes,
+    )
     if candidate is None:
         return None
 
@@ -40,7 +47,7 @@ def parse_manual_export_filename(
 
     path = Path(filename)
     suffix = path.suffix.casefold()
-    if suffix and suffix not in supported_suffixes:
+    if suffix and suffix not in active_suffixes:
         return None
     if not suffix:
         path = path.with_suffix(fallback_suffix)
@@ -97,14 +104,26 @@ def _sanitize_filename(filename: str, *, language: str, config: dict[str, Any]) 
     return cleaned
 
 
-def _supported_suffixes(config: dict[str, Any]) -> set[str]:
+def _supported_suffixes(
+    config: dict[str, Any],
+    *,
+    supported_suffixes: set[str] | None = None,
+) -> set[str]:
+    active_suffixes = {
+        str(suffix).strip().casefold()
+        for suffix in (supported_suffixes or default_export_suffixes())
+        if str(suffix).strip().startswith(".")
+    }
+    if not active_suffixes:
+        active_suffixes = default_export_suffixes()
+
     raw_suffixes = config.get("supported_suffixes") or []
     suffixes = {
         str(suffix).strip().casefold()
         for suffix in raw_suffixes
         if str(suffix).strip().startswith(".")
     }
-    return suffixes or {".txt", ".md", ".csv", ".pdf"}
+    return (suffixes & active_suffixes) or active_suffixes
 
 
 def _language_patterns(config: dict[str, Any], language: str) -> list[str]:

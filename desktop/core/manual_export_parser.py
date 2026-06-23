@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from shared.runtime_paths import resource_path
+from resources.addons.file_import_export.types import default_export_suffixes
 
 
 CONFIG_PATH = resource_path("app", "manual_export_patterns.json")
@@ -70,9 +71,14 @@ def should_extract_csv_like_content(text: str, *, language: str) -> bool:
     return _contains_any(normalized, _markers(language, "csv_extract_markers"))
 
 
-def manual_export_suffix(text: str, *, language: str) -> str:
+def manual_export_suffix(
+    text: str,
+    *,
+    language: str,
+    supported_suffixes: set[str] | None = None,
+) -> str:
     normalized = _normalize(text)
-    for suffix, markers in _suffix_markers(language).items():
+    for suffix, markers in _suffix_markers(language, supported_suffixes=supported_suffixes).items():
         if _contains_any(normalized, tuple(markers)):
             return suffix
     return ".txt"
@@ -84,9 +90,13 @@ def _markers(language: str, key: str) -> tuple[str, ...]:
     return _normalized_list(common_values) + _normalized_list(localized_values)
 
 
-def _suffix_markers(language: str) -> dict[str, tuple[str, ...]]:
+def _suffix_markers(
+    language: str,
+    *,
+    supported_suffixes: set[str] | None = None,
+) -> dict[str, tuple[str, ...]]:
     values = _merged_suffix_marker_config(language)
-    suffixes = _supported_suffixes()
+    suffixes = _supported_suffixes(supported_suffixes=supported_suffixes)
     result: dict[str, tuple[str, ...]] = {}
     for suffix, markers in values.items():
         normalized_suffix = str(suffix).strip().casefold()
@@ -98,16 +108,27 @@ def _suffix_markers(language: str) -> dict[str, tuple[str, ...]]:
     return result
 
 
-def _supported_suffixes() -> set[str]:
+def _supported_suffixes(
+    *,
+    supported_suffixes: set[str] | None = None,
+) -> set[str]:
+    active_suffixes = {
+        str(suffix).strip().casefold()
+        for suffix in (supported_suffixes or default_export_suffixes())
+        if str(suffix).strip().startswith(".")
+    }
+    if not active_suffixes:
+        active_suffixes = default_export_suffixes()
+
     values = _load_config().get("supported_suffixes")
     if not isinstance(values, list):
-        return {".txt", ".md", ".csv", ".pdf"}
+        return active_suffixes
     suffixes = {
         str(value).strip().casefold()
         for value in values
         if str(value).strip().startswith(".")
     }
-    return suffixes or {".txt", ".md", ".csv", ".pdf"}
+    return (suffixes & active_suffixes) or active_suffixes
 
 
 def _merged_suffix_marker_config(language: str) -> dict[str, list[Any]]:

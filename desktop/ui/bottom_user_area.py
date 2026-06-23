@@ -28,6 +28,7 @@ class BottomUserArea(QWidget):
         self.localization = localization
         self._composer_preferred_height: int | None = None
         self._response_pending = False
+        self._file_attach_visible = True
 
         self.setObjectName("BottomOverlayArea")
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
@@ -61,9 +62,9 @@ class BottomUserArea(QWidget):
         composer_layout.setContentsMargins(0, 0, 0, 0)
         composer_layout.setSpacing(6)
 
-        attachment_row = QWidget()
-        attachment_row.setObjectName("AttachmentRow")
-        attachment_layout = QHBoxLayout(attachment_row)
+        self.attachment_row = QWidget()
+        self.attachment_row.setObjectName("AttachmentRow")
+        attachment_layout = QHBoxLayout(self.attachment_row)
         attachment_layout.setContentsMargins(0, 0, 0, 0)
         attachment_layout.setSpacing(6)
 
@@ -95,7 +96,7 @@ class BottomUserArea(QWidget):
 
         attachment_layout.addWidget(self.attach_button)
         attachment_layout.addWidget(self.attachment_pill, stretch=1)
-        composer_layout.addWidget(attachment_row)
+        composer_layout.addWidget(self.attachment_row)
         composer_layout.addWidget(self.composer)
 
         self.send_button = QPushButton()
@@ -305,9 +306,22 @@ class BottomUserArea(QWidget):
         self.attachment_label.setToolTip(display_text)
         has_attachment = bool(label)
         self.attachment_pill.setVisible(has_attachment)
+        self._update_attachment_row_visibility()
+
+    def set_file_attach_visible(self, visible: bool) -> None:
+        self._file_attach_visible = bool(visible)
+        self.attach_button.setVisible(self._file_attach_visible)
+        if not self._file_attach_visible:
+            self.attachment_pill.setVisible(False)
+        self._update_attachment_row_visibility()
 
     def _has_visible_attachment(self) -> bool:
         return self.attachment_pill.isVisible()
+
+    def _update_attachment_row_visibility(self) -> None:
+        self.attachment_row.setVisible(
+            self._file_attach_visible or self._has_visible_attachment()
+        )
 
     def _update_send_button_text(self) -> None:
         key = "chat.stop_generating" if self._response_pending else "chat.send"

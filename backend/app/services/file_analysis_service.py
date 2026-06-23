@@ -18,7 +18,7 @@ from pygments.token import Token
 from pygments.util import ClassNotFound
 
 from shared.runtime_paths import app_data_path, runtime_root
-from shared.file_types import (
+from resources.addons.file_import_export.types import (
     JSON_SUFFIXES,
     SOURCE_CODE_SUFFIXES,
     SPREADSHEET_SUFFIXES,

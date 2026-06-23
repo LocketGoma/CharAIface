@@ -75,6 +75,11 @@ def user_resource_path(*parts: str) -> Path:
     return user_data_root() / Path(*parts)
 
 
+def addon_modules_root() -> Path:
+    """Return the user-managed external add-on module directory."""
+    return user_resource_path("Modules")
+
+
 def app_data_root() -> Path:
     """Return the writable app data root for the current runtime mode.
 
@@ -100,6 +105,7 @@ def ensure_app_data_dirs() -> Path:
     root = app_data_root()
     root.mkdir(parents=True, exist_ok=True)
     character_data_root().mkdir(parents=True, exist_ok=True)
+    addon_modules_root().mkdir(parents=True, exist_ok=True)
     app_data_path("chat_sessions").mkdir(parents=True, exist_ok=True)
     app_data_path("exports").mkdir(parents=True, exist_ok=True)
     app_data_path("file_analysis").mkdir(parents=True, exist_ok=True)

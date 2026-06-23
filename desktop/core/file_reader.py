@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from shared.file_intake import render_attachment_intake_block
-from shared.file_types import (
+from resources.addons.file_import_export.intake import render_attachment_intake_block
+from resources.addons.file_import_export.types import (
     JSON_SUFFIXES,
     MARKDOWN_SUFFIXES,
     SOURCE_CODE_SUFFIXES,

@@ -13,6 +13,18 @@
   "expand_chat_over_character_area": true,
   "avatar_occluded_opacity": 0.3,
   "enable_avatar_embarrassed_when_occluded": true,
+  "enabled_addons": {
+    "file_import_export": true
+  },
+  "addon_settings": {
+    "file_import_export": {
+      "file_import_enabled": true,
+      "csv_analysis_enabled": true,
+      "manual_export_enabled": true,
+      "session_export_enabled": true,
+      "pdf_export_enabled": true
+    }
+  },
   "local_ai_provider": "ollama",
   "local_ai_base_url": "http://127.0.0.1:11434",
   "auto_start_local_ai_server": true,

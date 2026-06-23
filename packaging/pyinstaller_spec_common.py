@@ -87,6 +87,7 @@ def build_datas(
         (str(root / "CHARPACK.md"), "."),
         (str(root / "LICENSE"), "."),
     ]
+    datas += add_resource_tree(root / "resources" / "addons", "resources/addons")
     datas += add_resource_tree(root / "resources" / "app", "resources/app")
     datas += add_builtin_charpacks(builtin_resource_root, "resources/builtin")
     datas += add_resource_tree(

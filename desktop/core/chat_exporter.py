@@ -6,9 +6,7 @@ from pathlib import Path
 import re
 
 from shared.schema.chat import ChatMessage
-
-
-SUPPORTED_EXPORT_SUFFIXES = {".txt", ".md", ".pdf", ".csv"}
+from resources.addons.file_import_export.types import SUPPORTED_EXPORT_SUFFIXES
 
 
 class ChatExportError(Exception):

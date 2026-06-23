@@ -1,8 +1,9 @@
 import shutil
 from pathlib import Path
+from typing import Any
 
 from PySide6.QtCore import QSize, Qt, QUrl, Signal
-from PySide6.QtGui import QDesktopServices, QFontDatabase, QIntValidator
+from PySide6.QtGui import QColor, QDesktopServices, QFontDatabase, QIntValidator
 
 import httpx
 from PySide6.QtWidgets import (
@@ -17,6 +18,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QListWidget,
+    QListWidgetItem,
     QMessageBox,
     QPushButton,
     QSlider,
@@ -55,9 +57,13 @@ from desktop.localization.localization_manager import LocalizationManager
 from desktop.settings.app_settings import AppSettings
 from desktop.theme.theme_manager import ThemeManager
 from desktop.theme.theme_model import ThemePalette
+from shared.addons import addon_registry
+from shared.addons.base import AddonModule
 
 
 class SettingsDialog(QDialog):
+    _suppress_addon_restart_notice_for_run = False
+
     local_model_prepare_requested = Signal(str, bool, bool, bool, float, bool)
     local_model_delete_requested = Signal(str, bool)
     local_model_list_requested = Signal(bool)
@@ -84,6 +90,14 @@ class SettingsDialog(QDialog):
         self.installed_models: list[str] = self._unique_model_names(installed_models or [])
         self.character_registry_reloaded = False
         self._updating_cloud_model_combo = False
+        self._addon_modules = addon_registry.all()
+        self._addon_enabled_items: dict[str, QListWidgetItem] = {}
+        self._addon_enabled_committed_states: dict[str, bool] = {}
+        self._addon_issue_items: list[QListWidgetItem] = []
+        self._addon_issue_labels: list[QLabel] = []
+        self._addon_option_containers: dict[str, QWidget] = {}
+        self._addon_setting_widgets: dict[str, dict[str, QWidget]] = {}
+        self._updating_addon_enabled_item = False
 
         self.setWindowTitle(self.localization.t("settings.title"))
         self.setMinimumSize(620, 520)
@@ -100,6 +114,7 @@ class SettingsDialog(QDialog):
         self.model_tab = self._create_model_tab()
         self.cloud_ai_tab = self._create_cloud_ai_tab()
         self.web_search_tab = self._create_web_search_tab()
+        self.modules_tab = self._create_modules_tab()
         self.advanced_tab = self._create_advanced_tab()
 
         self.tabs.addTab(self.general_tab, self.localization.t("settings.tab.general"))
@@ -108,6 +123,7 @@ class SettingsDialog(QDialog):
         self.tabs.addTab(self.model_tab, self.localization.t("settings.tab.model"))
         self.tabs.addTab(self.cloud_ai_tab, self.localization.t("settings.tab.cloud_ai"))
         self.tabs.addTab(self.web_search_tab, self.localization.t("settings.tab.web_search"))
+        self.tabs.addTab(self.modules_tab, self.localization.t("settings.tab.modules"))
         self.tabs.addTab(self.advanced_tab, self.localization.t("settings.tab.advanced"))
 
         root_layout.addWidget(self.tabs)
@@ -312,6 +328,7 @@ class SettingsDialog(QDialog):
 
         self.character_combo.currentIndexChanged.connect(self._update_character_info_label)
         self.character_combo.currentIndexChanged.connect(self._refresh_theme_palette_view)
+        self.character_combo.currentIndexChanged.connect(self._refresh_module_issue_colors)
 
         form_layout.addRow(self.localization.t("settings.character.select"), self.character_combo)
         character_button_row = QWidget()
@@ -379,6 +396,7 @@ class SettingsDialog(QDialog):
         self.theme_combo = QComboBox()
         self._setup_theme_combo()
         self.theme_combo.currentIndexChanged.connect(self._refresh_theme_palette_view)
+        self.theme_combo.currentIndexChanged.connect(self._refresh_module_issue_colors)
 
         self.theme_palette_button = QPushButton(
             self.localization.t("settings.theme.palette.show")
@@ -1143,6 +1161,311 @@ class SettingsDialog(QDialog):
         self._apply_web_search_controls_to_settings()
 
         return tab
+
+    def _create_modules_tab(self) -> QWidget:
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(10)
+
+        description_label = QLabel(self.localization.t("settings.modules.description"))
+        description_label.setObjectName("SettingsDescriptionLabel")
+        description_label.setWordWrap(True)
+        layout.addWidget(description_label)
+
+        if not self._addon_modules:
+            empty_label = QLabel(self.localization.t("settings.modules.empty"))
+            empty_label.setObjectName("SettingsDescriptionLabel")
+            empty_label.setWordWrap(True)
+            layout.addWidget(empty_label)
+            layout.addStretch()
+            return tab
+
+        body = QWidget()
+        body_layout = QHBoxLayout(body)
+        body_layout.setContentsMargins(0, 0, 0, 0)
+        body_layout.setSpacing(12)
+
+        self.addon_list_widget = QListWidget()
+        self.addon_list_widget.setMinimumWidth(190)
+        self.addon_list_widget.setMaximumWidth(260)
+
+        self.addon_detail_stack = QStackedWidget()
+        settings_snapshot = self.settings.model_dump(mode="json")
+
+        for module in self._addon_modules:
+            module_key = self._addon_key(module)
+            item = QListWidgetItem(module.manifest.display_name(self.settings.language))
+            item.setData(Qt.ItemDataRole.UserRole, module_key)
+            if module.is_available():
+                item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            else:
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsUserCheckable)
+                item.setForeground(QColor(self._module_load_issue_color()))
+                item.setToolTip(module.load_issue)
+                self._addon_issue_items.append(item)
+            module_enabled = module.is_enabled(settings_snapshot)
+            item.setCheckState(
+                Qt.CheckState.Checked
+                if module_enabled
+                else Qt.CheckState.Unchecked
+            )
+            self._addon_enabled_items[module_key] = item
+            self._addon_enabled_committed_states[module_key] = module_enabled
+            self.addon_list_widget.addItem(item)
+            self.addon_detail_stack.addWidget(
+                self._create_addon_detail_page(
+                    module,
+                    settings_snapshot=settings_snapshot,
+                )
+            )
+
+        self.addon_list_widget.currentRowChanged.connect(
+            self.addon_detail_stack.setCurrentIndex
+        )
+        self.addon_list_widget.itemChanged.connect(self._on_addon_list_item_changed)
+        self.addon_list_widget.setCurrentRow(0)
+
+        body_layout.addWidget(self.addon_list_widget)
+        body_layout.addWidget(self.addon_detail_stack, stretch=1)
+        layout.addWidget(body, stretch=1)
+
+        return tab
+
+    def _create_addon_detail_page(
+        self,
+        module: AddonModule,
+        *,
+        settings_snapshot: dict[str, object],
+    ) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+
+        title_label = QLabel(module.manifest.display_name(self.settings.language))
+        title_label.setObjectName("SettingsSectionLabel")
+        layout.addWidget(title_label)
+
+        description = module.manifest.display_description(self.settings.language)
+        if description:
+            description_label = QLabel(description)
+            description_label.setObjectName("SettingsDescriptionLabel")
+            description_label.setWordWrap(True)
+            layout.addWidget(description_label)
+
+        meta_label = QLabel(
+            self.localization.t(
+                "settings.modules.meta",
+                version=module.manifest.version,
+                capabilities=module.manifest.capability_text(self.settings.language),
+            )
+        )
+        meta_label.setObjectName("SettingsDescriptionLabel")
+        meta_label.setWordWrap(True)
+        layout.addWidget(meta_label)
+
+        if not module.is_available():
+            issue_label = QLabel(
+                self.localization.t(
+                    "settings.modules.load_issue",
+                    issue=module.load_issue,
+                )
+            )
+            issue_label.setObjectName("SettingsDescriptionLabel")
+            issue_label.setStyleSheet(f"color: {self._module_load_issue_color()};")
+            issue_label.setWordWrap(True)
+            self._addon_issue_labels.append(issue_label)
+            layout.addWidget(issue_label)
+
+        options_container = QWidget()
+        options_layout = QVBoxLayout(options_container)
+        options_layout.setContentsMargins(0, 0, 0, 0)
+        options_layout.setSpacing(8)
+        module_key = self._addon_key(module)
+        self._addon_option_containers[module_key] = options_container
+
+        settings_label = QLabel(self.localization.t("settings.modules.options"))
+        settings_label.setObjectName("SettingsSectionLabel")
+        options_layout.addWidget(settings_label)
+
+        form_layout = QFormLayout()
+        form_layout.setSpacing(8)
+
+        module_settings = module.settings(settings_snapshot)
+        self._addon_setting_widgets[module_key] = {}
+        for key, default_value in module.manifest.settings_schema.items():
+            widget = self._create_addon_setting_widget(
+                module=module,
+                key=str(key),
+                value=module_settings.get(key, default_value),
+                default_value=default_value,
+            )
+            self._addon_setting_widgets[module_key][str(key)] = widget
+            form_layout.addRow(
+                module.manifest.setting_label(str(key), self.settings.language),
+                widget,
+            )
+
+        if module.manifest.settings_schema:
+            options_layout.addLayout(form_layout)
+        else:
+            no_options_label = QLabel(self.localization.t("settings.modules.no_options"))
+            no_options_label.setObjectName("SettingsDescriptionLabel")
+            options_layout.addWidget(no_options_label)
+
+        self._set_addon_option_widgets_enabled(
+            module_key,
+            module.is_available() and self._addon_enabled_from_item(module_key),
+        )
+        layout.addWidget(options_container)
+
+        layout.addStretch()
+        return page
+
+    def _create_addon_setting_widget(
+        self,
+        *,
+        module: AddonModule,
+        key: str,
+        value: Any,
+        default_value: Any,
+    ) -> QWidget:
+        if isinstance(default_value, bool):
+            checkbox = QCheckBox(
+                module.manifest.setting_description(key, self.settings.language)
+            )
+            checkbox.setChecked(bool(value))
+            return checkbox
+
+        edit = QLineEdit()
+        edit.setText(str(value if value is not None else ""))
+        description = module.manifest.setting_description(key, self.settings.language)
+        if description:
+            edit.setToolTip(description)
+        return edit
+
+    def _set_addon_option_widgets_enabled(self, module_key: str, enabled: bool) -> None:
+        container = self._addon_option_containers.get(module_key)
+        if container is not None:
+            container.setEnabled(bool(enabled))
+        for widget in self._addon_setting_widgets.get(module_key, {}).values():
+            widget.setEnabled(bool(enabled))
+
+    def _on_addon_list_item_changed(self, item: QListWidgetItem) -> None:
+        if self._updating_addon_enabled_item:
+            return
+
+        module_key = str(item.data(Qt.ItemDataRole.UserRole) or "")
+        if not module_key:
+            return
+
+        module = self._addon_module_by_key(module_key)
+        if module is None or not module.is_available():
+            self._restore_addon_enabled_item(module_key)
+            return
+
+        enabled = item.checkState() == Qt.CheckState.Checked
+        if not self._confirm_addon_enabled_change(module_key):
+            self._restore_addon_enabled_item(module_key)
+            return
+
+        self._addon_enabled_committed_states[module_key] = enabled
+        self._set_addon_option_widgets_enabled(module_key, enabled)
+
+    def _confirm_addon_enabled_change(self, module_key: str) -> bool:
+        if SettingsDialog._suppress_addon_restart_notice_for_run:
+            return True
+
+        module = self._addon_module_by_key(module_key)
+        module_name = (
+            module.manifest.display_name(self.settings.language)
+            if module is not None
+            else module_key
+        )
+
+        message_box = QMessageBox(self)
+        message_box.setIcon(QMessageBox.Icon.Information)
+        message_box.setWindowTitle(
+            self.localization.t("settings.modules.restart_notice.title")
+        )
+        message_box.setText(
+            self.localization.t(
+                "settings.modules.restart_notice.message",
+                module=module_name,
+            )
+        )
+        message_box.setInformativeText(
+            self.localization.t("settings.modules.restart_notice.detail")
+        )
+
+        ok_button = message_box.addButton(
+            self.localization.t("settings.button.ok"),
+            QMessageBox.ButtonRole.AcceptRole,
+        )
+        message_box.addButton(
+            self.localization.t("settings.button.cancel"),
+            QMessageBox.ButtonRole.RejectRole,
+        )
+
+        suppress_checkbox = QCheckBox(
+            self.localization.t("settings.modules.restart_notice.suppress_for_run")
+        )
+        suppress_checkbox.setChecked(False)
+        message_box.setCheckBox(suppress_checkbox)
+        message_box.exec()
+
+        if message_box.clickedButton() != ok_button:
+            return False
+
+        if suppress_checkbox.isChecked():
+            SettingsDialog._suppress_addon_restart_notice_for_run = True
+        return True
+
+    def _restore_addon_enabled_item(self, module_key: str) -> None:
+        item = self._addon_enabled_items.get(module_key)
+        if item is None:
+            return
+
+        enabled = self._addon_enabled_committed_states.get(module_key, False)
+        self._updating_addon_enabled_item = True
+        try:
+            item.setCheckState(
+                Qt.CheckState.Checked if enabled else Qt.CheckState.Unchecked
+            )
+        finally:
+            self._updating_addon_enabled_item = False
+        self._set_addon_option_widgets_enabled(module_key, enabled)
+
+    def _addon_enabled_from_item(self, module_key: str) -> bool:
+        item = self._addon_enabled_items.get(module_key)
+        if item is None:
+            return False
+        return item.checkState() == Qt.CheckState.Checked
+
+    def _addon_key(self, module: AddonModule) -> str:
+        return str(getattr(module, "registry_key", module.id))
+
+    def _addon_module_by_key(self, module_key: str) -> AddonModule | None:
+        return next(
+            (module for module in self._addon_modules if self._addon_key(module) == module_key),
+            None,
+        )
+
+    def _module_load_issue_color(self) -> str:
+        palette_data, _override_keys = self._selected_theme_palette_info()
+        return str(palette_data.get("error") or "").strip()
+
+    def _refresh_module_issue_colors(self) -> None:
+        color = self._module_load_issue_color()
+        if not color:
+            return
+
+        brush = QColor(color)
+        for item in self._addon_issue_items:
+            item.setForeground(brush)
+        for label in self._addon_issue_labels:
+            label.setStyleSheet(f"color: {color};")
 
     def _create_advanced_tab(self) -> QWidget:
         tab = QWidget()
@@ -2824,6 +3147,46 @@ class SettingsDialog(QDialog):
             timeout_seconds = AppSettings().web_search_timeout_seconds
         self.settings.web_search_timeout_seconds = max(3, min(120, timeout_seconds))
 
+    def _apply_addon_controls_to_settings(self) -> None:
+        enabled_addons = dict(getattr(self.settings, "enabled_addons", {}) or {})
+        addon_settings = dict(getattr(self.settings, "addon_settings", {}) or {})
+
+        for module in self._addon_modules:
+            if not module.is_available():
+                continue
+
+            module_key = self._addon_key(module)
+            enabled_addons[module.id] = self._addon_enabled_from_item(module_key)
+
+            current_values = dict(addon_settings.get(module.id, {}) or {})
+            for key, widget in self._addon_setting_widgets.get(module_key, {}).items():
+                default_value = module.manifest.settings_schema.get(key)
+                current_values[key] = self._addon_setting_value(
+                    widget,
+                    default_value=default_value,
+                )
+            addon_settings[module.id] = current_values
+
+        self.settings.enabled_addons = enabled_addons
+        self.settings.addon_settings = addon_settings
+
+    def _addon_setting_value(self, widget: QWidget, *, default_value: Any) -> object:
+        if isinstance(default_value, bool) and isinstance(widget, QCheckBox):
+            return widget.isChecked()
+        if isinstance(default_value, int) and isinstance(widget, QLineEdit):
+            try:
+                return int(widget.text().strip())
+            except ValueError:
+                return default_value
+        if isinstance(default_value, float) and isinstance(widget, QLineEdit):
+            try:
+                return float(widget.text().strip())
+            except ValueError:
+                return default_value
+        if isinstance(widget, QLineEdit):
+            return widget.text().strip()
+        return default_value
+
     def apply_to_settings(self) -> None:
         self.settings.user_name = self.user_name_edit.text().strip() or AppSettings().user_name
         self.settings.language = self.language_combo.currentData()
@@ -2941,6 +3304,7 @@ class SettingsDialog(QDialog):
 
 
         self._apply_web_search_controls_to_settings()
+        self._apply_addon_controls_to_settings()
 
         self.settings.developer_mode = self.developer_mode_checkbox.isChecked()
         self.settings.enable_tray_icon = self.enable_tray_icon_checkbox.isChecked()

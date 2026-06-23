@@ -15,6 +15,7 @@ from desktop.core.frontend_helper import (
     normalize_provider,
 )
 from desktop.settings.app_settings import AppSettings, default_language_from_system
+from shared.addons import addon_registry
 
 
 class SettingsRepository:
@@ -149,6 +150,7 @@ class SettingsRepository:
 
         self._migrate_cloud_ai_settings(migrated)
         self._migrate_web_search_settings(migrated)
+        self._migrate_addon_settings(migrated)
 
         return migrated
 
@@ -274,3 +276,41 @@ class SettingsRepository:
         except (TypeError, ValueError):
             timeout_seconds = 20
         migrated["web_search_timeout_seconds"] = max(3, min(120, timeout_seconds))
+
+    def _migrate_addon_settings(self, migrated: dict) -> None:
+        enabled_addons = migrated.get("enabled_addons")
+        if not isinstance(enabled_addons, dict):
+            enabled_addons = {}
+
+        normalized_enabled: dict[str, bool] = {}
+        for module in addon_registry.all():
+            if not module.is_available():
+                continue
+            if module.id in enabled_addons:
+                normalized_enabled[module.id] = bool(enabled_addons[module.id])
+            else:
+                normalized_enabled[module.id] = module.manifest.default_enabled
+        migrated["enabled_addons"] = normalized_enabled
+
+        addon_settings = migrated.get("addon_settings")
+        if not isinstance(addon_settings, dict):
+            addon_settings = {}
+
+        normalized_settings: dict[str, dict[str, object]] = {}
+        for module in addon_registry.all():
+            if not module.is_available():
+                continue
+            values = addon_settings.get(module.id)
+            if not isinstance(values, dict):
+                values = {}
+            schema_keys = set(module.manifest.settings_schema)
+            values = {
+                key: value
+                for key, value in dict(values).items()
+                if key in schema_keys
+            }
+            normalized_settings[module.id] = {
+                **module.manifest.settings_schema,
+                **values,
+            }
+        migrated["addon_settings"] = normalized_settings

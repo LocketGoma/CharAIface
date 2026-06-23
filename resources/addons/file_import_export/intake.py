@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from shared.file_types import (
+from resources.addons.file_import_export import (
+    attached_file_handling_hint_lines,
+    inline_data_handling_hint_lines,
+)
+from resources.addons.file_import_export.types import (
     CONFIG_SUFFIXES,
     JSON_SUFFIXES,
     MARKDOWN_SUFFIXES,
@@ -112,30 +116,11 @@ def expected_response_guidance(user_content: str) -> str:
 
 
 def render_attached_file_handling_hint() -> str:
-    return "\n".join(
-        [
-            "The Machine-readable context below is deterministic helper data parsed from the original file by the app.",
-            "First identify the attachment type and the expected user outcome from [Attachment Intake] and [User Request].",
-            "Use the attached file as the primary input whenever the request refers to the file, this data, this code, this document, or attached content.",
-            "For analysis, calculation, or aggregation tasks, prefer deterministic helper/tool data over free-form guessing.",
-            "If ALL_CELL_VALUE_FREQUENCY_CSV is present and the user asks for value counts, row appearances, or row appearance probabilities, use that block directly.",
-            "Treat every numeric CSV/table cell as one independent occurrence unless the user explicitly asks for combination or row-as-a-single-value analysis.",
-            "If CELL_VALUE_FREQUENCY_CSV is present and the user asks for each number's appearance count, use that block directly.",
-            "For CSV output requests, return only CSV text without explanations, Markdown, or comments.",
-        ]
-    )
+    return "\n".join(attached_file_handling_hint_lines())
 
 
 def render_inline_data_handling_hint() -> str:
-    return "\n".join(
-        [
-            "The Machine-readable context below is deterministic helper data parsed from CSV-like text in the user request by the app.",
-            "For analysis, calculation, or aggregation tasks, prefer deterministic helper data over free-form guessing.",
-            "If ALL_CELL_VALUE_FREQUENCY_CSV is present and the user asks for value counts, row appearances, or row appearance probabilities, use that block directly.",
-            "Treat every numeric CSV/table cell as one independent occurrence unless the user explicitly asks for combination or row-as-a-single-value analysis.",
-            "For CSV output requests, return only CSV text without explanations, Markdown, or comments.",
-        ]
-    )
+    return "\n".join(inline_data_handling_hint_lines())
 
 
 def render_attachment_intake_block(name: str, suffix: str, user_content: str) -> str:

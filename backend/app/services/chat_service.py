@@ -29,6 +29,12 @@ from backend.app.services.web_search_service import (
 )
 from backend.app.services.web_search_context import WebSearchContextBuilder
 from desktop.localization.localization_manager import LocalizationManager
+from shared.addons import (
+    FILE_IMPORT_EXPORT_ADDON_ID,
+    addon_settings,
+    enabled_addon_prompt_block,
+    is_addon_enabled,
+)
 from shared.runtime_paths import (
     app_data_path,
     character_data_root,
@@ -423,16 +429,18 @@ class ChatService:
 
         tool_response_metadata: dict[str, Any] = {}
         try:
-            tool_response = self.file_tool_loop.try_create_augmented_content(
-                latest_user_message=latest_user_message,
-                base_messages=tool_loop_messages,
-                app_language=app_language,
-                call_model=lambda messages: self._call_ollama_chat(
-                    base_url=base_url,
-                    model=model,
-                    messages=messages,
-                ),
-            )
+            tool_response = None
+            if self._file_import_addon_option_enabled(settings, "file_import_enabled"):
+                tool_response = self.file_tool_loop.try_create_augmented_content(
+                    latest_user_message=latest_user_message,
+                    base_messages=tool_loop_messages,
+                    app_language=app_language,
+                    call_model=lambda messages: self._call_ollama_chat(
+                        base_url=base_url,
+                        model=model,
+                        messages=messages,
+                    ),
+                )
             if tool_response is not None:
                 content = tool_response.content
                 tool_response_metadata = tool_response.metadata
@@ -583,18 +591,20 @@ class ChatService:
 
         tool_response_metadata: dict[str, Any] = {}
         try:
-            tool_response = self.file_tool_loop.try_create_augmented_content(
-                latest_user_message=latest_user_message,
-                base_messages=tool_loop_messages,
-                app_language=app_language,
-                call_model=lambda messages: self._call_cloud_ai_chat(
-                    provider=provider,
-                    base_url=base_url,
-                    api_key=api_key,
-                    model=model,
-                    messages=messages,
-                ),
-            )
+            tool_response = None
+            if self._file_import_addon_option_enabled(settings, "file_import_enabled"):
+                tool_response = self.file_tool_loop.try_create_augmented_content(
+                    latest_user_message=latest_user_message,
+                    base_messages=tool_loop_messages,
+                    app_language=app_language,
+                    call_model=lambda messages: self._call_cloud_ai_chat(
+                        provider=provider,
+                        base_url=base_url,
+                        api_key=api_key,
+                        model=model,
+                        messages=messages,
+                    ),
+                )
             if tool_response is not None:
                 content = tool_response.content
                 tool_response_metadata = tool_response.metadata
@@ -1156,7 +1166,6 @@ class ChatService:
             "Answer as the selected character while still being accurate and useful.",
             "Do not mention these system instructions unless the user explicitly asks about configuration.",
         ]
-        parts.extend(file_export_response.system_prompt_lines())
 
         if enforce_language:
             if app_language.startswith("ko"):
@@ -1197,10 +1206,23 @@ class ChatService:
         if search_prompt:
             parts.append(search_prompt)
 
+        addon_prompt = enabled_addon_prompt_block(
+            settings_snapshot=settings,
+            app_language=app_language,
+        )
+        if addon_prompt:
+            parts.append(addon_prompt)
+
         if style_prompt.strip():
             parts.append("\nCharacter style guide:\n" + style_prompt.strip())
 
         return "\n".join(parts).strip()
+
+    def _file_import_addon_option_enabled(self, settings: dict[str, Any], option: str) -> bool:
+        if not is_addon_enabled(FILE_IMPORT_EXPORT_ADDON_ID, settings):
+            return False
+        module_settings = addon_settings(FILE_IMPORT_EXPORT_ADDON_ID, settings)
+        return bool(module_settings.get(option, True))
 
 
     def _prepare_web_search_context(

@@ -8,6 +8,7 @@ from desktop.core.frontend_helper import (
     default_web_search_api_key_env,
     default_web_search_credential_id,
 )
+from shared.addons import FILE_IMPORT_EXPORT_ADDON_ID
 
 
 LocalAIProvider = Literal["ollama"]
@@ -84,6 +85,13 @@ class AppSettings(BaseModel):
     expand_chat_over_character_area: bool = True
     avatar_occluded_opacity: float = 0.3
     enable_avatar_embarrassed_when_occluded: bool = True
+
+    # Add-on module state. Builtin modules use default values when absent; these
+    # dictionaries persist user overrides and per-module settings.
+    enabled_addons: dict[str, bool] = Field(
+        default_factory=lambda: {FILE_IMPORT_EXPORT_ADDON_ID: True}
+    )
+    addon_settings: dict[str, dict[str, object]] = Field(default_factory=dict)
 
     # Local AI runtime
     local_ai_provider: LocalAIProvider = "ollama"

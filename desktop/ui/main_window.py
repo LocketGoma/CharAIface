@@ -2,12 +2,22 @@ from datetime import datetime, timedelta
 import sys
 from pathlib import Path
 from uuid import uuid4
+from shared.addons import (
+    FILE_IMPORT_EXPORT_ADDON_ID,
+    addon_display_name,
+    addon_settings,
+    is_addon_enabled,
+)
 from shared.schema.chat import ChatMessage, ChatRequest
-from shared.file_intake import (
+from resources.addons.file_import_export.intake import (
     render_attached_file_handling_hint,
     render_inline_data_handling_hint,
 )
-from shared.file_types import file_dialog_filter
+from resources.addons.file_import_export.types import (
+    export_filter,
+    export_suffixes,
+    file_dialog_filter,
+)
 from shared.runtime_paths import (
     app_data_path,
     character_data_root,
@@ -114,6 +124,9 @@ class MainWindow(QMainWindow):
         self.theme_manager = theme_manager
         self.settings = settings
         self.settings_repository = settings_repository
+        # Module enable/disable state is intentionally fixed for this process.
+        # Saved changes are picked up on the next application launch.
+        self._runtime_enabled_addons = dict(getattr(settings, "enabled_addons", {}) or {})
 
         self.character_state = CharacterStateController(done_to_idle_ms=3000)
         self.character_registry: CharacterRegistry | None = None
@@ -272,6 +285,7 @@ class MainWindow(QMainWindow):
         )
         self.bottom_area.text_changed.connect(self.character_state.on_user_text_changed)
         self.character_state.state_changed.connect(self.bottom_area.set_state)
+        self._apply_addon_ui_contributions()
         self.chat_view.regenerate_requested.connect(self._on_regenerate_requested)
         self.chat_view.cancel_response_requested.connect(
             self._on_chat_response_cancel_requested
@@ -616,6 +630,7 @@ class MainWindow(QMainWindow):
 
         #유저 이름 변경시 적용
         self.bottom_area.set_user_name(self.settings.user_name)
+        self._apply_addon_ui_contributions()
         self._update_chat_view_display_names()
         self.retranslate_ui()
         self._render_current_chat_session()
@@ -724,6 +739,17 @@ class MainWindow(QMainWindow):
         )
 
     def _on_file_attach_requested(self) -> None:
+        if not self._file_import_export_option_enabled("file_import_enabled"):
+            QMessageBox.information(
+                self,
+                self.localization.t("chat.file.attach.title"),
+                self.localization.t(
+                    "addons.disabled.message",
+                    module=self._addon_display_name(FILE_IMPORT_EXPORT_ADDON_ID),
+                ),
+            )
+            return
+
         selected_path, _selected_filter = QFileDialog.getOpenFileName(
             self,
             self.localization.t("chat.file.attach.title"),
@@ -772,6 +798,17 @@ class MainWindow(QMainWindow):
         return str(error)
 
     def _on_export_chat_requested(self, session_id: str | None = None) -> None:
+        if not self._file_import_export_option_enabled("session_export_enabled"):
+            QMessageBox.information(
+                self,
+                self.localization.t("chat.export.title"),
+                self.localization.t(
+                    "addons.disabled.message",
+                    module=self._addon_display_name(FILE_IMPORT_EXPORT_ADDON_ID),
+                ),
+            )
+            return
+
         payload = None
         if session_id:
             payload = self.session_store.load_session(session_id)
@@ -807,7 +844,7 @@ class MainWindow(QMainWindow):
             self,
             self.localization.t("chat.export.title"),
             default_path,
-            "Markdown (*.md);;Text (*.txt);;CSV (*.csv);;PDF (*.pdf)",
+            export_filter(self._runtime_settings_snapshot()),
         )
 
         if not selected_path:
@@ -851,14 +888,15 @@ class MainWindow(QMainWindow):
 
     def _export_path_with_suffix(self, selected_path: str, selected_filter: str) -> Path:
         export_path = Path(selected_path)
-        if export_path.suffix.lower() in {".txt", ".md", ".csv", ".pdf"}:
+        supported_suffixes = self._export_suffixes()
+        if export_path.suffix.lower() in supported_suffixes:
             return export_path
 
         if "*.txt" in selected_filter:
             return export_path.with_suffix(".txt")
         if "*.csv" in selected_filter:
             return export_path.with_suffix(".csv")
-        if "*.pdf" in selected_filter:
+        if "*.pdf" in selected_filter and ".pdf" in supported_suffixes:
             return export_path.with_suffix(".pdf")
         return export_path.with_suffix(".md")
 
@@ -1175,6 +1213,9 @@ class MainWindow(QMainWindow):
         return csv_content or content
 
     def _is_manual_message_export_request(self, text: str) -> bool:
+        if not self._file_import_export_option_enabled("manual_export_enabled"):
+            return False
+
         language = self._manual_export_language()
         suffix = self._manual_export_suffix(text)
         return is_manual_message_export_request(
@@ -1183,15 +1224,51 @@ class MainWindow(QMainWindow):
             has_filename=self._manual_export_filename(text, suffix) is not None,
         )
 
+    def _file_import_export_option_enabled(self, option: str) -> bool:
+        settings_snapshot = self._runtime_settings_snapshot()
+        if not is_addon_enabled(FILE_IMPORT_EXPORT_ADDON_ID, settings_snapshot):
+            return False
+        module_settings = addon_settings(FILE_IMPORT_EXPORT_ADDON_ID, settings_snapshot)
+        return bool(module_settings.get(option, True))
+
+    def _runtime_settings_snapshot(self) -> dict[str, object]:
+        settings_snapshot = self.settings.model_dump(mode="json")
+        settings_snapshot["enabled_addons"] = dict(self._runtime_enabled_addons)
+        return settings_snapshot
+
+    def _apply_addon_ui_contributions(self) -> None:
+        file_import_visible = self._file_import_export_option_enabled("file_import_enabled")
+        session_export_visible = self._file_import_export_option_enabled("session_export_enabled")
+
+        if not file_import_visible and self.pending_file_attachment is not None:
+            self._clear_pending_file_attachment()
+
+        if hasattr(self, "bottom_area"):
+            self.bottom_area.set_file_attach_visible(file_import_visible)
+        if hasattr(self, "session_sidebar"):
+            self.session_sidebar.set_session_export_visible(session_export_visible)
+        self._update_content_geometry()
+
+    def _addon_display_name(self, addon_id: str) -> str:
+        return addon_display_name(addon_id, self.settings.language)
+
     def _manual_export_suffix(self, text: str) -> str:
-        return manual_export_suffix(text, language=self._manual_export_language())
+        return manual_export_suffix(
+            text,
+            language=self._manual_export_language(),
+            supported_suffixes=self._export_suffixes(),
+        )
 
     def _manual_export_filename(self, text: str, fallback_suffix: str) -> Path | None:
         return parse_manual_export_filename(
             text,
             language=self._manual_export_language(),
             fallback_suffix=fallback_suffix,
+            supported_suffixes=self._export_suffixes(),
         )
+
+    def _export_suffixes(self) -> set[str]:
+        return export_suffixes(self._runtime_settings_snapshot())
 
     def _manual_export_language(self) -> str:
         return getattr(self.settings, "language", "en")
@@ -1863,7 +1940,7 @@ class MainWindow(QMainWindow):
             user_name=self.settings.user_name,
             developer_mode=self.settings.developer_mode,
             language=self.settings.language,
-            settings_snapshot=self.settings.model_dump(mode="json"),
+            settings_snapshot=self._runtime_settings_snapshot(),
         )
 
         request_id = uuid4().hex

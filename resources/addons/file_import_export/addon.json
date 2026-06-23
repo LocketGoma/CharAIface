@@ -1,0 +1,94 @@
+{
+  "id": "file_import_export",
+  "name": "File Import / Export",
+  "version": "1.0.0",
+  "description": "Reads supported text, source, table, and spreadsheet attachments, analyzes CSV-like data, and exports assistant content.",
+  "default_enabled": true,
+  "capabilities": [
+    "prompt",
+    "file_intake",
+    "file_analysis",
+    "export",
+    "desktop_ui"
+  ],
+  "provided_features": [
+    "file_import_export",
+    "file_attachment_import",
+    "csv_table_analysis",
+    "manual_answer_export",
+    "session_export",
+    "pdf_export"
+  ],
+  "capability_labels": {
+    "prompt": "Prompt guidance",
+    "file_intake": "File attachments",
+    "file_analysis": "File analysis",
+    "export": "Local export",
+    "desktop_ui": "Desktop UI"
+  },
+  "prompt_file": "prompt.md",
+  "settings_schema": {
+    "file_import_enabled": true,
+    "csv_analysis_enabled": true,
+    "manual_export_enabled": true,
+    "session_export_enabled": true,
+    "pdf_export_enabled": true
+  },
+  "settings_ui": {
+    "file_import_enabled": {
+      "label": "File attachment import",
+      "description": "Show the attach-file button and allow supported files to be attached to chat."
+    },
+    "csv_analysis_enabled": {
+      "label": "CSV/table analysis",
+      "description": "Allow deterministic CSV, TSV, and spreadsheet parsing guidance."
+    },
+    "manual_export_enabled": {
+      "label": "Answer export commands",
+      "description": "Allow commands that export the latest assistant answer as a local file."
+    },
+    "session_export_enabled": {
+      "label": "Session export",
+      "description": "Show the session export menu item."
+    },
+    "pdf_export_enabled": {
+      "label": "PDF export",
+      "description": "Allow chat sessions and assistant answers to be saved as PDF files."
+    }
+  },
+  "localized": {
+    "ko": {
+      "name": "파일 가져오기 / 내보내기",
+      "description": "지원되는 텍스트, 소스, 표, 스프레드시트 파일을 읽고 CSV 계열 데이터를 분석하며 답변을 파일로 저장합니다.",
+      "capabilities": {
+        "prompt": "프롬프트 안내",
+        "file_intake": "파일 첨부",
+        "file_analysis": "파일 분석",
+        "export": "로컬 내보내기",
+        "desktop_ui": "데스크톱 UI"
+      },
+      "settings": {
+        "file_import_enabled": {
+          "label": "파일 첨부 가져오기",
+          "description": "파일 첨부 버튼을 표시하고 지원 파일을 채팅에 첨부할 수 있게 합니다."
+        },
+        "csv_analysis_enabled": {
+          "label": "CSV/표 분석",
+          "description": "CSV, TSV, 스프레드시트 파싱 안내와 결정적 분석 컨텍스트를 사용합니다."
+        },
+        "manual_export_enabled": {
+          "label": "답변 내보내기 명령",
+          "description": "최근 AI 답변을 로컬 파일로 저장하는 명령을 허용합니다."
+        },
+        "session_export_enabled": {
+          "label": "세션 내보내기",
+          "description": "세션 메뉴에 내보내기 항목을 표시합니다."
+        },
+        "pdf_export_enabled": {
+          "label": "PDF 내보내기",
+          "description": "채팅 세션과 AI 답변을 PDF 파일로 저장할 수 있게 합니다."
+        }
+      }
+    }
+  }
+}
